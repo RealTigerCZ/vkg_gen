@@ -1,0 +1,6 @@
+build/
+
+
+# Custom
+ignore_*
+*_ignore
