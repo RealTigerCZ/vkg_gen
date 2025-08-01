@@ -1,13 +1,14 @@
 # TODO: this cmake should be inlinable into the build target for other projects
 
-cmake_minimum_required(VERSION 3.15) # CHECK: try other versions later 
+cmake_minimum_required(VERSION 3.15) # CHECK: try other versions later
 
 set(APP_NAME vkg_gen)
 
 project(${APP_NAME})
 
 set(APP_SOURCES
-    src/main.cpp
+   src/xml_parser.cpp
+   src/main.cpp
    )
 
 set(APP_INCLUDES
