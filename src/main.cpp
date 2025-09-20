@@ -2,7 +2,8 @@
  *@file main.cpp
  * @author Jaroslav Hucel (xhucel00@vutbr.cz)
  * @brief
- * @date 30. 07. 2025
+ * @date Created: 30. 07. 2025
+ * @date Modified: 20. 09. 2025
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -10,7 +11,7 @@
 #include <iostream>
 #include "xml_parser.hpp"
 
-static const char* FILE_PATH = "test.xml";
+static const char* FILE_PATH = "vk.xml";
 
 int main() {
     vkg_gen::XmlParser parser;

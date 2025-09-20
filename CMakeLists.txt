@@ -18,3 +18,6 @@ set(APP_INCLUDES
 # target
 add_executable(${APP_NAME} ${APP_SOURCES} ${APP_INCLUDES})
 set_property(TARGET ${APP_NAME} PROPERTY CXX_STANDARD 20)
+
+# TODO: debug flags
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -g -pedantic -O0")

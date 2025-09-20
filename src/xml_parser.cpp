@@ -2,7 +2,8 @@
  * @file xml_parser.cpp
  * @author Jaroslav Hucel (xhucel00@vutbr.cz)
  * @brief
- * @date 31. 07. 2025
+ * @date Created: 31. 07. 2025
+ * @date Modified: 20. 09. 2025
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -25,9 +26,11 @@ namespace vkg_gen {
 
         switch (*(m_ptr++)) {
         case '<':
+            // Handle '</'
             if (m_ptr[0] == '/') {
                 ++m_ptr;
                 return XmlLexTokenType::LessThanSlash;
+                // Handle '<?xml'
             } else if (m_ptr[0] == '?') {
                 if ((m_ptr + 4) < m_data.data() + m_data.length()) { // CHECK: off-by-one
                     if (m_ptr[1] == 'x' && m_ptr[2] == 'm' && m_ptr[3] == 'l') {
@@ -36,6 +39,16 @@ namespace vkg_gen {
                     }
                 }
                 throw std::runtime_error{ "TODO: invalid ?xml tag" };
+                // Handle '<!--'
+            } else if (m_ptr[0] == '!') {
+                if ((m_ptr + 2) < m_data.data() + m_data.length()) { // CHECK: off-by-one
+                    if (m_ptr[1] == '-' && m_ptr[2] == '-') {
+                        m_ptr += 3;
+                        remove_comment();
+                        return next(skip_whitespace, allow_text);
+                    }
+                }
+                throw std::runtime_error{ "TODO: invalid comment" };
             }
             return XmlLexTokenType::LessThan;
         case '>':
@@ -54,18 +67,20 @@ namespace vkg_gen {
             if (m_ptr[0] == '>')
                 return XmlLexTokenType::XmlTagEnd;
             break;
-        default:
-            m_ptr--; // put the character back
-            auto tok = load_text(allow_text);
-            m_last_value = { m_last_value.data(), m_ptr - m_last_value.data() };
-            return tok;
         }
+
+        m_ptr--; // put the character back
+        auto tok = load_text(allow_text);
+        m_last_value = { m_last_value.data(), m_ptr - m_last_value.data() };
+        return tok;
 
 
         // TODO: refactor the code that repeats
     }
 
     XmlLexTokenType XmlLexer::load_text(bool allow_text) {
+        // TODO: striping spaces
+
         // Zero length identifier
         if (*m_ptr == 0)
             return XmlLexTokenType::EndOfFile;
@@ -95,6 +110,7 @@ namespace vkg_gen {
                     return XmlLexTokenType::Text; // Identifier cannot contain '&'
 
                 std::cout << __FILE__ << ":" << __LINE__ << ": " << "TODO: & escaping" << std::endl;
+                while (*(++m_ptr) != ';' && *m_ptr != 0); // skip the rest of the entity
                 break;
 
                 // TODO: windows newlines
@@ -136,9 +152,10 @@ namespace vkg_gen {
                     || (*m_ptr >= '0' && *m_ptr <= '9')
                     || *m_ptr == '_' || *m_ptr == '.')
                     ) {
-                    static const std::string allowed_chars{ "*.,#|()[]{}~:-+@" };
+                    static const std::string allowed_chars{ "*.,'#|()[]{}~:-+@\\" };
                     if (allowed_chars.find(*m_ptr) == std::string_view::npos) {
-                        std::cout << __FILE__ << ":" << __LINE__ << ": " << "DEBUG: unexpected char: " << *m_ptr << "(" << int(*m_ptr) << ")" << std::endl;
+                        std::cout << __FILE__ << ":" << __LINE__ << ": " << "DEBUG: unexpected char(" << get_pos().line << ":"
+                            << get_pos().col << "): " << *m_ptr << "(" << int(*m_ptr) << ")" << std::endl;
                     }
                 }
             }
@@ -199,6 +216,15 @@ namespace vkg_gen {
             return os << "?>";
         case XmlLexTokenType::EndOfFile:
             return os << "EOF";
+        }
+    }
+    void XmlLexer::remove_comment() {
+        while (m_ptr + 2 < m_data.data() + m_data.length() && m_ptr[0] != '-' || m_ptr[1] != '-' || m_ptr[2] != '>') {
+            ++m_ptr;
+        }
+        m_ptr += 3;
+        if (m_ptr == m_data.data() + m_data.length()) {
+            throw std::runtime_error{ "Unterminated comment" };
         }
     }
 }

@@ -2,7 +2,8 @@
  * @file xml_parser.hpp
  * @author Jaroslav Hucel (xhucel00@vutbr.cz)
  * @brief
- * @date 30. 07. 2025
+ * @date Created: 30. 07. 2025
+ * @date Modified: 20. 09. 2025
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -76,6 +77,7 @@ namespace vkg_gen {
 
     class XmlLexer {
 
+
         sv m_last_value = {};
 
         const std::string& m_data;
@@ -85,6 +87,7 @@ namespace vkg_gen {
 
         void skip_whitespace();
         XmlLexTokenType load_text(bool allow_text);
+        void remove_comment();
 
     public:
         XmlLexTokenType next(bool skip_whitespace, bool allow_text);
