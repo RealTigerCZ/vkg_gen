@@ -17,34 +17,28 @@ int main() {
     vkg_gen::XmlParser parser;
     vkg_gen::XmlDom dom = parser.parse(FILE_PATH);
     vkg_gen::XmlLexer lexer(dom.file.data);
-    bool skip_whitespace = true;
-    bool allow_text = false;
+
+    using Expected = vkg_gen::XmlLexer::Expected;
+    Expected next = Expected::Header;
 
     while (true) {
-        auto token = lexer.next(skip_whitespace, allow_text);
+        auto token = lexer.next(next);
         auto pos = lexer.get_pos();
         std::cout << "Pos: " << FILE_PATH << ":" << pos.line << ":" << pos.col << "\n";
         std::cout << "Token: " << token << std::endl;
-        if (token == vkg_gen::XmlLexTokenType::Identifier || token == vkg_gen::XmlLexTokenType::Text) {
+        if (token == vkg_gen::XmlLexTokenType::Identifier || token == vkg_gen::XmlLexTokenType::Text || token == vkg_gen::XmlLexTokenType::String) {
             std::cout << "Value: '" << lexer.get_value() << "'" << std::endl;
-            if (lexer.get_value().size() == 0)
-                break;
         }
 
         if (token == vkg_gen::XmlLexTokenType::EndOfFile)
             break;
         if (token == vkg_gen::XmlLexTokenType::LessThan || token == vkg_gen::XmlLexTokenType::LessThanSlash) {
-            skip_whitespace = false;
-            allow_text = false;
-        } else if (token == vkg_gen::XmlLexTokenType::GreaterThan || token == vkg_gen::XmlLexTokenType::SlashGreaterThan) {
-            skip_whitespace = true;
-            allow_text = true;
-        } else if (token == vkg_gen::XmlLexTokenType::Quote) {
-            allow_text = !allow_text;
-        } else if (token == vkg_gen::XmlLexTokenType::Identifier) {
-            skip_whitespace = true;
+            next = Expected::Tag;
+        } else if (token == vkg_gen::XmlLexTokenType::GreaterThan || token == vkg_gen::XmlLexTokenType::SlashGreaterThan || token == vkg_gen::XmlLexTokenType::XmlTagEnd) {
+            next = Expected::Text;
+        } else if (next == Expected::Tag || next == Expected::Header) {
+            next = Expected::Attribute;
         }
-
     }
 
     return 0;

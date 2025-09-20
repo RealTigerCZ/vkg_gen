@@ -13,171 +13,256 @@
 #include <cerrno>
 #include <cstring>
 #include <iostream>
+#include <unordered_map>
+#include <algorithm>
+#include <assert.h>
 
 namespace vkg_gen {
-    XmlLexTokenType XmlLexer::next(bool skip_whitespace, bool allow_text) {
-        m_last_value = { m_ptr, 0 };
-        if (skip_whitespace)
-            this->skip_whitespace();
+    XmlLexTokenType XmlLexer::next(Expected expected) {
+        m_last_value = { (int)m_buffer.size(), 0 };
 
-        if (*m_ptr == 0) {
+        if (*m_ptr == 0)
             return XmlLexTokenType::EndOfFile;
-        }
 
-        switch (*(m_ptr++)) {
-        case '<':
-            // Handle '</'
-            if (m_ptr[0] == '/') {
-                ++m_ptr;
-                return XmlLexTokenType::LessThanSlash;
-                // Handle '<?xml'
-            } else if (m_ptr[0] == '?') {
-                if ((m_ptr + 4) < m_data.data() + m_data.length()) { // CHECK: off-by-one
-                    if (m_ptr[1] == 'x' && m_ptr[2] == 'm' && m_ptr[3] == 'l') {
-                        m_ptr += 4;
-                        return XmlLexTokenType::XmlTagStart;
-                    }
-                }
-                throw std::runtime_error{ "TODO: invalid ?xml tag" };
-                // Handle '<!--'
-            } else if (m_ptr[0] == '!') {
-                if ((m_ptr + 2) < m_data.data() + m_data.length()) { // CHECK: off-by-one
-                    if (m_ptr[1] == '-' && m_ptr[2] == '-') {
-                        m_ptr += 3;
-                        remove_comment();
-                        return next(skip_whitespace, allow_text);
-                    }
-                }
-                throw std::runtime_error{ "TODO: invalid comment" };
+        switch (expected) {
+        case Expected::Header:
+            // CHECK: skip whitespace?
+            if (std::distance(m_ptr, m_data.end().base()) < 5)
+                throw std::runtime_error{ "Unexpected end of data" };
+
+            if (std::string_view{ m_ptr, 5 } != "<?xml") {
+                throw std::runtime_error{ "Expected '<?xml'" };
             }
-            return XmlLexTokenType::LessThan;
-        case '>':
-            return XmlLexTokenType::GreaterThan;
-        case '/':
-            if (m_ptr[0] == '>') {
+
+            m_ptr += 5;
+            return XmlLexTokenType::XmlTagStart;
+
+        case Expected::Text:
+            return load_text();
+
+        case Expected::Tag:
+            return load_identifier();
+
+        case Expected::Attribute:
+            skip_whitespace();
+            switch (*m_ptr) {
+            case 0:
+                return XmlLexTokenType::EndOfFile;
+            case '=':
                 ++m_ptr;
-                return XmlLexTokenType::SlashGreaterThan;
+                return XmlLexTokenType::Equals;
+
+            case '"': // fallthrough
+            case '\'':
+                return load_string();
+            case '?':
+                if (m_ptr[1] == '>') {
+                    m_ptr += 2;
+                    return XmlLexTokenType::XmlTagEnd;
+                }
+                throw std::runtime_error{ "TODO: invalid ? token" };
+            case '/':
+                if (m_ptr[1] == '>') {
+                    m_ptr += 2;
+                    return XmlLexTokenType::SlashGreaterThan;
+                }
+                throw std::runtime_error{ "TODO: invalid / token" };
+
+            case '>':
+                ++m_ptr;
+                return XmlLexTokenType::GreaterThan;
+
+            case '<':
+                if (std::distance(m_ptr, m_data.end().base()) < 4) // CHECK: off by one
+                    throw std::runtime_error{ "Unexpected end of data" };
+                if (m_ptr[1] != '!' || m_ptr[2] != '-' || m_ptr[3] != '-')
+                    throw std::runtime_error{ "TODO: Expected attribute but got '<'" };
+                remove_comment();
+                return next(Expected::Attribute);
+
+            default:
+                return load_identifier();
             }
-            break;
-        case '=':
-            return XmlLexTokenType::Equals;
-        case '"':
-            return XmlLexTokenType::Quote;
-        case '?':
-            if (m_ptr[0] == '>')
-                return XmlLexTokenType::XmlTagEnd;
-            break;
+
         }
-
-        m_ptr--; // put the character back
-        auto tok = load_text(allow_text);
-        m_last_value = { m_last_value.data(), m_ptr - m_last_value.data() };
-        return tok;
-
-
-        // TODO: refactor the code that repeats
     }
 
-    XmlLexTokenType XmlLexer::load_text(bool allow_text) {
-        // TODO: striping spaces
 
-        // Zero length identifier
+    XmlLexTokenType XmlLexer::load_text() {
+        skip_whitespace();
         if (*m_ptr == 0)
             return XmlLexTokenType::EndOfFile;
 
 
         do {
             switch (*m_ptr) {
-            case '<': // fallthrough
-            case '>': // fallthrough
-            case '=': // fallthrough
-            case '"':
-                return allow_text ? XmlLexTokenType::Text : XmlLexTokenType::Identifier;
+            case '<':
+                if ((std::distance(m_ptr, m_data.end().base()) >= 4) && m_ptr[1] == '!' && m_ptr[2] == '-' && m_ptr[3] == '-') {
+                    remove_comment();
+                    break;
+                }
+                m_last_value.size = m_buffer.size() - m_last_value.start;
+                if (m_last_value.size > 0)
+                    return XmlLexTokenType::Text;
 
-            case '/': // fallthrough
-            case '?':
-                // '/' or '?' can be used in text but if it's part of other token (/> or ?>), then the text ends
-                if (m_ptr[1] == '>') {
-                    return allow_text ? XmlLexTokenType::Text : XmlLexTokenType::Identifier;
+                if (m_ptr[1] == '/') {
+                    m_ptr += 2;
+                    return XmlLexTokenType::LessThanSlash;
                 }
 
-                if (!allow_text)
-                    return XmlLexTokenType::Text; // Identifier cannot contain '?' or '/'
+                ++m_ptr;
+                return XmlLexTokenType::LessThan;
 
-                break;
             case '&':
-                if (!allow_text)
-                    return XmlLexTokenType::Text; // Identifier cannot contain '&'
-
-                std::cout << __FILE__ << ":" << __LINE__ << ": " << "TODO: & escaping" << std::endl;
-                while (*(++m_ptr) != ';' && *m_ptr != 0); // skip the rest of the entity
+                escape_entity();
                 break;
-
-                // TODO: windows newlines
-            case '\n':  // fallthrough
-                if (!allow_text) { // Identifier ends with any whitespace
-                    return XmlLexTokenType::Identifier;
+            case ']':
+                if (std::distance(m_ptr, m_data.end().base()) >= 3 && m_ptr[1] == ']' && m_ptr[2] == '>') {
+                    throw std::runtime_error{ "TODO: CDATA section not supported yet" };
                 }
-                m_line++;
-                m_last_line_end = m_ptr;
-            case '\t':  // fallthrough
-            case ' ':
-                if (!allow_text) { // Identifier ends with any whitespace
-                    return XmlLexTokenType::Identifier;
-                }
+                m_buffer.push_back(*m_ptr);
                 break;
-
             default:
-                // Check the valid identifier characters if text is not allowed
-                if (!allow_text) {
-                    if (m_last_value.data() == m_ptr) { // first character
-                        if (!((*m_ptr >= 'a' && *m_ptr <= 'z')
-                            || (*m_ptr >= 'A' && *m_ptr <= 'Z')
-                            || *m_ptr == '_')
-                            )
-                            return XmlLexTokenType::Text; // Identifier cannot start with not allowed character
-
-                    } else // not first character
-                        if (!((*m_ptr >= 'a' && *m_ptr <= 'z')
-                            || (*m_ptr >= 'A' && *m_ptr <= 'Z')
-                            || (*m_ptr >= '0' && *m_ptr <= '9')
-                            || *m_ptr == '_' || *m_ptr == '.')
-                            )
-                            return XmlLexTokenType::Text; // Identifier cannot contain not allowed character
-                }
-
-                // TODO: remove this debug:
-                if (!((*m_ptr >= 'a' && *m_ptr <= 'z')
-                    || (*m_ptr >= 'A' && *m_ptr <= 'Z')
-                    || (*m_ptr >= '0' && *m_ptr <= '9')
-                    || *m_ptr == '_' || *m_ptr == '.')
-                    ) {
-                    static const std::string allowed_chars{ "*.,'#|()[]{}~:-+@\\" };
-                    if (allowed_chars.find(*m_ptr) == std::string_view::npos) {
-                        std::cout << __FILE__ << ":" << __LINE__ << ": " << "DEBUG: unexpected char(" << get_pos().line << ":"
-                            << get_pos().col << "): " << *m_ptr << "(" << int(*m_ptr) << ")" << std::endl;
-                    }
-                }
+                handle_new_line();
+                m_buffer.push_back(*m_ptr);
             }
-
         } while (*(++m_ptr));
 
         return XmlLexTokenType::EndOfFile;
     }
 
+    XmlLexTokenType XmlLexer::load_identifier() {
+        // TODO: UTF-8?
+        // From XML spec: NameStartChar ::= ":" | [A-Z] | "_" | [a-z] | [#xC0-#xD6] | [#xD8-#xF6] | [#xF8-#xFF]
+        const auto isNameStartChar = [](char c) {
+            return c == ':' || (c >= 'A' && c <= 'Z') || c == '_' || (c >= 'a' && c <= 'z') ||
+                (c >= '\xC0' && c <= '\xD6') || (c >= '\xD8' && c <= '\xF6') || (c >= '\xF8' && c <= '\xFF');
+            };
 
+        // From XML spec: NameChar ::= NameStartChar | "-" | "." | [0-9] | #xB7
+        const auto isNameChar = [&isNameStartChar](char c) {
+            return isNameStartChar(c) || (c >= '0' && c <= '9') || c == '-' || c == '.' || c == '\xB7';
+            };
 
-    inline void XmlLexer::skip_whitespace() {
-        // TODO: Windows newlines
-        while (*m_ptr && (*m_ptr == '\n' || *m_ptr == '\t' || *m_ptr == ' ')) {
-            if (*m_ptr == '\n') {
-                ++m_line;
-                m_last_line_end = m_ptr;
+        if (*m_ptr == 0)
+            return XmlLexTokenType::EndOfFile;
+
+        auto start = m_ptr;
+
+        do {
+            if (m_ptr == start) {
+                if (!isNameStartChar(*m_ptr))
+                    break;
+            } else {
+                if (!isNameChar(*m_ptr))
+                    break;
             }
+            m_buffer.push_back(*m_ptr);
+        } while (*(++m_ptr));
+
+        if (m_ptr == start)
+            throw std::runtime_error{ "TODO: empty identifier" };
+
+        m_last_value.size = m_buffer.size() - m_last_value.start;
+        return XmlLexTokenType::Identifier;
+    }
+
+
+    XmlLexTokenType XmlLexer::load_string() {
+        assert(*m_ptr == '"' || *m_ptr == '\'');
+
+        auto start = m_ptr++; // quote or apostrophe
+        do {
+            if (*m_ptr == *start) // closing quote or apostrophe
+                break;
+            if (*m_ptr == '&') {
+                escape_entity();
+                continue;
+            }
+            if (*m_ptr == '<')
+                throw std::runtime_error{ "'<' is not allowed in attribute value" };
+
+            handle_new_line();
+
+            m_buffer.push_back(*m_ptr);
+        } while (*(++m_ptr));
+        ++m_ptr;
+        m_last_value.size = m_buffer.size() - m_last_value.start;
+        if (m_last_value.size == 0) {
+            std::cout << "a";
+        }
+
+        return XmlLexTokenType::String;
+    }
+    void XmlLexer::escape_entity() {
+        static const std::unordered_map<std::string_view, char> entities{
+            { "lt", '<' },
+            { "gt", '>' },
+            { "amp", '&' },
+            { "apos", '\'' },
+            { "quot", '"' }
+        };
+        constexpr int longest_entity = 4; // quot and #x7F and #255 are the longest
+        ++m_ptr; // remove '&'
+
+        auto end = std::find_if(m_ptr, m_ptr + longest_entity + 1, [](char c) { return c == ';'; });
+        if (end == m_ptr + longest_entity + 1)
+            throw std::runtime_error{ "TODO: incomplete entity" };
+
+
+        std::string_view entity{ m_ptr, end - m_ptr }; // Remove ';'
+
+        if (entity[0] == '#') {
+            if (entity[1] == 'x') {
+                entity.remove_prefix(2);
+                m_buffer.push_back(std::stoul(entity.data(), nullptr, 16));
+            } else {
+                entity.remove_prefix(1);
+                m_buffer.push_back(std::stoul(entity.data(), nullptr, 10));
+            }
+            m_ptr = end;
+            return;
+        }
+
+
+        auto it = entities.find(entity);
+        if (it == entities.end()) {
+            throw std::runtime_error{ "TODO: unknown entity '" + std::string{ entity } + "'" };
+        }
+
+        m_buffer.push_back(it->second);
+        m_ptr = end;
+    }
+
+    inline void XmlLexer::handle_new_line() {
+        if (*m_ptr == '\r') {
+            ++m_line;
+            m_last_line_end = m_ptr;
+            // If next char is '\n', skip it too (Windows newline)
+            if (*(m_ptr + 1) == '\n') ++m_ptr;
+        } else if (*m_ptr == '\n') {
+            ++m_line;
+            m_last_line_end = m_ptr;
+        }
+    }
+
+
+    void XmlLexer::remove_comment() {
+        while (*m_ptr && m_ptr[0] != '-' || m_ptr[1] != '-' || m_ptr[2] != '>') {
+            handle_new_line();
             ++m_ptr;
         }
-        m_last_value = { m_ptr, 0 };
+        m_ptr += 3;
+        if (m_ptr >= m_data.data() + m_data.length()) {
+            throw std::runtime_error{ "Unterminated comment" };
+        }
+    }
 
+    void XmlLexer::skip_whitespace() {
+        while (*m_ptr && (*m_ptr == '\n' || *m_ptr == '\r' || *m_ptr == '\t' || *m_ptr == ' ')) {
+            handle_new_line();
+            ++m_ptr;
+        }
     }
 
     XmlDom XmlParser::parse(const std::string& path) {
@@ -204,8 +289,6 @@ namespace vkg_gen {
             return os << "</";
         case XmlLexTokenType::Equals:
             return os << "=";
-        case XmlLexTokenType::Quote:
-            return os << "\"";
         case XmlLexTokenType::Identifier:
             return os << "Identifier";
         case XmlLexTokenType::Text:
@@ -216,15 +299,8 @@ namespace vkg_gen {
             return os << "?>";
         case XmlLexTokenType::EndOfFile:
             return os << "EOF";
-        }
-    }
-    void XmlLexer::remove_comment() {
-        while (m_ptr + 2 < m_data.data() + m_data.length() && m_ptr[0] != '-' || m_ptr[1] != '-' || m_ptr[2] != '>') {
-            ++m_ptr;
-        }
-        m_ptr += 3;
-        if (m_ptr == m_data.data() + m_data.length()) {
-            throw std::runtime_error{ "Unterminated comment" };
+        case XmlLexTokenType::String:
+            return os << "String";
         }
     }
 }

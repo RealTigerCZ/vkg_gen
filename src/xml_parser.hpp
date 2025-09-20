@@ -51,12 +51,13 @@ namespace vkg_gen {
         SlashGreaterThan,     // />
         LessThanSlash,        // </
         Equals,               // =
-        Quote,                // "
+        String,               // "..." or '...'
         Identifier,           // tag names, attribute names
-        Text,                 // text content
+        Text,                 // text content between tags
         XmlTagStart,          // <?xml
         XmlTagEnd,            // ?>
-        EndOfFile
+        EndOfFile,
+
     };
 
     /**
@@ -75,27 +76,50 @@ namespace vkg_gen {
         int col;
     };
 
+    struct Slice {
+        int start;
+        int size;
+    };
+
     class XmlLexer {
+    public:
+        enum class Expected {
+            Header,
+            Text,
+            Tag,
+            Attribute
+        };
 
-
-        sv m_last_value = {};
+    private:
+        std::vector<char> m_buffer;
+        Slice m_last_value;
 
         const std::string& m_data;
         char const* m_ptr = m_data.data();
         char const* m_last_line_end = m_ptr - 1; // CHECK: Points to the end of the last line, could be out of bounds
         int m_line = 1;
 
+        XmlLexTokenType load_text();
+        XmlLexTokenType load_identifier();
+        XmlLexTokenType load_string();
+
         void skip_whitespace();
-        XmlLexTokenType load_text(bool allow_text);
+        void handle_new_line();
         void remove_comment();
+        void escape_entity();
 
     public:
-        XmlLexTokenType next(bool skip_whitespace, bool allow_text);
-        sv get_value() const { return m_last_value; }
+        XmlLexTokenType next(Expected expected);
+
+        Slice get_last_value() const { return m_last_value; }
+        // TODO: returned SV could be invalidated by lexer::next call
+        sv get_value() const { return { m_buffer.data() + m_last_value.start, m_last_value.size }; }
         XmlPosition get_pos() const { return { m_line, m_ptr - m_last_line_end }; }
 
 
         XmlLexer(const std::string& data) : m_data{ data } {};
+
+
     };
 
     class XmlParser {
