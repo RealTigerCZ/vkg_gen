@@ -1,9 +1,9 @@
 /**
  * @file xml_parser.cpp
  * @author Jaroslav Hucel (xhucel00@vutbr.cz)
- * @brief
+ * @brief TODO:
  * @date Created: 31. 07. 2025
- * @date Modified: 20. 09. 2025
+ * @date Modified: 29. 09. 2025
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -16,6 +16,7 @@
 #include <unordered_map>
 #include <algorithm>
 #include <assert.h>
+#include <sstream>
 
 namespace vkg_gen {
     XmlLexTokenType XmlLexer::next(Expected expected) {
@@ -28,10 +29,10 @@ namespace vkg_gen {
         case Expected::Header:
             // CHECK: skip whitespace?
             if (std::distance(m_ptr, m_data.end().base()) < 5)
-                throw std::runtime_error{ "Unexpected end of data" };
+                throw LexerError{ *this, "Unexpected end of data",  std::distance(m_ptr, m_data.end().base()) };
 
             if (std::string_view{ m_ptr, 5 } != "<?xml") {
-                throw std::runtime_error{ "Expected '<?xml'" };
+                throw LexerError{ *this,  "Expected '<?xml' tag.", 5 };
             }
 
             m_ptr += 5;
@@ -60,13 +61,13 @@ namespace vkg_gen {
                     m_ptr += 2;
                     return XmlLexTokenType::XmlTagEnd;
                 }
-                throw std::runtime_error{ "TODO: invalid ? token" };
+                throw LexerError{ *this, "Expected '?>' tag.", 2 };
             case '/':
                 if (m_ptr[1] == '>') {
                     m_ptr += 2;
                     return XmlLexTokenType::SlashGreaterThan;
                 }
-                throw std::runtime_error{ "TODO: invalid / token" };
+                throw LexerError{ *this, "Expected '/>' tag.", 2 };
 
             case '>':
                 ++m_ptr;
@@ -74,9 +75,9 @@ namespace vkg_gen {
 
             case '<':
                 if (std::distance(m_ptr, m_data.end().base()) < 4) // CHECK: off by one
-                    throw std::runtime_error{ "Unexpected end of data" };
+                    throw LexerError{ *this, "Unexpected end of data",  std::distance(m_ptr, m_data.end().base()) };
                 if (m_ptr[1] != '!' || m_ptr[2] != '-' || m_ptr[3] != '-')
-                    throw std::runtime_error{ "TODO: Expected attribute but got '<'" };
+                    throw LexerError{ *this, "Expected atribute or '<!--' tag.", 4 };
                 remove_comment();
                 return next(Expected::Attribute);
 
@@ -132,7 +133,7 @@ namespace vkg_gen {
     }
 
     XmlLexTokenType XmlLexer::load_identifier() {
-        // TODO: UTF-8?
+        // FIXME: this is not correct for UTF-8, but it works for windows-1252
         // From XML spec: NameStartChar ::= ":" | [A-Z] | "_" | [a-z] | [#xC0-#xD6] | [#xD8-#xF6] | [#xF8-#xFF]
         const auto isNameStartChar = [](char c) {
             return c == ':' || (c >= 'A' && c <= 'Z') || c == '_' || (c >= 'a' && c <= 'z') ||
@@ -150,6 +151,9 @@ namespace vkg_gen {
         auto start = m_ptr;
 
         do {
+            if ((unsigned)*m_ptr >= 0x80)
+                throw LexerError{ *this, "Identifiers must be in ASCII range" };
+
             if (m_ptr == start) {
                 if (!isNameStartChar(*m_ptr))
                     break;
@@ -161,7 +165,7 @@ namespace vkg_gen {
         } while (*(++m_ptr));
 
         if (m_ptr == start)
-            throw std::runtime_error{ "TODO: empty identifier" };
+            throw LexerError{ *this, "Expected identifier. But found '" + std::string(m_ptr, 1) + "'" };
 
         m_last_value.size = m_buffer.size() - m_last_value.start;
         return XmlLexTokenType::Identifier;
@@ -180,7 +184,7 @@ namespace vkg_gen {
                 continue;
             }
             if (*m_ptr == '<')
-                throw std::runtime_error{ "'<' is not allowed in attribute value" };
+                throw LexerError{ *this, "'<' is not allowed in attribute value" };
 
             handle_new_line();
 
@@ -188,10 +192,6 @@ namespace vkg_gen {
         } while (*(++m_ptr));
         ++m_ptr;
         m_last_value.size = m_buffer.size() - m_last_value.start;
-        if (m_last_value.size == 0) {
-            std::cout << "a";
-        }
-
         return XmlLexTokenType::String;
     }
     void XmlLexer::escape_entity() {
@@ -207,7 +207,7 @@ namespace vkg_gen {
 
         auto end = std::find_if(m_ptr, m_ptr + longest_entity + 1, [](char c) { return c == ';'; });
         if (end == m_ptr + longest_entity + 1)
-            throw std::runtime_error{ "TODO: incomplete entity" };
+            throw LexerError{ *this, "TODO: incomplete entity" };
 
 
         std::string_view entity{ m_ptr, end - m_ptr }; // Remove ';'
@@ -227,7 +227,7 @@ namespace vkg_gen {
 
         auto it = entities.find(entity);
         if (it == entities.end()) {
-            throw std::runtime_error{ "TODO: unknown entity '" + std::string{ entity } + "'" };
+            throw LexerError{ *this, "Unknown entity '" + std::string{ entity } + "'", entity.length() };
         }
 
         m_buffer.push_back(it->second);
@@ -248,13 +248,13 @@ namespace vkg_gen {
 
 
     void XmlLexer::remove_comment() {
-        while (*m_ptr && m_ptr[0] != '-' || m_ptr[1] != '-' || m_ptr[2] != '>') {
+        while (*m_ptr && (m_ptr[0] != '-' || m_ptr[1] != '-' || m_ptr[2] != '>')) {
             handle_new_line();
             ++m_ptr;
         }
         m_ptr += 3;
         if (m_ptr >= m_data.data() + m_data.length()) {
-            throw std::runtime_error{ "Unterminated comment" };
+            throw LexerError{ *this, "Unterminated comment" };
         }
     }
 
@@ -302,6 +302,26 @@ namespace vkg_gen {
         case XmlLexTokenType::String:
             return os << "String";
         }
+
+        UNREACHABLE();
     }
+
+    LexerError::LexerError(const XmlLexer& lexer, const std::string& msg, int len) :
+        std::runtime_error(
+            [&] {
+                std::stringstream ss;
+                auto pos = lexer.get_pos();
+                ss << "Error occured when lexing at " << lexer.file_path << ':' << pos.line << ':' << pos.col << '\n' <<
+                    msg << '\n';
+                sv line(lexer.m_last_line_end + 1, lexer.m_data.end().base() - lexer.m_last_line_end);
+                size_t new_size = line.find_first_of('\n');
+                if (new_size != sv::npos)
+                    line = line.substr(0, new_size);
+
+                int error_loc = std::distance(lexer.m_last_line_end + 1, lexer.m_ptr);
+                ss << pos.line << " | " << line << '\n';
+                ss << pos.line << " | " << std::string(error_loc, ' ') << std::string(len, '^') << "~~~here" << std::endl;
+                return ss.str();
+            }()) {};
 }
 

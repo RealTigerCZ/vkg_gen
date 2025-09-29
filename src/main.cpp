@@ -1,9 +1,9 @@
 /**
  *@file main.cpp
  * @author Jaroslav Hucel (xhucel00@vutbr.cz)
- * @brief
+ * @brief TODO:
  * @date Created: 30. 07. 2025
- * @date Modified: 20. 09. 2025
+ * @date Modified: 29. 09. 2025
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -16,13 +16,21 @@ static const char* FILE_PATH = "vk.xml";
 int main() {
     vkg_gen::XmlParser parser;
     vkg_gen::XmlDom dom = parser.parse(FILE_PATH);
-    vkg_gen::XmlLexer lexer(dom.file.data);
+    vkg_gen::XmlLexer lexer(dom.file.data, FILE_PATH);
 
     using Expected = vkg_gen::XmlLexer::Expected;
     Expected next = Expected::Header;
 
     while (true) {
-        auto token = lexer.next(next);
+        vkg_gen::XmlLexTokenType token;
+        try {
+            token = lexer.next(next);
+        }
+        catch (const vkg_gen::LexerError& e) {
+            std::cerr << e.what() << std::endl;
+            return 1;
+        };
+
         auto pos = lexer.get_pos();
         std::cout << "Pos: " << FILE_PATH << ":" << pos.line << ":" << pos.col << "\n";
         std::cout << "Token: " << token << std::endl;

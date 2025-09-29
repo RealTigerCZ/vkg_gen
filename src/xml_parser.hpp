@@ -1,14 +1,16 @@
 /**
  * @file xml_parser.hpp
  * @author Jaroslav Hucel (xhucel00@vutbr.cz)
- * @brief
+ * @brief TODO:
  * @date Created: 30. 07. 2025
- * @date Modified: 20. 09. 2025
+ * @date Modified: 29. 09. 2025
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
 
 #pragma once
+
+#define UNREACHABLE() std::cerr << "Unreachable code reached at " __FILE__ ":" << __LINE__; std::abort();
 
 #include <string>
 #include <string_view>
@@ -81,6 +83,8 @@ namespace vkg_gen {
         int size;
     };
 
+    class LexerError;
+
     class XmlLexer {
     public:
         enum class Expected {
@@ -90,10 +94,22 @@ namespace vkg_gen {
             Attribute
         };
 
+        friend LexerError;
+
+        static sv next_utf8_char(const char* p) {
+            unsigned char c = *p;
+            size_t len = 1;
+            if (c >= 0xF0) len = 4;
+            else if (c >= 0xE0) len = 3;
+            else if (c >= 0xC0) len = 2;
+            return sv(p, len);
+        };
+
     private:
         std::vector<char> m_buffer;
         Slice m_last_value;
 
+        const char* file_path;
         const std::string& m_data;
         char const* m_ptr = m_data.data();
         char const* m_last_line_end = m_ptr - 1; // CHECK: Points to the end of the last line, could be out of bounds
@@ -117,7 +133,7 @@ namespace vkg_gen {
         XmlPosition get_pos() const { return { m_line, m_ptr - m_last_line_end }; }
 
 
-        XmlLexer(const std::string& data) : m_data{ data } {};
+        XmlLexer(const std::string& data, const char* path) : m_data(data), file_path(path) {};
 
 
     };
@@ -129,6 +145,12 @@ namespace vkg_gen {
 
         XmlParser() = default;
         ~XmlParser() = default;
+    };
+
+
+    class LexerError : public std::runtime_error {
+    public:
+        LexerError(const XmlLexer& lexer, const std::string& msg, int len = 1);
     };
 
 } // namespace vkg_gen
