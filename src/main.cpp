@@ -3,7 +3,7 @@
  * @author Jaroslav Hucel (xhucel00@vutbr.cz)
  * @brief TODO:
  * @date Created: 30. 07. 2025
- * @date Modified: 29. 09. 2025
+ * @date Modified: 12. 10. 2025
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -16,7 +16,7 @@ static const char* FILE_PATH = "vk.xml";
 int main() {
     vkg_gen::XmlParser parser;
     vkg_gen::XmlDom dom = parser.parse(FILE_PATH);
-    vkg_gen::XmlLexer lexer(dom.file.data, FILE_PATH);
+    vkg_gen::XmlLexer lexer(dom.data, FILE_PATH);
 
     using Expected = vkg_gen::XmlLexer::Expected;
     Expected next = Expected::Header;

@@ -3,10 +3,12 @@
 cmake_minimum_required(VERSION 3.15) # CHECK: try other versions later
 
 set(APP_NAME vkg_gen)
+set(CMAKE_CXX_STANDARD 23)
 
 project(${APP_NAME})
 
 set(APP_SOURCES
+   src/arena.cpp
    src/xml_parser.cpp
    src/main.cpp
    )
@@ -17,7 +19,8 @@ set(APP_INCLUDES
 
 # target
 add_executable(${APP_NAME} ${APP_SOURCES} ${APP_INCLUDES})
-set_property(TARGET ${APP_NAME} PROPERTY CXX_STANDARD 20)
 
 # TODO: debug flags
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -g -pedantic -O0")
+# TODO: remove this
+target_compile_options(${APP_NAME} PRIVATE -fdiagnostics-color=always)

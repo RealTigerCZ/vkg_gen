@@ -3,7 +3,7 @@
  * @author Jaroslav Hucel (xhucel00@vutbr.cz)
  * @brief TODO:
  * @date Created: 31. 07. 2025
- * @date Modified: 29. 09. 2025
+ * @date Modified: 12. 10. 2025
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -271,9 +271,7 @@ namespace vkg_gen {
             throw std::runtime_error{ "Failed to open file: '" + path + "' because: '" + std::strerror(errno) + "'" };
         }
 
-        XmlFile xml_file{ std::string{ std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>() }, path };
-
-        XmlDom dom{ XmlHeader{ "1.0", "UTF-8" }, XmlItem{ "root", "" }, xml_file };
+        XmlDom dom{ std::string{ std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>() }, nullptr, nullptr, Arena{} };
         return dom;
     };
 

@@ -3,7 +3,7 @@
  * @author Jaroslav Hucel (xhucel00@vutbr.cz)
  * @brief TODO:
  * @date Created: 30. 07. 2025
- * @date Modified: 29. 09. 2025
+ * @date Modified: 12. 10. 2025
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -15,8 +15,10 @@
 #include <string>
 #include <string_view>
 #include <vector>
-
+#include <variant>
 #include <fstream>
+
+#include "arena.hpp"
 
 namespace vkg_gen {
 
@@ -24,28 +26,6 @@ namespace vkg_gen {
 
     template <typename T>
     using vec = std::vector<T>;
-
-    struct XmlAttr {
-        sv name;
-        sv value;
-    };
-
-    struct XmlItem { // FIXME: what about this: <tag1> Hello <tag2> World </tag2> </tag1>
-        sv tag;
-        sv value;
-        vec<XmlAttr> attrs;
-        vec<XmlItem> children;
-    };
-
-    struct XmlHeader {
-        sv version;
-        sv encoding;
-    };
-
-    struct XmlFile {
-        const std::string data; // Holds the copy of xml data, **must live at least as long as XmlDom's items**
-        const std::string path; // Path to xml file
-    };
 
     enum class XmlLexTokenType {
         LessThan,             // <
@@ -67,10 +47,51 @@ namespace vkg_gen {
      */
     std::ostream& operator<<(std::ostream& os, XmlLexTokenType type);
 
+
+    struct XmlHeader {
+        sv version;
+        sv encoding;
+        sv standalone;
+    };
+
+    struct XmlAttr {
+        sv name; // TODO: replace with interned string
+        sv value;
+        bool value_is_interned; // TODO: implement :)
+    };
+
+    struct XmlNode;
+
+
+    struct XmlElement {
+        sv tag; // TODO: replace with interned string
+        vec<XmlAttr> attrs;
+        vec<XmlNode*> children;
+    };
+
+    struct XmlNode {
+        using XmlText = sv;
+        using Data = std::variant<XmlElement, XmlText>;
+
+        Data data;
+        XmlNode* parent = nullptr;
+
+        bool isElement() const noexcept { return std::holds_alternative<XmlElement>(data); }
+        bool isText() const noexcept { return std::holds_alternative<XmlText>(data); }
+
+        XmlElement& asElement() noexcept { return std::get<XmlElement>(data); }
+        const XmlElement& asElement() const noexcept { return std::get<XmlElement>(data); }
+
+        XmlText& asText() noexcept { return std::get<XmlText>(data); }
+        const XmlText& asText() const noexcept { return std::get<XmlText>(data); }
+    };
+
+
     struct XmlDom {
-        XmlHeader header;
-        XmlItem root;
-        XmlFile file;
+        std::string data; // Holds the copy of the file data // TODO: replace with string view?
+        XmlNode* root;
+        XmlHeader* header;
+        Arena arena; // All nodes are allocated in the arena
     };
 
     struct XmlPosition {
@@ -78,10 +99,6 @@ namespace vkg_gen {
         int col;
     };
 
-    struct Slice {
-        int start;
-        int size;
-    };
 
     class LexerError;
 
@@ -92,6 +109,11 @@ namespace vkg_gen {
             Text,
             Tag,
             Attribute
+        };
+
+        struct Slice {
+            int start;
+            int size;
         };
 
         friend LexerError;
