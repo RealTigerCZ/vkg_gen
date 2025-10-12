@@ -1,7 +1,8 @@
 /**
- * @file xml_parser.cpp
+ * @file lexer.cpp
  * @author Jaroslav Hucel (xhucel00@vutbr.cz)
- * @brief TODO:
+ * @brief Implementation of Lexer (tokenizer)
+ *
  * @date Created: 31. 07. 2025
  * @date Modified: 12. 10. 2025
  *
@@ -9,21 +10,19 @@
  */
 
 
-#include "xml_parser.hpp"
-#include <cerrno>
-#include <cstring>
-#include <iostream>
-#include <unordered_map>
-#include <algorithm>
+#include "lexer.hpp"
 #include <assert.h>
+#include <unordered_map>
 #include <sstream>
+#include <iostream>
 
-namespace vkg_gen {
-    XmlLexTokenType XmlLexer::next(Expected expected) {
+
+namespace vkg_gen::xml {
+    LexTokenType Lexer::next(Expected expected) {
         m_last_value = { (int)m_buffer.size(), 0 };
 
         if (*m_ptr == 0)
-            return XmlLexTokenType::EndOfFile;
+            return LexTokenType::EndOfFile;
 
         switch (expected) {
         case Expected::Header:
@@ -36,7 +35,7 @@ namespace vkg_gen {
             }
 
             m_ptr += 5;
-            return XmlLexTokenType::XmlTagStart;
+            return LexTokenType::XmlTagStart;
 
         case Expected::Text:
             return load_text();
@@ -48,10 +47,10 @@ namespace vkg_gen {
             skip_whitespace();
             switch (*m_ptr) {
             case 0:
-                return XmlLexTokenType::EndOfFile;
+                return LexTokenType::EndOfFile;
             case '=':
                 ++m_ptr;
-                return XmlLexTokenType::Equals;
+                return LexTokenType::Equals;
 
             case '"': // fallthrough
             case '\'':
@@ -59,19 +58,19 @@ namespace vkg_gen {
             case '?':
                 if (m_ptr[1] == '>') {
                     m_ptr += 2;
-                    return XmlLexTokenType::XmlTagEnd;
+                    return LexTokenType::XmlTagEnd;
                 }
                 throw LexerError{ *this, "Expected '?>' tag.", 2 };
             case '/':
                 if (m_ptr[1] == '>') {
                     m_ptr += 2;
-                    return XmlLexTokenType::SlashGreaterThan;
+                    return LexTokenType::SlashGreaterThan;
                 }
                 throw LexerError{ *this, "Expected '/>' tag.", 2 };
 
             case '>':
                 ++m_ptr;
-                return XmlLexTokenType::GreaterThan;
+                return LexTokenType::GreaterThan;
 
             case '<':
                 if (std::distance(m_ptr, m_data.end().base()) < 4) // CHECK: off by one
@@ -89,10 +88,10 @@ namespace vkg_gen {
     }
 
 
-    XmlLexTokenType XmlLexer::load_text() {
+    LexTokenType Lexer::load_text() {
         skip_whitespace();
         if (*m_ptr == 0)
-            return XmlLexTokenType::EndOfFile;
+            return LexTokenType::EndOfFile;
 
 
         do {
@@ -104,15 +103,15 @@ namespace vkg_gen {
                 }
                 m_last_value.size = m_buffer.size() - m_last_value.start;
                 if (m_last_value.size > 0)
-                    return XmlLexTokenType::Text;
+                    return LexTokenType::Text;
 
                 if (m_ptr[1] == '/') {
                     m_ptr += 2;
-                    return XmlLexTokenType::LessThanSlash;
+                    return LexTokenType::LessThanSlash;
                 }
 
                 ++m_ptr;
-                return XmlLexTokenType::LessThan;
+                return LexTokenType::LessThan;
 
             case '&':
                 escape_entity();
@@ -129,10 +128,10 @@ namespace vkg_gen {
             }
         } while (*(++m_ptr));
 
-        return XmlLexTokenType::EndOfFile;
+        return LexTokenType::EndOfFile;
     }
 
-    XmlLexTokenType XmlLexer::load_identifier() {
+    LexTokenType Lexer::load_identifier() {
         // FIXME: this is not correct for UTF-8, but it works for windows-1252
         // From XML spec: NameStartChar ::= ":" | [A-Z] | "_" | [a-z] | [#xC0-#xD6] | [#xD8-#xF6] | [#xF8-#xFF]
         const auto isNameStartChar = [](char c) {
@@ -146,7 +145,7 @@ namespace vkg_gen {
             };
 
         if (*m_ptr == 0)
-            return XmlLexTokenType::EndOfFile;
+            return LexTokenType::EndOfFile;
 
         auto start = m_ptr;
 
@@ -168,11 +167,11 @@ namespace vkg_gen {
             throw LexerError{ *this, "Expected identifier. But found '" + std::string(m_ptr, 1) + "'" };
 
         m_last_value.size = m_buffer.size() - m_last_value.start;
-        return XmlLexTokenType::Identifier;
+        return LexTokenType::Identifier;
     }
 
 
-    XmlLexTokenType XmlLexer::load_string() {
+    LexTokenType Lexer::load_string() {
         assert(*m_ptr == '"' || *m_ptr == '\'');
 
         auto start = m_ptr++; // quote or apostrophe
@@ -192,9 +191,9 @@ namespace vkg_gen {
         } while (*(++m_ptr));
         ++m_ptr;
         m_last_value.size = m_buffer.size() - m_last_value.start;
-        return XmlLexTokenType::String;
+        return LexTokenType::String;
     }
-    void XmlLexer::escape_entity() {
+    void Lexer::escape_entity() {
         static const std::unordered_map<std::string_view, char> entities{
             { "lt", '<' },
             { "gt", '>' },
@@ -234,7 +233,7 @@ namespace vkg_gen {
         m_ptr = end;
     }
 
-    inline void XmlLexer::handle_new_line() {
+    inline void Lexer::handle_new_line() {
         if (*m_ptr == '\r') {
             ++m_line;
             m_last_line_end = m_ptr;
@@ -247,7 +246,7 @@ namespace vkg_gen {
     }
 
 
-    void XmlLexer::remove_comment() {
+    void Lexer::remove_comment() {
         while (*m_ptr && (m_ptr[0] != '-' || m_ptr[1] != '-' || m_ptr[2] != '>')) {
             handle_new_line();
             ++m_ptr;
@@ -258,53 +257,43 @@ namespace vkg_gen {
         }
     }
 
-    void XmlLexer::skip_whitespace() {
+    void Lexer::skip_whitespace() {
         while (*m_ptr && (*m_ptr == '\n' || *m_ptr == '\r' || *m_ptr == '\t' || *m_ptr == ' ')) {
             handle_new_line();
             ++m_ptr;
         }
     }
 
-    XmlDom XmlParser::parse(const std::string& path) {
-        std::ifstream file{ path, std::ios::in };
-        if (!file.is_open()) {
-            throw std::runtime_error{ "Failed to open file: '" + path + "' because: '" + std::strerror(errno) + "'" };
-        }
-
-        XmlDom dom{ std::string{ std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>() }, nullptr, nullptr, Arena{} };
-        return dom;
-    };
-
-    std::ostream& operator<<(std::ostream& os, XmlLexTokenType type) {
+    std::ostream& operator<<(std::ostream& os, LexTokenType type) {
         switch (type) {
-        case XmlLexTokenType::LessThan:
+        case LexTokenType::LessThan:
             return os << "<";
-        case XmlLexTokenType::GreaterThan:
+        case LexTokenType::GreaterThan:
             return os << ">";
-        case XmlLexTokenType::SlashGreaterThan:
+        case LexTokenType::SlashGreaterThan:
             return os << "/>";
-        case XmlLexTokenType::LessThanSlash:
+        case LexTokenType::LessThanSlash:
             return os << "</";
-        case XmlLexTokenType::Equals:
+        case LexTokenType::Equals:
             return os << "=";
-        case XmlLexTokenType::Identifier:
+        case LexTokenType::Identifier:
             return os << "Identifier";
-        case XmlLexTokenType::Text:
+        case LexTokenType::Text:
             return os << "Text";
-        case XmlLexTokenType::XmlTagStart:
+        case LexTokenType::XmlTagStart:
             return os << "<?xml";
-        case XmlLexTokenType::XmlTagEnd:
+        case LexTokenType::XmlTagEnd:
             return os << "?>";
-        case XmlLexTokenType::EndOfFile:
+        case LexTokenType::EndOfFile:
             return os << "EOF";
-        case XmlLexTokenType::String:
+        case LexTokenType::String:
             return os << "String";
         }
 
         UNREACHABLE();
     }
 
-    LexerError::LexerError(const XmlLexer& lexer, const std::string& msg, int len) :
+    LexerError::LexerError(const Lexer& lexer, const std::string& msg, int len) :
         std::runtime_error(
             [&] {
                 std::stringstream ss;
@@ -321,5 +310,5 @@ namespace vkg_gen {
                 ss << pos.line << " | " << std::string(error_loc, ' ') << std::string(len, '^') << "~~~here" << std::endl;
                 return ss.str();
             }()) {};
-}
+} // namespace vkg_gen::xml
 
