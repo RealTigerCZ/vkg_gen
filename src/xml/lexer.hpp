@@ -17,31 +17,25 @@
 
 namespace vkg_gen::xml {
 
-    enum class LexTokenType {
-        LessThan,             // <
-        GreaterThan,          // >
-        SlashGreaterThan,     // />
-        LessThanSlash,        // </
-        Equals,               // =
-        String,               // "..." or '...'
-        Identifier,           // tag names, attribute names
-        Text,                 // text content between tags
-        XmlTagStart,          // <?xml
-        XmlTagEnd,            // ?>
-        EndOfFile,
-
-    };
-
-    /**
-     * @brief Prints the XmlLexTokenType to the output stream
-     */
-    std::ostream& operator<<(std::ostream& os, LexTokenType type);
-
-
     class LexerError;
 
     class Lexer {
     public:
+        enum class TokenType {
+            LessThan,             // <
+            GreaterThan,          // >
+            SlashGreaterThan,     // />
+            LessThanSlash,        // </
+            Equals,               // =
+            String,               // "..." or '...'
+            Identifier,           // tag names, attribute names
+            Text,                 // text content between tags
+            XmlTagStart,          // <?xml
+            XmlTagEnd,            // ?>
+            EndOfFile,
+
+        };
+
         enum class Expected {
             Header,
             Text,
@@ -56,7 +50,7 @@ namespace vkg_gen::xml {
 
         friend LexerError;
 
-        static sv next_utf8_char(const char* p) {
+        static sv next_utf8_char(const char* p) noexcept {
             unsigned char c = *p;
             size_t len = 1;
             if (c >= 0xF0) len = 4;
@@ -75,9 +69,9 @@ namespace vkg_gen::xml {
         char const* m_last_line_end = m_ptr - 1; // CHECK: Points to the end of the last line, could be out of bounds
         int m_line = 1;
 
-        LexTokenType load_text();
-        LexTokenType load_identifier();
-        LexTokenType load_string();
+        TokenType load_text();
+        TokenType load_identifier();
+        TokenType load_string();
 
         void skip_whitespace();
         void handle_new_line();
@@ -85,7 +79,7 @@ namespace vkg_gen::xml {
         void escape_entity();
 
     public:
-        LexTokenType next(Expected expected);
+        TokenType next(Expected expected);
 
         Slice get_last_value() const noexcept { return m_last_value; }
 
@@ -96,6 +90,13 @@ namespace vkg_gen::xml {
 
         Lexer(const std::string& data, const char* path) : m_data(data), file_path(path) {};
     };
+
+    /**
+     * @brief Prints the Lexer::TokenType to the output stream
+     */
+    std::ostream& operator<<(std::ostream& os, Lexer::TokenType type);
+
+
 
     class LexerError : public std::runtime_error {
     public:

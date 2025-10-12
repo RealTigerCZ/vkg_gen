@@ -18,11 +18,11 @@
 
 
 namespace vkg_gen::xml {
-    LexTokenType Lexer::next(Expected expected) {
+    Lexer::TokenType Lexer::next(Expected expected) {
         m_last_value = { (int)m_buffer.size(), 0 };
 
         if (*m_ptr == 0)
-            return LexTokenType::EndOfFile;
+            return TokenType::EndOfFile;
 
         switch (expected) {
         case Expected::Header:
@@ -35,7 +35,7 @@ namespace vkg_gen::xml {
             }
 
             m_ptr += 5;
-            return LexTokenType::XmlTagStart;
+            return TokenType::XmlTagStart;
 
         case Expected::Text:
             return load_text();
@@ -47,10 +47,10 @@ namespace vkg_gen::xml {
             skip_whitespace();
             switch (*m_ptr) {
             case 0:
-                return LexTokenType::EndOfFile;
+                return TokenType::EndOfFile;
             case '=':
                 ++m_ptr;
-                return LexTokenType::Equals;
+                return TokenType::Equals;
 
             case '"': // fallthrough
             case '\'':
@@ -58,19 +58,19 @@ namespace vkg_gen::xml {
             case '?':
                 if (m_ptr[1] == '>') {
                     m_ptr += 2;
-                    return LexTokenType::XmlTagEnd;
+                    return TokenType::XmlTagEnd;
                 }
                 throw LexerError{ *this, "Expected '?>' tag.", 2 };
             case '/':
                 if (m_ptr[1] == '>') {
                     m_ptr += 2;
-                    return LexTokenType::SlashGreaterThan;
+                    return TokenType::SlashGreaterThan;
                 }
                 throw LexerError{ *this, "Expected '/>' tag.", 2 };
 
             case '>':
                 ++m_ptr;
-                return LexTokenType::GreaterThan;
+                return TokenType::GreaterThan;
 
             case '<':
                 if (std::distance(m_ptr, m_data.end().base()) < 4) // CHECK: off by one
@@ -88,10 +88,10 @@ namespace vkg_gen::xml {
     }
 
 
-    LexTokenType Lexer::load_text() {
+    Lexer::TokenType Lexer::load_text() {
         skip_whitespace();
         if (*m_ptr == 0)
-            return LexTokenType::EndOfFile;
+            return TokenType::EndOfFile;
 
 
         do {
@@ -103,15 +103,15 @@ namespace vkg_gen::xml {
                 }
                 m_last_value.size = m_buffer.size() - m_last_value.start;
                 if (m_last_value.size > 0)
-                    return LexTokenType::Text;
+                    return TokenType::Text;
 
                 if (m_ptr[1] == '/') {
                     m_ptr += 2;
-                    return LexTokenType::LessThanSlash;
+                    return TokenType::LessThanSlash;
                 }
 
                 ++m_ptr;
-                return LexTokenType::LessThan;
+                return TokenType::LessThan;
 
             case '&':
                 escape_entity();
@@ -128,10 +128,10 @@ namespace vkg_gen::xml {
             }
         } while (*(++m_ptr));
 
-        return LexTokenType::EndOfFile;
+        return TokenType::EndOfFile;
     }
 
-    LexTokenType Lexer::load_identifier() {
+    Lexer::TokenType Lexer::load_identifier() {
         // FIXME: this is not correct for UTF-8, but it works for windows-1252
         // From XML spec: NameStartChar ::= ":" | [A-Z] | "_" | [a-z] | [#xC0-#xD6] | [#xD8-#xF6] | [#xF8-#xFF]
         const auto isNameStartChar = [](char c) {
@@ -145,7 +145,7 @@ namespace vkg_gen::xml {
             };
 
         if (*m_ptr == 0)
-            return LexTokenType::EndOfFile;
+            return TokenType::EndOfFile;
 
         auto start = m_ptr;
 
@@ -167,11 +167,11 @@ namespace vkg_gen::xml {
             throw LexerError{ *this, "Expected identifier. But found '" + std::string(m_ptr, 1) + "'" };
 
         m_last_value.size = m_buffer.size() - m_last_value.start;
-        return LexTokenType::Identifier;
+        return TokenType::Identifier;
     }
 
 
-    LexTokenType Lexer::load_string() {
+    Lexer::TokenType Lexer::load_string() {
         assert(*m_ptr == '"' || *m_ptr == '\'');
 
         auto start = m_ptr++; // quote or apostrophe
@@ -191,8 +191,9 @@ namespace vkg_gen::xml {
         } while (*(++m_ptr));
         ++m_ptr;
         m_last_value.size = m_buffer.size() - m_last_value.start;
-        return LexTokenType::String;
+        return TokenType::String;
     }
+
     void Lexer::escape_entity() {
         static const std::unordered_map<std::string_view, char> entities{
             { "lt", '<' },
@@ -264,30 +265,21 @@ namespace vkg_gen::xml {
         }
     }
 
-    std::ostream& operator<<(std::ostream& os, LexTokenType type) {
+    std::ostream& operator<<(std::ostream& os, Lexer::TokenType type) {
+        using Type = Lexer::TokenType;
+
         switch (type) {
-        case LexTokenType::LessThan:
-            return os << "<";
-        case LexTokenType::GreaterThan:
-            return os << ">";
-        case LexTokenType::SlashGreaterThan:
-            return os << "/>";
-        case LexTokenType::LessThanSlash:
-            return os << "</";
-        case LexTokenType::Equals:
-            return os << "=";
-        case LexTokenType::Identifier:
-            return os << "Identifier";
-        case LexTokenType::Text:
-            return os << "Text";
-        case LexTokenType::XmlTagStart:
-            return os << "<?xml";
-        case LexTokenType::XmlTagEnd:
-            return os << "?>";
-        case LexTokenType::EndOfFile:
-            return os << "EOF";
-        case LexTokenType::String:
-            return os << "String";
+        case Type::LessThan:         return os << "<";
+        case Type::GreaterThan:      return os << ">";
+        case Type::SlashGreaterThan: return os << "/>";
+        case Type::LessThanSlash:    return os << "</";
+        case Type::Equals:           return os << "=";
+        case Type::Identifier:       return os << "Identifier";
+        case Type::Text:             return os << "Text";
+        case Type::XmlTagStart:      return os << "<?xml";
+        case Type::XmlTagEnd:        return os << "?>";
+        case Type::EndOfFile:        return os << "EOF";
+        case Type::String:           return os << "String";
         }
 
         UNREACHABLE();

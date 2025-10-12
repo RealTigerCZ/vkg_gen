@@ -16,6 +16,7 @@ static const char* FILE_PATH = "vk.xml";
 
 int main() {
     namespace xml = vkg_gen::xml;
+    using TokenType = xml::Lexer::TokenType;
 
     xml::Parser parser;
     xml::Dom dom = parser.parse(FILE_PATH);
@@ -25,7 +26,7 @@ int main() {
     Expected next = Expected::Header;
 
     while (true) {
-        xml::LexTokenType token;
+        TokenType token;
         try {
             token = lexer.next(next);
         }
@@ -37,15 +38,15 @@ int main() {
         auto pos = lexer.get_pos();
         std::cout << "Pos: " << FILE_PATH << ":" << pos.line << ":" << pos.col << "\n";
         std::cout << "Token: " << token << std::endl;
-        if (token == xml::LexTokenType::Identifier || token == xml::LexTokenType::Text || token == xml::LexTokenType::String) {
+        if (token == TokenType::Identifier || token == TokenType::Text || token == TokenType::String) {
             std::cout << "Value: '" << lexer.get_value() << "'" << std::endl;
         }
 
-        if (token == xml::LexTokenType::EndOfFile)
+        if (token == TokenType::EndOfFile)
             break;
-        if (token == xml::LexTokenType::LessThan || token == xml::LexTokenType::LessThanSlash) {
+        if (token == TokenType::LessThan || token == TokenType::LessThanSlash) {
             next = Expected::Tag;
-        } else if (token == xml::LexTokenType::GreaterThan || token == xml::LexTokenType::SlashGreaterThan || token == xml::LexTokenType::XmlTagEnd) {
+        } else if (token == TokenType::GreaterThan || token == TokenType::SlashGreaterThan || token == TokenType::XmlTagEnd) {
             next = Expected::Text;
         } else if (next == Expected::Tag || next == Expected::Header) {
             next = Expected::Attribute;
