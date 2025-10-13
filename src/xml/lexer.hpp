@@ -5,7 +5,7 @@
  *        It's used by the parser.
  *
  * @date Created: 30. 07. 2025
- * @date Modified: 12. 10. 2025
+ * @date Modified: 13. 10. 2025
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -14,9 +14,9 @@
 
 #include "xml.hpp"
 
+#include <iostream>
 
 namespace vkg_gen::xml {
-
     class LexerError;
 
     class Lexer {
@@ -32,9 +32,9 @@ namespace vkg_gen::xml {
             Text,                 // text content between tags
             XmlTagStart,          // <?xml
             XmlTagEnd,            // ?>
-            EndOfFile,
-
+            EndOfFile
         };
+
 
         enum class Expected {
             Header,
@@ -47,8 +47,6 @@ namespace vkg_gen::xml {
             int start;
             int size;
         };
-
-        friend LexerError;
 
         static sv next_utf8_char(const char* p) noexcept {
             unsigned char c = *p;
@@ -78,17 +76,22 @@ namespace vkg_gen::xml {
         void remove_comment();
         void escape_entity();
 
+        TokenType _next(Expected expected);
     public:
         TokenType next(Expected expected);
 
         Slice get_last_value() const noexcept { return m_last_value; }
 
         // TODO: returned SV could be invalidated by lexer::next call
-        sv get_value() const noexcept { return { m_buffer.data() + m_last_value.start, m_last_value.size }; }
-        Position get_pos() const noexcept { return { m_line, m_ptr - m_last_line_end }; }
+        sv get_value() const noexcept { return { m_buffer.data() + m_last_value.start, static_cast<size_t>(m_last_value.size) }; }
+        Position get_pos() const noexcept { return { m_line, static_cast<int>(m_ptr - m_last_line_end) }; }
 
+        ErrorLoc get_err_loc() const noexcept {
+            return { m_data, get_pos(), file_path, static_cast<int>(m_ptr - m_data.begin().base()),
+                static_cast<int>(m_last_line_end + 1 - m_data.begin().base()) };
+        }
 
-        Lexer(const std::string& data, const char* path) : m_data(data), file_path(path) {};
+        Lexer(const std::string& data, const char* path) : file_path(path), m_data(data) { m_buffer.reserve(1024 * 1024 * 4) /* FIXME: proper data handling ?*/; };
     };
 
     /**
@@ -98,9 +101,12 @@ namespace vkg_gen::xml {
 
 
 
-    class LexerError : public std::runtime_error {
+    class LexerError : public Error {
     public:
         LexerError(const Lexer& lexer, const std::string& msg, int len = 1);
     };
 
+
+    constexpr sv token_to_string(Lexer::TokenType type) noexcept;
 } // namespace vkg_gen::xml
+

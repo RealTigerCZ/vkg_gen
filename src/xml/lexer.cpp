@@ -4,7 +4,7 @@
  * @brief Implementation of Lexer (tokenizer)
  *
  * @date Created: 31. 07. 2025
- * @date Modified: 12. 10. 2025
+ * @date Modified: 13. 10. 2025
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -19,6 +19,12 @@
 
 namespace vkg_gen::xml {
     Lexer::TokenType Lexer::next(Expected expected) {
+        auto token = _next(expected); // FIXME: refactor
+        m_last_value.size = m_last_value.size ? m_last_value.size : token_to_string(token).size();
+        return token;
+    }
+
+    Lexer::TokenType Lexer::_next(Expected expected) {
         m_last_value = { (int)m_buffer.size(), 0 };
 
         if (*m_ptr == 0)
@@ -28,10 +34,10 @@ namespace vkg_gen::xml {
         case Expected::Header:
             // CHECK: skip whitespace?
             if (std::distance(m_ptr, m_data.end().base()) < 5)
-                throw LexerError{ *this, "Unexpected end of data",  std::distance(m_ptr, m_data.end().base()) };
+                throw LexerError{ *this, "Unexpected end of data",  (int)std::distance(m_ptr, m_data.end().base()) };
 
             if (std::string_view{ m_ptr, 5 } != "<?xml") {
-                throw LexerError{ *this,  "Expected '<?xml' tag.", 5 };
+                throw LexerError{ *this,  "Missing '<?xml' tag.", 5 };
             }
 
             m_ptr += 5;
@@ -44,6 +50,7 @@ namespace vkg_gen::xml {
             return load_identifier();
 
         case Expected::Attribute:
+            // TODO: Move into load_attribute
             skip_whitespace();
             switch (*m_ptr) {
             case 0:
@@ -74,7 +81,7 @@ namespace vkg_gen::xml {
 
             case '<':
                 if (std::distance(m_ptr, m_data.end().base()) < 4) // CHECK: off by one
-                    throw LexerError{ *this, "Unexpected end of data",  std::distance(m_ptr, m_data.end().base()) };
+                    throw LexerError{ *this, "Unexpected end of data",  (int)std::distance(m_ptr, m_data.end().base()) };
                 if (m_ptr[1] != '!' || m_ptr[2] != '-' || m_ptr[3] != '-')
                     throw LexerError{ *this, "Expected atribute or '<!--' tag.", 4 };
                 remove_comment();
@@ -85,6 +92,8 @@ namespace vkg_gen::xml {
             }
 
         }
+
+        UNREACHABLE();
     }
 
 
@@ -210,7 +219,7 @@ namespace vkg_gen::xml {
             throw LexerError{ *this, "TODO: incomplete entity" };
 
 
-        std::string_view entity{ m_ptr, end - m_ptr }; // Remove ';'
+        std::string_view entity{ m_ptr, static_cast<size_t>(end - m_ptr) }; // Remove ';'
 
         if (entity[0] == '#') {
             if (entity[1] == 'x') {
@@ -227,7 +236,7 @@ namespace vkg_gen::xml {
 
         auto it = entities.find(entity);
         if (it == entities.end()) {
-            throw LexerError{ *this, "Unknown entity '" + std::string{ entity } + "'", entity.length() };
+            throw LexerError{ *this, "Unknown entity '" + std::string{ entity } + "'", (int)entity.length() };
         }
 
         m_buffer.push_back(it->second);
@@ -265,42 +274,30 @@ namespace vkg_gen::xml {
         }
     }
 
-    std::ostream& operator<<(std::ostream& os, Lexer::TokenType type) {
+    constexpr sv token_to_string(Lexer::TokenType type) noexcept {
         using Type = Lexer::TokenType;
-
         switch (type) {
-        case Type::LessThan:         return os << "<";
-        case Type::GreaterThan:      return os << ">";
-        case Type::SlashGreaterThan: return os << "/>";
-        case Type::LessThanSlash:    return os << "</";
-        case Type::Equals:           return os << "=";
-        case Type::Identifier:       return os << "Identifier";
-        case Type::Text:             return os << "Text";
-        case Type::XmlTagStart:      return os << "<?xml";
-        case Type::XmlTagEnd:        return os << "?>";
-        case Type::EndOfFile:        return os << "EOF";
-        case Type::String:           return os << "String";
+        case Type::LessThan:         return "<";
+        case Type::GreaterThan:      return ">";
+        case Type::SlashGreaterThan: return "/>";
+        case Type::LessThanSlash:    return "</";
+        case Type::Equals:           return "=";
+        case Type::Identifier:       return "ID";
+        case Type::Text:             return "TEXT";
+        case Type::XmlTagStart:      return "<?xml";
+        case Type::XmlTagEnd:        return "?>";
+        case Type::EndOfFile:        return "EOF";
+        case Type::String:           return "STR";
         }
 
         UNREACHABLE();
     }
 
+    std::ostream& operator<<(std::ostream& os, Lexer::TokenType type) {
+        return os << token_to_string(type);
+    }
+
+
     LexerError::LexerError(const Lexer& lexer, const std::string& msg, int len) :
-        std::runtime_error(
-            [&] {
-                std::stringstream ss;
-                auto pos = lexer.get_pos();
-                ss << "Error occured when lexing at " << lexer.file_path << ':' << pos.line << ':' << pos.col << '\n' <<
-                    msg << '\n';
-                sv line(lexer.m_last_line_end + 1, lexer.m_data.end().base() - lexer.m_last_line_end);
-                size_t new_size = line.find_first_of('\n');
-                if (new_size != sv::npos)
-                    line = line.substr(0, new_size);
-
-                int error_loc = std::distance(lexer.m_last_line_end + 1, lexer.m_ptr);
-                ss << pos.line << " | " << line << '\n';
-                ss << pos.line << " | " << std::string(error_loc, ' ') << std::string(len, '^') << "~~~here" << std::endl;
-                return ss.str();
-            }()) {};
+        Error(lexer.get_err_loc(), msg, "lexing", len, false) {}
 } // namespace vkg_gen::xml
-

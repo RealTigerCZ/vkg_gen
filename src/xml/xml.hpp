@@ -4,7 +4,7 @@
  * @brief Definitions of xml data structures
  *
  * @date Created: 12. 10. 2025
- * @date Modified: 12. 10. 2025
+ * @date Modified: 13. 10. 2025
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -71,4 +71,22 @@ namespace vkg_gen::xml {
         int line;
         int col;
     };
+
+    struct ErrorLoc {
+        const std::string& data;
+        const Position pos;
+        const char* file_path;
+        const int err_start;
+        const int line_start;
+    };
+
+    class Error : public std::runtime_error {
+    public:
+        Error(const std::string& data, const Position& pos, const char* action, const char* file_path,
+            const std::string& msg, const int err_start, const int err_len, const int line_start, bool forward);
+
+        Error(const ErrorLoc& e, const std::string& msg, const char* action, const int len, bool forward) :
+            Error(e.data, e.pos, action, e.file_path, msg, e.err_start, len, e.line_start, forward) {};
+    };
+
 }

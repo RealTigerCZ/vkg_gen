@@ -9,6 +9,7 @@ project(${APP_NAME})
 
 set(APP_SOURCES
    src/arena.cpp
+   src/xml/xml.cpp
    src/xml/lexer.cpp
    src/xml/parser.cpp
    src/main.cpp
