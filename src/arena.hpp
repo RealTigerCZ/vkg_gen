@@ -5,7 +5,7 @@
  *        and whole xml can be freed at once. This approach is not ideal if you need to change xml at runtime (its not possible to deallocate memory).
  *
  * @date Created: 12. 10. 2025
- * @date Modified: 12. 10. 2025
+ * @date Modified: 1. 11. 2025
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -37,6 +37,11 @@ namespace vkg_gen {
         }
 
         void reset() noexcept;
+
+        using sv = std::string_view;
+        sv storeString(const char* str) { return storeString(sv(str)); }
+        sv storeString(const std::string& str) { return storeString(sv(str)); }
+        sv storeString(const sv& str);
 
     private:
         void allocateBlock(size_t size);

@@ -3,7 +3,7 @@
  * @author Jaroslav Hucel (xhucel00@vutbr.cz)
  * @brief TODO:
  * @date Created: 30. 07. 2025
- * @date Modified: 12. 10. 2025
+ * @date Modified: 1. 11. 2025
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -112,6 +112,19 @@ void debug_print(const vkg_gen::xml::Dom& dom) {
     debug_print_node_short(*dom.root);
 }
 
+void free_node(vkg_gen::xml::Node* node) {
+    if (node->isElement()) {
+        auto& elem = node->asElement();
+        for (auto& child : elem.children) {
+            free_node(child);
+        }
+        node->asElement().~Element();
+    }
+}
+
+void free_dom(vkg_gen::xml::Dom& dom) {
+    free_node(dom.root);
+}
 
 int main() {
     namespace xml = vkg_gen::xml;
@@ -119,7 +132,7 @@ int main() {
     xml::Parser parser;
     try {
         auto dom = parser.parse(FILE_PATH);
-        debug_print(dom);
+        free_dom(dom);
     }
     catch (const xml::Error& e) {
         std::cerr << e.what() << std::endl;

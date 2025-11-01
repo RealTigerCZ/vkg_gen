@@ -4,7 +4,7 @@
  * @brief Implementation of Lexer (tokenizer)
  *
  * @date Created: 31. 07. 2025
- * @date Modified: 13. 10. 2025
+ * @date Modified: 1. 11. 2025
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -16,6 +16,7 @@
 #include <sstream>
 #include <iostream>
 
+#include "../arena.hpp"
 
 namespace vkg_gen::xml {
     Lexer::TokenType Lexer::next(Expected expected) {
@@ -25,7 +26,8 @@ namespace vkg_gen::xml {
     }
 
     Lexer::TokenType Lexer::_next(Expected expected) {
-        m_last_value = { (int)m_buffer.size(), 0 };
+        m_buffer.clear();
+        m_last_value = { 0, 0 };
 
         if (*m_ptr == 0)
             return TokenType::EndOfFile;
@@ -301,3 +303,12 @@ namespace vkg_gen::xml {
     LexerError::LexerError(const Lexer& lexer, const std::string& msg, int len) :
         Error(lexer.get_err_loc(), msg, "lexing", len, false) {}
 } // namespace vkg_gen::xml
+
+
+namespace vkg_gen {
+    using sv = std::string_view;
+    sv xml::Lexer::get_and_save_value(Arena& arena) {
+        return arena.storeString(get_value());
+    }
+
+}

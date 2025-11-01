@@ -4,12 +4,13 @@
  * @brief Implementation of Arena allocator
  *
  * @date Created: 12. 10. 2025
- * @date Modified: 12. 10. 2025
+ * @date Modified: 1. 11. 2025
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
 
 #include "arena.hpp"
+#include <cstring>
 
 using namespace vkg_gen;
 
@@ -44,4 +45,11 @@ void Arena::allocateBlock(size_t size) {
     current = block.get();
     remaining = size;
     blocks.push_back(std::move(block));
+}
+
+
+std::string_view Arena::storeString(const sv& str) {
+    void* mem = allocate(str.size(), alignof(std::max_align_t));
+    std::memcpy(mem, str.data(), str.size());
+    return { reinterpret_cast<char*>(mem), str.size() };
 }

@@ -3,7 +3,7 @@
  * @author Jaroslav Hucel (xhucel00@vutbr.cz)
  * @brief TODO:
  * @date Created: 12. 10. 2025
- * @date Modified: 13. 10. 2025
+ * @date Modified: 1. 11. 2025
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -65,10 +65,10 @@ namespace vkg_gen::xml {
 
         dom.root = dom.arena.make<Node>();
         auto& root = dom.root->asElement();
-        root.tag = lexer.get_value(); // FIXME: replace with interned string
+        root.tag = lexer.get_and_save_value(dom.arena); // FIXME: replace with interned string
 
         std::stack<Node*> stack({ dom.root });
-        if (load_attr(lexer, root.attrs)) {
+        if (load_attr(lexer, root.attrs, dom)) {
             stack.pop();
         }
 
@@ -97,10 +97,10 @@ namespace vkg_gen::xml {
                         throw ParserError{ lexer, EXPECT_FMT("tag name (ID)", token), };
 
                     Node* element = dom.arena.make<Node>();
-                    element->asElement().tag = lexer.get_value();
+                    element->asElement().tag = lexer.get_and_save_value(dom.arena);
                     stack.top()->asElement().children.push_back(element);
                     element->parent = stack.top();
-                    if (!load_attr(lexer, element->asElement().attrs))
+                    if (!load_attr(lexer, element->asElement().attrs, dom))
                         stack.push(element);
 
                     next = Expected::Text;
@@ -179,7 +179,7 @@ namespace vkg_gen::xml {
             if (token != TokenType::Identifier)
                 throw ParserError{ lexer, EXPECT_FMT("attribute name (ID) or '?>'", token) };
 
-            sv attr_name = lexer.get_value();
+            sv attr_name = lexer.get_and_save_value(dom.arena);
             if (attr_name != "version" && attr_name != "encoding" && attr_name != "standalone")
                 throw ParserError{ lexer, EXPECT_FMT("'version', 'encoding' or 'standalone' attribute name in header", attr_name) };
 
@@ -194,24 +194,24 @@ namespace vkg_gen::xml {
             if (attr_name == "version") {
                 if (has_version)
                     throw ParserError{ lexer, "Duplicate 'version' attribute." };
-                dom.header->version = lexer.get_value();
+                dom.header->version = lexer.get_and_save_value(dom.arena);
                 has_version = true;
             } else if (attr_name == "encoding") {
                 if (has_encoding)
                     throw ParserError{ lexer, "Duplicate 'encoding' attribute." };
-                dom.header->encoding = lexer.get_value();
+                dom.header->encoding = lexer.get_and_save_value(dom.arena);
                 has_encoding = true;
             } else {
                 if (has_standalone)
                     throw ParserError{ lexer, "Duplicate 'standalone' attribute." };
-                dom.header->standalone = lexer.get_value();
+                dom.header->standalone = lexer.get_and_save_value(dom.arena);
                 has_standalone = true;
             }
         }
 
     };
 
-    bool Parser::load_attr(Lexer& lexer, vec<Attribute>& attrs) {
+    bool Parser::load_attr(Lexer& lexer, vec<Attribute>& attrs, Dom& dom) {
         using Expected = Lexer::Expected;
         using TokenType = Lexer::TokenType;
 
@@ -230,7 +230,7 @@ namespace vkg_gen::xml {
             if (token != TokenType::Identifier)
                 throw ParserError{ lexer, EXPECT_FMT("attribute name or end of the tag ('>' or '/>')", token) };
 
-            name = lexer.get_value();
+            name = lexer.get_and_save_value(dom.arena);
 
             auto dupl = std::find_if(attrs.begin(), attrs.end(), [&name](const Attribute& a) { return a.name == name; });
             if (dupl != attrs.end())
@@ -244,7 +244,7 @@ namespace vkg_gen::xml {
             if (token != TokenType::String)
                 throw ParserError{ lexer, EXPECT_FMT("attribute value (STR)", token) };
 
-            value = lexer.get_value();
+            value = lexer.get_and_save_value(dom.arena);
             value_is_interned = false; // TODO: replace with interned string
 
             attrs.emplace_back(Attribute{ name, value, value_is_interned });
