@@ -4,7 +4,7 @@
  * @brief Definitions of xml data structures
  *
  * @date Created: 12. 10. 2025
- * @date Modified: 13. 10. 2025
+ * @date Modified: 1. 11. 2025
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -61,10 +61,21 @@ namespace vkg_gen::xml {
     };
 
     struct Dom {
-        std::string data; // Holds the copy of the file data // TODO: replace with string view?
+        std::string data; // Holds the copy of the file data // TODO: do we need to replace it with string view?
         Node* root;
         Header* header;
         Arena arena; // All nodes are allocated in the arena
+
+        Dom(std::string&& data) : data(std::move(data)) {};
+        ~Dom();
+
+        // No copying
+        Dom(const Dom&) = delete;
+        Dom& operator=(const Dom&) = delete;
+
+        // Allow moves
+        Dom(Dom&&) noexcept = default;
+        Dom& operator=(Dom&&) noexcept = default;
     };
 
     struct Position {

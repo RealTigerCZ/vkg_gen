@@ -21,13 +21,18 @@
 namespace vkg_gen::xml {
     Lexer::TokenType Lexer::next(Expected expected) {
         auto token = _next(expected); // FIXME: refactor
-        m_last_value.size = m_last_value.size ? m_last_value.size : token_to_string(token).size();
+        if (m_buffer.size() == 0)
+            m_last_value = { m_token_start, static_cast<size_t>(m_ptr - m_token_start) }; // TODO: what about wchar?
+        else {
+            m_last_value = { m_buffer.data(), m_buffer.size() };
+        }
+
         return token;
     }
 
     Lexer::TokenType Lexer::_next(Expected expected) {
         m_buffer.clear();
-        m_last_value = { 0, 0 };
+        m_token_start = m_ptr;
 
         if (*m_ptr == 0)
             return TokenType::EndOfFile;
@@ -112,8 +117,7 @@ namespace vkg_gen::xml {
                     remove_comment();
                     break;
                 }
-                m_last_value.size = m_buffer.size() - m_last_value.start;
-                if (m_last_value.size > 0)
+                if (m_buffer.size() > 0)
                     return TokenType::Text;
 
                 if (m_ptr[1] == '/') {
@@ -171,13 +175,12 @@ namespace vkg_gen::xml {
                 if (!isNameChar(*m_ptr))
                     break;
             }
-            m_buffer.push_back(*m_ptr);
+
         } while (*(++m_ptr));
 
         if (m_ptr == start)
             throw LexerError{ *this, "Expected identifier. But found '" + std::string(m_ptr, 1) + "'" };
 
-        m_last_value.size = m_buffer.size() - m_last_value.start;
         return TokenType::Identifier;
     }
 
@@ -201,7 +204,6 @@ namespace vkg_gen::xml {
             m_buffer.push_back(*m_ptr);
         } while (*(++m_ptr));
         ++m_ptr;
-        m_last_value.size = m_buffer.size() - m_last_value.start;
         return TokenType::String;
     }
 
@@ -267,6 +269,7 @@ namespace vkg_gen::xml {
         if (m_ptr >= m_data.data() + m_data.length()) {
             throw LexerError{ *this, "Unterminated comment" };
         }
+        m_token_start = m_ptr;
     }
 
     void Lexer::skip_whitespace() {
@@ -274,9 +277,10 @@ namespace vkg_gen::xml {
             handle_new_line();
             ++m_ptr;
         }
+        m_token_start = m_ptr;
     }
 
-    constexpr sv token_to_string(Lexer::TokenType type) noexcept {
+    sv token_to_string(Lexer::TokenType type) noexcept {
         using Type = Lexer::TokenType;
         switch (type) {
         case Type::LessThan:         return "<";

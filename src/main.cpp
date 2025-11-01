@@ -112,19 +112,6 @@ void debug_print(const vkg_gen::xml::Dom& dom) {
     debug_print_node_short(*dom.root);
 }
 
-void free_node(vkg_gen::xml::Node* node) {
-    if (node->isElement()) {
-        auto& elem = node->asElement();
-        for (auto& child : elem.children) {
-            free_node(child);
-        }
-        node->asElement().~Element();
-    }
-}
-
-void free_dom(vkg_gen::xml::Dom& dom) {
-    free_node(dom.root);
-}
 
 int main() {
     namespace xml = vkg_gen::xml;
@@ -132,47 +119,12 @@ int main() {
     xml::Parser parser;
     try {
         auto dom = parser.parse(FILE_PATH);
-        free_dom(dom);
+        debug_print(dom);
     }
     catch (const xml::Error& e) {
         std::cerr << e.what() << std::endl;
         return 1;
     }
 
-
-#if 0
-    xml::Lexer lexer(dom.data, FILE_PATH);
-
-    using Expected = xml::Lexer::Expected;
-    Expected next = Expected::Header;
-
-    while (true) {
-        TokenType token;
-        try {
-            token = lexer.next(next);
-        }
-        catch (const xml::LexerError& e) {
-            std::cerr << e.what() << std::endl;
-            return 1;
-        };
-
-        auto pos = lexer.get_pos();
-        std::cout << "Pos: " << FILE_PATH << ":" << pos.line << ":" << pos.col << "\n";
-        std::cout << "Token: " << token << std::endl;
-        if (token == TokenType::Identifier || token == TokenType::Text || token == TokenType::String) {
-            std::cout << "Value: '" << lexer.get_value() << "'" << std::endl;
-        }
-
-        if (token == TokenType::EndOfFile)
-            break;
-        if (token == TokenType::LessThan || token == TokenType::LessThanSlash) {
-            next = Expected::Tag;
-        } else if (token == TokenType::GreaterThan || token == TokenType::SlashGreaterThan || token == TokenType::XmlTagEnd) {
-            next = Expected::Text;
-        } else if (next == Expected::Tag || next == Expected::Header) {
-            next = Expected::Attribute;
-        }
-    }
-#endif
     return 0;
 }

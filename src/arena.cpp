@@ -49,7 +49,9 @@ void Arena::allocateBlock(size_t size) {
 
 
 std::string_view Arena::storeString(const sv& str) {
-    void* mem = allocate(str.size(), alignof(std::max_align_t));
-    std::memcpy(mem, str.data(), str.size());
-    return { reinterpret_cast<char*>(mem), str.size() };
+    void* mem = allocate(str.size(), alignof(char)); // TODO: wchar?
+    char* dst = reinterpret_cast<char*>(mem);
+    std::memcpy(dst, str.data(), str.size());
+    dst[str.size()] = '\0';
+    return { dst, str.size() };
 }

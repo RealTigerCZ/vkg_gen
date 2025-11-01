@@ -47,11 +47,6 @@ namespace vkg_gen::xml {
             Attribute
         };
 
-        struct Slice {
-            int start;
-            int size;
-        };
-
         static sv next_utf8_char(const char* p) noexcept {
             unsigned char c = *p;
             size_t len = 1;
@@ -63,11 +58,12 @@ namespace vkg_gen::xml {
 
     private:
         std::vector<char> m_buffer;
-        Slice m_last_value;
+        sv m_last_value;
 
         const char* file_path;
         const std::string& m_data;
         char const* m_ptr = m_data.data();
+        char const* m_token_start = m_ptr;
         char const* m_last_line_end = m_ptr - 1; // CHECK: Points to the end of the last line, could be out of bounds
         int m_line = 1;
 
@@ -84,11 +80,16 @@ namespace vkg_gen::xml {
     public:
         TokenType next(Expected expected);
 
-        Slice get_last_value() const noexcept { return m_last_value; }
-
-        // TODO: returned SV could be invalidated by lexer::next call
-        sv get_value() const noexcept { return { m_buffer.data() + m_last_value.start, static_cast<size_t>(m_last_value.size) }; }
+        /**
+         * @brief Get the string value of the last token.
+         *
+         * @note This value will be **unvalidated** after calling lexer::next() or deleting the lexer.
+         */
+        sv get_value() const noexcept { return m_last_value; }
         Position get_pos() const noexcept { return { m_line, static_cast<int>(m_ptr - m_last_line_end) }; }
+
+        int get_token_start() const noexcept { return static_cast<int>(m_token_start - m_data.begin().base()); }
+        int get_token_end() const noexcept { return static_cast<int>(m_ptr - m_data.begin().base()); }
 
         sv get_and_save_value(Arena& arena);
 
@@ -113,6 +114,6 @@ namespace vkg_gen::xml {
     };
 
 
-    constexpr sv token_to_string(Lexer::TokenType type) noexcept;
+    sv token_to_string(Lexer::TokenType type) noexcept;
 } // namespace vkg_gen::xml
 

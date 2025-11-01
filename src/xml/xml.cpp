@@ -4,7 +4,7 @@
  * @brief Helper implementation of xml data structures
  *
  * @date Created: 13. 10. 2025
- * @date Modified: 13. 10. 2025
+ * @date Modified: 1. 11. 2025
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -12,6 +12,19 @@
 #include <sstream>
 
 namespace vkg_gen::xml {
+    static void free_node(Node* node) {
+        if (node->isElement()) {
+            auto& elem = node->asElement();
+            for (Node* child : elem.children) {
+                free_node(child);
+            }
+            elem.~Element();
+        }
+    }
+
+    Dom::~Dom() {
+        free_node(root);
+    }
 
     Error::Error(const std::string& data, const Position& pos, const char* action, const char* file_path, const std::string& msg,
         const int err_start, const int err_len, const int line_start, bool backwards) : std::runtime_error([&] {

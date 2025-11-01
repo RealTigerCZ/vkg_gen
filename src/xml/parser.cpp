@@ -33,9 +33,9 @@ namespace vkg_gen::xml {
             throw std::runtime_error{ "Failed to open file: '" + path + "' because: '" + std::strerror(errno) + "'" };
         }
 
-        Dom dom{ std::string{ std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>() }, nullptr, nullptr, Arena{} };
+        Dom dom(std::string{ std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>() });
 
-        static Lexer lexer{ dom.data, path.c_str() }; //FIXME: DATA HANDLING
+        Lexer lexer{ dom.data, path.c_str() };
 
         parse(dom, lexer);
 
@@ -179,6 +179,7 @@ namespace vkg_gen::xml {
             if (token != TokenType::Identifier)
                 throw ParserError{ lexer, EXPECT_FMT("attribute name (ID) or '?>'", token) };
 
+            int start = lexer.get_token_start();
             sv attr_name = lexer.get_and_save_value(dom.arena);
             if (attr_name != "version" && attr_name != "encoding" && attr_name != "standalone")
                 throw ParserError{ lexer, EXPECT_FMT("'version', 'encoding' or 'standalone' attribute name in header", attr_name) };
@@ -191,19 +192,20 @@ namespace vkg_gen::xml {
             if (token != TokenType::String)
                 throw ParserError{ lexer, EXPECT_FMT("attribute value (STR)", token) };
 
+            int end = lexer.get_token_end();
             if (attr_name == "version") {
                 if (has_version)
-                    throw ParserError{ lexer, "Duplicate 'version' attribute." };
+                    throw ParserError{ lexer, "Duplicate 'version' attribute.", end - start };
                 dom.header->version = lexer.get_and_save_value(dom.arena);
                 has_version = true;
             } else if (attr_name == "encoding") {
                 if (has_encoding)
-                    throw ParserError{ lexer, "Duplicate 'encoding' attribute." };
+                    throw ParserError{ lexer, "Duplicate 'encoding' attribute.",  end - start };
                 dom.header->encoding = lexer.get_and_save_value(dom.arena);
                 has_encoding = true;
             } else {
                 if (has_standalone)
-                    throw ParserError{ lexer, "Duplicate 'standalone' attribute." };
+                    throw ParserError{ lexer, "Duplicate 'standalone' attribute.", end - start };
                 dom.header->standalone = lexer.get_and_save_value(dom.arena);
                 has_standalone = true;
             }
@@ -252,6 +254,6 @@ namespace vkg_gen::xml {
     }
 
     ParserError::ParserError(const Lexer& lexer, const std::string& msg, int len) :
-        Error(lexer.get_err_loc(), msg, "parsing", len == USE_TOKEN_LEN ? lexer.get_last_value().size : len, true) {};
+        Error(lexer.get_err_loc(), msg, "parsing", len == USE_TOKEN_LEN ? lexer.get_value().size() : len, true) {};
 
 } // namespace vkg_gen::xml
