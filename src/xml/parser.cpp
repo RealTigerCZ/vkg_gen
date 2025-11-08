@@ -124,7 +124,7 @@ namespace vkg_gen::xml {
                 break;
 
             case TokenType::Text: {
-                    Node* text = dom.arena.make<Node>(Node::Text{ lexer.get_value() }); // FIXME: replace with interned string
+                    Node* text = dom.arena.make<Node>(Node::Text{ lexer.get_and_save_value(dom.arena) }); // FIXME: replace with interned string
                     stack.top()->asElement().children.push_back(text);
                     break;
                 }
