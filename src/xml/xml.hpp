@@ -15,6 +15,7 @@
 
 #include "../arena.hpp"
 #include <variant>
+#include <ranges>
 
 namespace vkg_gen::xml {
     using sv = std::string_view;
@@ -41,6 +42,13 @@ namespace vkg_gen::xml {
         sv tag; // TODO: replace with interned string
         vec<Attribute> attrs;
         vec<Node*> children;
+
+        sv get_attr_value(sv name) const {
+            auto it = std::ranges::find(attrs, name, &Attribute::name);
+            if (it == attrs.end())
+                return {};
+            return it->value;
+        }
     };
 
     struct Node {
@@ -60,7 +68,14 @@ namespace vkg_gen::xml {
         const Text& asText() const noexcept { return std::get<Text>(data); }
     };
 
-    struct Dom {
+    class Dom {
+    public:
+        struct Filter {
+            sv tag;
+            sv attr_name;
+            std::optional<sv> attr_value;
+        };
+
         std::string data; // Holds the copy of the file data // TODO: do we need to replace it with string view?
         Node* root;
         Header* header;
@@ -68,6 +83,36 @@ namespace vkg_gen::xml {
 
         Dom(std::string&& data) : data(std::move(data)) {};
         ~Dom();
+
+        vec<Node*> getChildren(Node* node = nullptr, bool recursive = false) const noexcept;
+        vec<Node*> getChildrenByTag(sv tag, Node* node = nullptr, bool recursive = false) const noexcept;
+        vec<Node*> getChidlrenByAttrName(sv name, Node* node = nullptr, bool recursive = false) const noexcept;
+        vec<Node*> getChidlrenByAttrValue(std::optional<sv> value, Node* node = nullptr, bool recursive = false) const noexcept;
+
+        vec<Node*> getChildrenByFilter(const Filter& filter, Node* node = nullptr, bool recursive = false) const noexcept;
+        vec<Node*> getChildrenByChildrenFilter(const Filter& filter, Node* node = nullptr) const noexcept;
+
+        auto children(Node* node) const noexcept {
+            //if (!node->isElement()) return {};
+            auto& ch = node->asElement().children;
+            return std::views::all(ch)
+                | std::views::filter([](Node* n) { return n->isElement(); });
+        }
+
+        //        auto filterByTag(sv tag, Node* node = nullptr, bool recursive = false) const noexcept;
+        auto filterByTag(sv tag, Node* node, bool recursive = false) const noexcept {
+            if (node == nullptr) node = root;
+
+            return children(node)
+                | std::views::filter([&tag](Node* n) { return n->asElement().tag == tag; });
+
+        };
+        auto filterByAttr(sv name, sv value, Node* node = nullptr, bool recursive = false) const noexcept;
+        auto filterByFilter(const Filter& filter, Node* node = nullptr, bool recursive = false) const noexcept;
+        auto filterByTag(auto nodes, sv tag) const noexcept;
+        auto filterByAttr(auto nodes, sv name, sv value) const noexcept;
+        auto filterByFilter(auto nodes, const Filter& filter) const noexcept;
+        auto filterByChildrenFilter(auto nodes, const Filter& filter) const noexcept;
 
         // No copying
         Dom(const Dom&) = delete;

@@ -1,0 +1,1055 @@
+
+#include <concepts>
+#include <string_view>
+#include <ranges>
+#include <algorithm>
+#include <fstream>
+#include <iostream>
+#include <cassert>
+#include "../xml/xml.hpp"
+#include "../arena.hpp"
+#include "generator.hpp"
+
+using namespace vkg_gen::xml;
+
+template <typename Func>
+concept NodePredicate = requires(const Func & f, const Node * n) {
+    { f(n) } -> std::convertible_to<bool>;
+};
+
+template <NodePredicate L, NodePredicate R>
+struct And {
+    L lhs;
+    R rhs;
+    inline constexpr bool operator()(const Node* n) const noexcept {
+        return lhs(n) && rhs(n);
+    }
+};
+
+template <NodePredicate L, NodePredicate R>
+struct Or {
+    L lhs;
+    R rhs;
+    inline constexpr bool operator()(const Node* n) const noexcept {
+        return lhs(n) || rhs(n);
+    }
+};
+
+template <NodePredicate L, NodePredicate R>
+inline constexpr auto operator&&(L lhs, R rhs) noexcept {
+    return And<L, R>{lhs, rhs};
+}
+
+template <NodePredicate L, NodePredicate R>
+inline constexpr auto operator||(L lhs, R rhs) noexcept {
+    return Or<L, R>{lhs, rhs};
+}
+
+struct HasTag {
+    std::string_view tag;
+    inline constexpr bool operator()(const Element& e) const noexcept {
+        return e.tag == tag;
+    }
+    inline constexpr bool operator()(const Node* n) const noexcept {
+        return n->isElement() && n->asElement().tag == tag;
+    }
+};
+
+struct HasAttr {
+    std::string_view name;
+    std::string_view value;
+
+    inline constexpr bool operator()(const Element& e) const noexcept {
+        return std::ranges::any_of(e.attrs, [&](const auto& a) {
+            return a.name == name && a.value == value;
+            });
+    }
+
+    inline constexpr bool operator()(const Node* n) const noexcept {
+        if (!n->isElement()) return false;
+        return (*this)(n->asElement());
+    }
+
+};
+
+struct HasAttrName {
+    std::string_view name;
+
+    constexpr inline bool operator()(const Element& e) const noexcept {
+        return std::ranges::contains(e.attrs, name, &Attribute::name);
+    }
+    constexpr inline bool operator()(const Node* n) const noexcept {
+        if (!n->isElement()) return false;
+        return (*this)(n->asElement());
+    }
+};
+
+struct HasAttrValue {
+    std::string_view value;
+    constexpr inline bool operator()(const Element& e) const noexcept {
+        return std::ranges::contains(e.attrs, value, &Attribute::value);
+    }
+    constexpr inline bool operator()(const Node* n) const noexcept {
+        if (!n->isElement()) return false;
+        return (*this)(n->asElement());
+    }
+};
+
+
+inline constexpr auto has_tag(std::string_view t) noexcept { return HasTag{ t }; }
+inline constexpr auto has_attr(std::string_view n, std::string_view v) noexcept { return HasAttr{ n, v }; }
+inline constexpr auto has_attr_name(std::string_view n) noexcept { return HasAttrName{ n }; }
+inline constexpr auto has_attr_value(std::string_view v) noexcept { return HasAttrValue{ v }; }
+
+
+std::ostream& helper_test(std::ostream& os, const vkg_gen::xml::Node* node) {
+    if (!node) return os << "(NULL)";
+    if (!node->isElement())
+        return os << "(TEXT: " << node->asText() << ")";
+
+    auto& elem = node->asElement();
+    os << "<" << elem.tag;
+    for (auto& attr : elem.attrs) {
+        os << " " << attr.name << "=\"" << attr.value << '"';
+    }
+    return os << ">";
+}
+
+
+bool bool_from_string(std::string_view s) {
+    if (s == "true")
+        return true;
+    if (s == "false")
+        return false;
+
+    if (s.find(",") != std::string_view::npos) {
+        std::cout << "FIXME: " << s << "not supported" << std::endl;
+        return false;
+    }
+
+    throw std::runtime_error("Invalid boolean value: '" + std::string(s) + "'");
+}
+
+Member::ExternSync externsync_from_string(std::string_view s) {
+    if (s == "true")
+        return Member::ExternSync::True;
+    if (s == "false")
+        return Member::ExternSync::False;
+    if (s == "maybe")
+        return Member::ExternSync::Maybe;
+
+    throw std::runtime_error("Invalid externsync value: '" + std::string(s) + "'");
+}
+
+
+
+
+Type::Category Type::category_from_string(std::string_view s) const {
+    if (s == "bitmask") return Category::Bitmask;
+    if (s == "basetype") return Category::Basetype;
+    if (s == "define") return Category::Define;
+    if (s == "enum") return Category::Enum;
+    if (s == "handle") return Category::Handle;
+    if (s == "funcpointer") return Category::Funcpointer;
+    if (s == "struct") return Category::Struct;
+    if (s == "include") return Category::Include;
+    if (s == "union") return Category::Union;
+
+    std::string err("Invalid category: '");
+    err += s;
+    err += "' {";
+    for (auto c : s) {
+        err += c;
+        err += ", ";
+    }
+    err += '}';
+
+    throw std::runtime_error(err);
+}
+
+void Type::parse_struct(const vkg_gen::xml::Element& elem, vkg_gen::Arena& arena) {
+    for (Node* child : elem.children) {
+        if (child->isText()) {
+            std::cout << "- Skipping TEXT: " << child->asText() << std::endl;
+            continue;
+        }
+
+        auto& ch = child->asElement();
+
+        if (ch.tag == "comment")
+            struct_->members.emplace_back(Member(ch, arena, Member::ParentType::Struct, true));
+        else if (ch.tag == "member")
+            struct_->members.emplace_back(Member(ch, arena, Member::ParentType::Struct));
+        else {
+            throw std::runtime_error{ "Unknown child element: " + std::string(ch.tag) };
+        }
+    }
+
+};
+
+
+void Type::parse_union(const vkg_gen::xml::Element& elem, vkg_gen::Arena& arena) {
+
+};
+
+Type::Type(const vkg_gen::xml::Element& elem, vkg_gen::Arena& arena) : elem(elem) {
+    Category specific_attr = Category::None;
+
+    for (const Attribute& attr : elem.attrs) {
+        if (attr.name == "category") {
+            category = category_from_string(attr.value);
+
+            if (specific_attr == Category::None) {
+                specific_attr = category;
+                switch (category) {
+                case Category::Handle:
+                    handle = arena.make<TypeHandle>();
+                    break;
+                case Category::Struct:
+                    struct_ = arena.make<TypeStruct>();
+                    break;
+                case Category::Union:
+                    union_ = arena.make<TypeUnion>();
+                    break;
+                default:
+                    break;
+                }
+            } else if (specific_attr != category)
+                throw std::runtime_error("Invalid combination of attributes and category on <type>");
+
+        } else if (attr.name == "name")
+            name = attr.value;
+
+        else if (attr.name == "api")
+            api = attr.value;
+
+        else if (attr.name == "alias")
+            alias = attr.value;
+
+        else if (attr.name == "requires")
+            requires_ = attr.value;
+
+        else if (attr.name == "comment")
+            comment = attr.value;
+
+        else if (attr.name == "deprecated")
+            deprecated = attr.value;
+
+        else if (attr.name == "parent" || attr.name == "objtypeenum") {
+            if (specific_attr == Category::None) {
+                handle = arena.make<TypeHandle>();
+            } else if (specific_attr != Category::Handle) {
+                throw std::runtime_error("unexpected attribute on <type>");
+            }
+
+            if (attr.name == "parent")
+                handle->parent = attr.value;
+            else
+                handle->objtypeenum = attr.value;
+        } else if (attr.name == "returnedonly") {
+            if (specific_attr == Category::None) {
+                //FIXME:
+                auto it = std::ranges::find(elem.attrs, "category", &Attribute::name);
+                if (it == elem.attrs.end())
+                    throw std::runtime_error("unexpected attribute on <type>");
+                specific_attr = category_from_string(it->value);
+
+                if (specific_attr == Category::Struct) {
+
+                    struct_ = arena.make<TypeStruct>();
+                    struct_->returned_only = bool_from_string(attr.value);
+                } else if (specific_attr == Category::Union) {
+
+                    union_ = arena.make<TypeUnion>();
+                    union_->returned_only = bool_from_string(attr.value);
+                } else {
+                    throw std::runtime_error("unexpected attribute on <type>");
+                }
+
+
+            } else if (specific_attr == Category::Struct) {
+                struct_->returned_only = bool_from_string(attr.value);
+            } else if (specific_attr == Category::Union) {
+                union_->returned_only = bool_from_string(attr.value);
+            } else {
+                throw std::runtime_error("unexpected attribute on <type>");
+            }
+
+
+
+        } else if (attr.name == "structextends" || attr.name == "allowduplicate") {
+            if (specific_attr == Category::None) {
+                struct_ = arena.make<TypeStruct>();
+            } else if (specific_attr != Category::Struct && specific_attr != Category::Union) {
+                throw std::runtime_error("unexpected attribute on <type>");
+            }
+
+            if (attr.name == "structextends")
+                struct_->struct_extends = attr.value;
+            else if (attr.name == "allowduplicate")
+                struct_->allow_duplicate = bool_from_string(attr.value);
+            else
+                struct_->returned_only = bool_from_string(attr.value);
+        } else if (attr.name == "bitvalues") {
+            if (specific_attr != Category::None && specific_attr != Category::Bitmask) {
+                throw std::runtime_error("unexpected attribute on <type>");
+            }
+
+            specific_attr = Category::Bitmask;
+            bitvalues = attr.value;
+        } else {
+            throw std::runtime_error("unknown attribute on <type>: " + std::string(attr.name));
+        }
+
+    }
+
+    if (specific_attr == Category::Handle && handle->objtypeenum.empty() && alias.empty())
+        throw std::runtime_error("objtypeenum attribute is required on <type category=\"handle\"> if alias attribute is not present");
+
+
+    if (specific_attr == Category::Struct)
+        parse_struct(elem, arena);
+
+    if (specific_attr == Category::Union)
+        parse_union(elem, arena);
+
+    if (name.empty()) {
+        auto it = std::ranges::find_if(elem.children, has_tag("name"));
+        if (it != elem.children.end()) {
+            name = (*it)->asElement().children[0]->asText().data();
+        } else {
+            throw std::runtime_error("name attribute or <name> tag is required in <type>");
+        }
+    };
+}
+
+void _gen_arbitrary_C_code_in_type(const vkg_gen::xml::Element& elem, std::ofstream& file) {
+    bool last_was_element = false;
+    for (Node* child : elem.children) {
+        if (child->isText()) {
+            // FIXME:
+            if (child->asText() != ";" && last_was_element)
+                file << ' ';
+            file << child->asText();
+            last_was_element = false;
+            continue;
+        }
+
+        if (last_was_element)
+            file << ' ';
+
+        auto& ch = child->asElement();
+        if (ch.tag == "comment") {
+            file << "/*" << ch.children[0]->asText() << "*/"; // TODO: check_comment
+        } else if (ch.tag == "name") {
+            // TODO: register it
+            file << ch.children[0]->asText(); // TODO: check_name
+        } else if (ch.tag == "type") {
+            // TODO: find if defined or at least declared;
+            file << ch.children[0]->asText(); // TODO: check_type
+        }
+
+
+        last_was_element = true;
+    }
+    file << '\n';
+}
+
+
+
+void generate_type(const vkg_gen::xml::Element& type, vkg_gen::Arena& arena, std::ofstream& file) {
+    Type t(type, arena);
+
+    if (!t.comment.empty()) {
+        file << "// " << t.comment << "\n";
+    }
+
+    switch (t.category) {
+    case Type::Category::Basetype:
+        if (!t.deprecated.empty()) throw std::runtime_error("deprecated basetype not supported yet");
+        _gen_arbitrary_C_code_in_type(type, file);
+        break;
+    case Type::Category::Bitmask:
+        if (!t.deprecated.empty()) throw std::runtime_error("deprecated bitmask not supported yet");
+        _gen_arbitrary_C_code_in_type(type, file); // bitvalues??
+        break;
+    case Type::Category::Define:
+        if (!t.deprecated.empty()) throw std::runtime_error("deprecated define not supported yet");
+        _gen_arbitrary_C_code_in_type(type, file);
+        break;
+    case Type::Category::Enum:
+        file << "enum class ";
+        if (!t.deprecated.empty()) file << " [[deprecated(\"" << t.deprecated << "\")]] ";
+        file << t.name << ";\n";
+        break;
+
+    case Type::Category::Handle:
+        if (!t.deprecated.empty()) throw std::runtime_error("deprecated handle not supported yet");
+        if (type.children.size() == 0)
+            _gen_arbitrary_C_code_in_type(type, file);
+        break; // TODO: handle
+    case Type::Category::Funcpointer:
+        if (!t.deprecated.empty()) throw std::runtime_error("deprecated handle not supported yet");
+        _gen_arbitrary_C_code_in_type(type, file);
+        break;
+    case Type::Category::Include:
+        break;
+
+    case Type::Category::Struct:
+        break;
+    case Type::Category::Union:
+        break;
+    case Type::Category::None:
+        break;
+    };
+
+    if (!t.alias.empty()) {
+        file << "using " << t.name << " = " << t.alias << ";\n";
+    }
+
+
+}
+
+void generate_types(vkg_gen::xml::Dom& dom, std::ofstream& file) {
+    auto& children = dom.root->asElement().children;
+    auto it = std::ranges::find_if(children, [](Node* n) {
+        return n->isElement() && n->asElement().tag == "types";
+        });
+
+    if (it == children.end()) {
+        throw std::runtime_error("expected <types> tag");
+    };
+
+    for (; it != children.end(); ++it)
+        for (Node* node : (*it)->asElement().children) {
+            if (node->isText()) {
+                std::cout << "- Skipping: " << node->asText() << std::endl;
+                continue;
+            }
+            auto& node_elem = node->asElement();
+            if (node_elem.tag != "type") {
+                std::cout << "- Skipping: ";
+                helper_test(std::cout, node) << std::endl;
+                continue;
+            }
+            generate_type(node_elem, dom.arena, file);
+        }
+};
+
+
+void generate_base_types(const vkg_gen::xml::Dom& dom, std::ofstream& file) {
+    auto base_types = has_tag("type") && has_attr("category", "basetype");
+    auto& children = dom.root->asElement().children;
+
+    auto it = std::ranges::find_if(children, has_tag("types"));
+
+    if (it == children.end()) {
+        throw std::runtime_error("expected <types> tag");
+    };
+
+    for (; it != children.end(); ++it)
+        for (Node* node : dom.children(*it) | std::views::filter(base_types)) {
+            auto& type = node->asElement();
+
+            for (Node* child : type.children) {
+                if (child->isText()) {
+                    file << child->asText();
+                    continue;
+                }
+                auto& ch = child->asElement();
+                if (ch.tag == "name") {
+                    // TODO: register it
+                    if (ch.children.size() != 1 || !ch.children[0]->isText()) {
+                        throw std::runtime_error("expected <name> to have one text child");
+                    };
+
+                    file << ch.children[0]->asText();
+
+                } else if (ch.tag == "type") {
+                    // TODO: find it
+                    if (ch.children.size() != 1 || !ch.children[0]->isText()) {
+                        throw std::runtime_error("expected <name> to have one text child");
+                    };
+
+                    file << ch.children[0]->asText();
+
+                } else {
+                    std::cout << " - Skipping: ";
+                    helper_test(std::cout, child) << '\n';
+                }
+            }
+            file << '\n';
+        }
+}
+
+void generate_enums(const vkg_gen::xml::Dom& dom, std::ofstream& file) {
+    auto expr = has_tag("enums") && has_attr("type", "enum");
+
+    for (Node* node : dom.children(dom.root) | std::views::filter(expr)) {
+        auto& enum_ = node->asElement();
+        file << "enum class " << enum_.get_attr_value("name") << " {\n";
+
+        for (Node* val_ : enum_.children) {
+            auto& val = val_->asElement();
+            if (val.tag == "comment") {
+                file << "    /* " << val.children[0]->asText() << " */\n";
+                continue;
+            }
+
+            if (val.tag != "enum") {
+                std::cout << " - Skipping: ";
+                helper_test(std::cout, val_) << '\n';
+                continue;
+            }
+
+
+            file << "    " << val.get_attr_value("name");
+            if (!val.get_attr_value("deprecated").empty())
+                file << "    [[deprecated(\"" << val.get_attr_value("deprecated") << "\")]] ";
+
+            if (val.get_attr_value("value").empty()) {
+                if (!val.get_attr_value("alias").empty())
+                    file << " = " << val.get_attr_value("alias");
+                else
+                    throw std::runtime_error{ "No alias for enum value: " + std::string(val.get_attr_value("name")) };
+            } else {
+                file << " = " << val.get_attr_value("value");
+            }
+
+
+            if (val_ != enum_.children.back()) {
+                file << ",";
+            }
+
+            if (!val.get_attr_value("comment").empty())
+                file << " // " << val.get_attr_value("comment");
+            file << '\n';
+        }
+
+        file << "};\n";
+    }
+}
+
+template <std::ranges::input_range R>
+std::ranges::range_value_t<R>* get_single_if_exists(R&& range) {
+    auto it = std::ranges::begin(range);
+    if (it == std::ranges::end(range)) return nullptr; // empty
+    auto first = it;
+    ++it;
+    if (it != std::ranges::end(range)) return nullptr; // more than one
+    return &(*first);
+}
+
+void generate_API_constants(const vkg_gen::xml::Dom& dom, std::ofstream& file) {
+    auto expr = has_tag("enums") && has_attr("type", "constants");
+
+    auto tmp = get_single_if_exists(dom.children(dom.root) | std::views::filter(expr));
+    if (tmp == nullptr) {
+        throw std::runtime_error{ "API constants must have only one element" };
+    }
+
+    auto& constants = (*tmp)->asElement();
+
+    file << "// " << constants.get_attr_value("comment") << '\n';
+    for (Node* constant : constants.children) {
+        auto& c = constant->asElement();
+        file << "constexpr " << c.get_attr_value("type") << " " << c.get_attr_value("name") << " = " << c.get_attr_value("value") << ";";
+        if (!c.get_attr_value("comment").empty())
+            file << " // " << c.get_attr_value("comment");
+        file << '\n';
+    }
+    file << '\n';
+}
+
+TypeEnum::Type TypeEnum::type_from_string(std::string_view s) {
+    if (s == "bitmask") return Type::Bitmask;
+    if (s == "enum") return Type::Normal;
+    if (s == "constants") return Type::Constants;
+    throw std::runtime_error{ "Unknown type: " + std::string(s) };
+}
+
+TypeEnum::Bitwidth TypeEnum::bitwidth_from_string(std::string_view s) {
+    if (s == "8") return Bitwidth::_8;
+    if (s == "16") return Bitwidth::_16;
+    if (s == "32") return Bitwidth::_32;
+    if (s == "64") return Bitwidth::_64;
+    throw std::runtime_error{ "Unknown bitwidth: " + std::string(s) };
+}
+
+TypeEnum::TypeEnum(const vkg_gen::xml::Element& e, vkg_gen::Arena& arena) {
+    for (auto& attr : e.attrs) {
+        if (attr.name == "name") {
+            name = attr.value;
+        } else if (attr.name == "comment") {
+            comment = attr.value;
+        } else if (attr.name == "type") {
+            type = type_from_string(e.get_attr_value("type"));
+        } else if (attr.name == "bitwidth") {
+            bitwidth = bitwidth_from_string(attr.value);
+        } else {
+            throw std::runtime_error{ "Unknown attribute: " + std::string(attr.name) };
+        }
+    };
+
+    if (name.empty())
+        throw std::runtime_error{ "Enum must have a name" };
+
+    if (type == Type::None)
+        throw std::runtime_error{ "Enum must have a type" };
+
+    if (bitwidth != Bitwidth::None && type == Type::Constants)
+        throw std::runtime_error{ "Constants cannot have a bitwidth, they specify the type instead" };
+
+
+    for (Node* child : e.children) {
+        if (!child->isElement()) {
+            std::cout << "skipping non-element child" << std::endl;
+            continue;
+        }
+
+        auto& ch = child->asElement();
+
+        if (ch.tag == "comment") {
+            items.emplace_back(EnumItem(ch, arena, this, true));
+            continue;
+        }
+
+        if (ch.tag == "unused") {
+            std::cout << "skipping unused" << std::endl;
+            continue;
+        }
+
+        if (ch.tag != "enum")
+            throw std::runtime_error("unknown child of <enum>: " + std::string(ch.tag));
+
+        items.emplace_back(EnumItem(ch, arena, this));
+    };
+};
+
+//FIXME:
+std::string to_string(TypeEnum::Bitwidth b) { return "TODO"; }
+std::string to_string(TypeEnum::Type t) {
+    switch (t) {
+    case TypeEnum::Type::None: return "None";
+    case TypeEnum::Type::Normal: return "enum";
+    case TypeEnum::Type::Bitmask: return "bitmask";
+    case TypeEnum::Type::Constants: return "constants";
+    }
+    //TODO:
+    throw std::runtime_error{ "Unknown type" };
+}
+
+uint8_t bitpos_from_string(std::string_view s) {
+    int value = 0;
+    for (char c : s) {
+        if (c < '0' || c > '9')
+            throw std::runtime_error{ "Invalid bitpos: " + std::string(s) };
+        value = value * 10 + (c - '0');
+        if (value > BITPOS_MAX)
+            throw std::runtime_error{ "Invalid bitpos: " + std::string(s) };
+    }
+    return value;
+}
+
+Member::LimitType Member::limit_type_from_string(std::string_view s) {
+    uint16_t value = 0;
+
+#define LIMIT(x, y) if (tok == x) { if (value & (uint16_t)LimitType::y) throw std::runtime_error{ "Duplicate limit of " x " in: " + std::string(s) } ; value |= (uint16_t)LimitType::y;}
+
+    size_t start = 0;
+
+    while (start < s.size()) {
+        sv tok = s.substr(start, s.find(','));
+        start += tok.size() + 1;
+
+        LIMIT("min", Min)
+else LIMIT("max", Max)
+        else LIMIT("not", Not)
+        else LIMIT("pot", Pot)
+        else LIMIT("mul", Mul)
+        else LIMIT("bits", Bits)
+        else LIMIT("bitmask", Bitmask)
+        else LIMIT("range", Range)
+        else LIMIT("struct", Struct)
+        else LIMIT("exact", Exact)
+        else LIMIT("noauto", NoAuto)
+        else
+            throw std::runtime_error{ "Unknown limit type: " + std::string(s) };
+    }
+    return (Member::LimitType)value;
+}
+
+Member::Member(const vkg_gen::xml::Element& e, vkg_gen::Arena& arena, ParentType parent_type, bool is_standalone_comment) :
+    element(e), is_standalone_comment(is_standalone_comment), stringify("") {
+    if (is_standalone_comment) {
+        assert(e.tag == "comment");
+        comment = e.children[0]->asText();
+        return;
+    }
+
+    assert(e.tag == "member");
+
+    for (auto& attr : e.attrs) {
+        if (attr.name == "name") {
+            name = attr.value;
+        } else if (attr.name == "api") {
+            api = attr.value;
+        } else if (attr.name == "comment") {
+            comment = attr.value;
+        } else if (attr.name == "len") {
+            len = attr.value;
+        } else if (attr.name == "altlen") {
+            altlen = attr.value;
+        } else if (attr.name == "stride") {
+            stride = attr.value;
+        } else if (attr.name == "deprecated") {
+            deprecated = attr.value;
+        } else if (attr.name == "externsync") {
+            externsync = externsync_from_string(attr.value);
+        } else if (attr.name == "optional") {
+            optional = bool_from_string(attr.value);
+        } else if (attr.name == "selector") {
+            selector = attr.value;
+        } else if (attr.name == "selection") {
+            selection = attr.value;
+        } else if (attr.name == "noautovalidity") {
+            noautovalidity = bool_from_string(attr.value);
+        } else if (attr.name == "values") {
+            values = attr.value;
+        } else if (attr.name == "limittype") {
+            limittype = limit_type_from_string(attr.value);
+        } else if (attr.name == "objecttype") {
+            objecttype = attr.value;
+        } else if (attr.name == "featurelink") {
+            featurelink = attr.value;
+        } else {
+            throw std::runtime_error{ "Unknown attribute: " + std::string(attr.name) };
+        }
+    }
+
+    for (Node* child : e.children) {
+        if (child->isText()) {
+            stringify += child->asText();
+            continue;
+        }
+        auto& ch = child->asElement();
+        if (ch.tag == "name") {
+            if (!name.empty())
+                throw std::runtime_error{ "Duplicate name in member: " + std::string(name) };
+            name = ch.children[0]->asText(); // TODO: check_name
+            stringify += " ";
+            stringify += name;
+        } else if (ch.tag == "type" || ch.tag == "enum") {
+            if (!type.empty())
+                std::cout << "FIXME: Duplicate type in member: " << std::string(type) << std::endl;
+
+            type = ch.children[0]->asText();
+            stringify += type;
+        } else if (ch.tag == "comment") {
+            if (!comment.empty())
+                throw std::runtime_error{ "Duplicate comment in member: " + std::string(comment) };
+            comment = ch.children[0]->asText();
+        } else {
+            throw std::runtime_error{ "Unknown child: " + std::string(ch.tag) };
+        }
+    }
+    stringify += ";";
+}
+
+TypeEnum::EnumItem::EnumItem(const vkg_gen::xml::Element& e, vkg_gen::Arena& arena, TypeEnum* parent, bool is_standalone_comment)
+    : is_standalone_comment(is_standalone_comment) {
+
+    if (is_standalone_comment) {
+        assert(e.tag == "comment");
+        comment = e.children[0]->asText();
+        return;
+    }
+
+    assert(e.tag == "enum");
+
+    bool value_specified = false;
+
+    for (auto& attr : e.attrs) {
+        if (attr.name == "name") {
+            name = attr.value;
+        } else if (attr.name == "comment") {
+            comment = attr.value;
+        } else if (attr.name == "api") {
+            api = attr.value;
+        } else if (attr.name == "protect") {
+            protect = attr.value;
+        } else if (attr.name == "deprecated") {
+            deprecated = attr.value;
+        } else if (attr.name == "alias") {
+            if (value_specified)
+                throw std::runtime_error{ "Enum item cannot have both 'value' and 'alias'" };
+            alias = attr.value;
+            is_alias = true;
+        } else if (attr.name == "value") {
+            if (is_alias)
+                throw std::runtime_error{ "Enum item cannot have both 'value' and 'alias'" };
+            if (value_specified)
+                throw std::runtime_error{ "Enum item cannot have both 'value' and 'bitpos'" };
+
+            if (parent->type == Type::Constants)
+                constant.value = attr.value;
+            else if (parent->type == Type::Normal)
+                normal.value = attr.value;
+            else if (parent->type == Type::Bitmask)
+                bitmask.value = attr.value;
+            else
+                assert(false);
+
+            value_specified = true;
+
+        } else if (attr.name == "bitpos") {
+            if (is_alias)
+                throw std::runtime_error{ "Enum item cannot have both 'value' and 'alias'" };
+            if (value_specified)
+                throw std::runtime_error{ "Enum item cannot have both 'value' and 'bitpos'" };
+
+            if (parent->type != Type::Bitmask)
+                throw std::runtime_error{ "Invalid 'bitpos' attribute for enum type: " + to_string(parent->type) };
+            bitmask.bitpos = bitpos_from_string(attr.value);
+            bitmask.is_bitfield = true;
+            // TODO: check range with bitwidth
+            // TODO: remove from_chars and write own parser
+            value_specified = true;
+
+        } else if (attr.name == "type") {
+            if (parent->type != Type::Constants)
+                throw std::runtime_error{ "Invalid 'type' attribute for enum type: " + to_string(parent->type) };
+            assert(parent->bitwidth == Bitwidth::None);
+            constant.type = attr.value; // TODO: parse
+        } else {
+            throw std::runtime_error{ "Unknown attribute: " + std::string(attr.name) };
+        }
+    };
+
+    if (name.empty())
+        throw std::runtime_error{ "Enum item must have a name" };
+
+    if (!value_specified && !is_alias)
+        throw std::runtime_error{ "Enum item must have 'value'/'bitpos' or 'alias' attribute" };
+}
+
+
+
+void Generator::parse_types(vkg_gen::xml::Dom& dom, std::ofstream& file) {
+    auto& registry = dom.root->asElement();
+    assert(registry.tag == "registry");
+
+    // TODO: platforms
+    // TODO: tags
+
+    // TODO: there should be only one
+    auto all_types = registry.children | std::views::filter(has_tag("types"));
+    for (Node* types : all_types) {
+        for (Node* child : types->asElement().children) {
+            // TODO: grouping?? and comments tag
+            if (child->isText()) {
+                std::cout << "- Skipping TEXT: " << child->asText() << std::endl;
+                continue;
+            }
+
+            auto& type = child->asElement();
+            if (type.tag != "type") {
+                std::cout << "- FIXME: ";
+                helper_test(std::cout, child) << std::endl;
+                continue;
+            };
+
+            Type t(type, dom.arena);
+            std::cout << "- " << t.name << std::endl;
+            this->types.emplace(t.name, std::move(t));
+        }
+    }
+
+}
+
+void Generator::parse_enums(vkg_gen::xml::Dom& dom) {
+    auto& registry = dom.root->asElement();
+    assert(registry.tag == "registry");
+
+    for (Node* type : registry.children | std::views::filter(has_tag("enums"))) {
+        TypeEnum e(type->asElement(), dom.arena);
+        std::cout << "- " << e.name << std::endl;
+        this->enums.emplace(e.name, std::move(e));
+    }
+}
+
+constexpr std::string_view bitwidth_to_str_type(TypeEnum::Bitwidth w) {
+    switch (w) {
+    case TypeEnum::Bitwidth::None:
+        return "";
+    case TypeEnum::Bitwidth::_8:
+        return ": uint8_t ";
+    case TypeEnum::Bitwidth::_16:
+        return ": uint16_t ";
+    case TypeEnum::Bitwidth::_32:
+        return ": uint32_t ";
+    case TypeEnum::Bitwidth::_64:
+        return ": uint64_t ";
+    }
+}
+
+void Generator::generate_enum(TypeEnum& e, std::ofstream& file) {
+    if (!e.comment.empty())
+        file << "// " << e.comment << "\n";
+
+    if (e.type == TypeEnum::Type::Constants) {
+        for (auto& item : e.items) {
+            file << "constexpr " << item.constant.type << " " << item.name << " = " << item.constant.value << ";";
+            if (!item.comment.empty())
+                file << " // " << item.comment;
+            file << '\n';
+        }
+        file << '\n';
+        return;
+    }
+
+    file << "enum class ";
+    //    if (e.deprecated) {
+    //        /* code */
+    //    }
+    file << e.name << " " << bitwidth_to_str_type(e.bitwidth) << " {\n";
+    for (auto& item : e.items) {
+        if (item.is_standalone_comment) {
+            file << "/* " << item.comment << " */\n";
+            continue;
+        }
+
+        if (item.name == "VK_CLUSTER_ACCELERATION_STRUCTURE_ADDRESS_RESOLUTION_NONE_NV") {
+            std::cout << "debug VK_CLUSTER_ACCELERATION_STRUCTURE_ADDRESS_RESOLUTION_NONE_NV\n";
+        }
+
+
+
+        file << "    " << item.name << " ";
+        if (!item.deprecated.empty())
+            file << "[[deprecated(\"" << item.deprecated << "\")]] ";
+        file << "= ";
+
+        if (e.type == TypeEnum::Type::Normal) {
+            file << item.normal.value;
+        } else if (e.type == TypeEnum::Type::Bitmask) {
+            if (item.bitmask.is_bitfield) {
+                if (item.bitmask.bitpos == 31)
+                    file << "1U";
+                else if (item.bitmask.bitpos > 31)
+                    file << "1ULL";
+                else
+                    file << "1";
+
+                file << " << " << (int)item.bitmask.bitpos;
+            } else {
+                file << item.bitmask.value;
+            }
+
+        } else {
+            assert(false);
+        }
+
+        file << ",";
+        if (!item.comment.empty())
+            file << " // " << item.comment;
+        file << '\n';
+    }
+    file << "};\n\n";
+}
+
+void Generator::generate_struct(Type& s, std::ofstream& file) {
+    assert(s.category == Type::Category::Struct);
+
+    std::cout << "Generating struct: " << s.name << std::endl;
+
+    if (!s.comment.empty())
+        file << "// " << s.comment << "\n";
+
+    if (!s.alias.empty())
+        file << "using ";
+    else
+        file << "struct ";
+
+    if (!s.deprecated.empty())
+        file << "[[deprecated(\"" << s.deprecated << "\")]] ";
+    file << s.name;
+    if (!s.alias.empty()) {
+        file << " = " << s.alias << ";\n";
+        return;
+    }
+
+    file << " {\n";
+    for (auto& member : s.struct_->members) {
+        file << "    " << member.stringify;
+        if (!member.comment.empty())
+            file << " // " << member.comment;
+        file << '\n';
+    }
+    file << "};\n\n";
+
+}
+
+
+void Generator::generate(vkg_gen::xml::Dom& dom, std::ofstream& file, void* config) {
+#if 0
+    file << "typedef uint32_t VkFlags;\n";
+    file << "typedef uint64_t VkFlags64;\n";
+
+    //generate_API_constants(dom, file);
+    //generate_types(dom, file);
+
+    parse_types(dom, file);
+    parse_enums(dom);
+
+
+
+
+    //auto it = enums.find("API Constants");
+    //if (it == enums.end())
+    //    throw std::runtime_error{ "API Constants not found" };
+    //generate_enum(it->second, file);
+
+    for (auto& e : enums) {
+        generate_enum(e.second, file);
+    }
+
+    for (auto& [_, type] : types) {
+        switch (type.category) {
+        case Type::Category::Struct:
+            generate_struct(type, file);
+            break;
+
+            // TODO: provizorní řešení
+        case Type::Category::Basetype:
+        case Type::Category::Bitmask:
+            _gen_arbitrary_C_code_in_type(type.elem, file);
+            break;
+
+        default:
+            break;
+        }
+    }
+
+#else
+    //auto unions_filter = has_tag("type") && has_attr("category", "union");
+    //auto types = dom.getChildrenByTag("types")[0]->asElement();
+//
+    //for (const auto& child : types.children | std::views::filter(unions_filter)) {
+    //    std::cout << "<type ";
+    //    for (auto& attr : child->asElement().attrs) {
+    //        std::cout << attr.name << "='" << attr.value << "', ";
+    //    }
+    //    std::cout << ">\n";
+//
+    //};
+
+    auto extension_filter = has_tag("extension");
+    auto extensions = dom.getChildrenByTag("extensions")[0]->asElement();
+    for (Node* child : extensions.children | std::views::filter(extension_filter)) {
+        auto& ch = child->asElement();
+        std::cout << ch.get_attr_value("name") << " = " << ch.get_attr_value("number") << ",\n";
+    }
+#endif
+}
+

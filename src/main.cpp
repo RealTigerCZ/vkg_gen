@@ -11,10 +11,14 @@
 #include <iostream>
 #include "xml/parser.hpp"
 #include "xml/lexer.hpp"
+#include "generator/generator.hpp"
 #include <set>
+#include <fstream>
+#include <cstring>
 #include <unordered_map>
 
 static const char* FILE_PATH = "vk.xml";
+static const char* OUT_PATH = "out.hpp";
 
 
 void debug_print_node(const vkg_gen::xml::Node& node, int indent = 0, int max_indent = 0) {
@@ -113,15 +117,46 @@ void debug_print(const vkg_gen::xml::Dom& dom) {
 }
 
 
+
+void test(vkg_gen::xml::Dom& dom) {
+    using namespace vkg_gen::xml;
+
+    std::ofstream file{ OUT_PATH, std::ios::out };
+    if (!file.is_open()) {
+        throw std::runtime_error{ "Failed to open file: '" + std::string(OUT_PATH) + "' because: '" + std::strerror(errno) + "'" };
+    }
+
+    file << "#pragma once\n";
+    file << "#include <cstdint>\n";
+    file << "#include <cstddef>\n";
+    file << "\n";
+
+    //generate_base_types(dom, file);
+    //generate_API_constants(dom, file);
+    //generate_enums(dom, file);
+
+    Generator generator;
+    generator.generate(dom, file);
+
+}
+
+
+
+
 int main() {
     namespace xml = vkg_gen::xml;
 
     xml::Parser parser;
     try {
         auto dom = parser.parse(FILE_PATH);
-        debug_print(dom);
+        test(dom);
     }
     catch (const xml::Error& e) {
+        std::cerr << e.what() << std::endl;
+        return 1;
+    }
+    catch (const std::runtime_error& e) {
+        //TODO: use proper error handling
         std::cerr << e.what() << std::endl;
         return 1;
     }

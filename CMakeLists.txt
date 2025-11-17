@@ -12,6 +12,7 @@ set(APP_SOURCES
    src/xml/xml.cpp
    src/xml/lexer.cpp
    src/xml/parser.cpp
+   src/generator/generator.cpp
    src/main.cpp
    )
 
@@ -26,3 +27,10 @@ add_executable(${APP_NAME} ${APP_SOURCES} ${APP_INCLUDES})
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -g -pedantic -O0")
 # TODO: remove this
 target_compile_options(${APP_NAME} PRIVATE -fdiagnostics-color=always)
+
+
+# Debug target to check if out.hpp is compilable
+add_custom_target(out_comp
+    COMMAND g++ -c ${CMAKE_BINARY_DIR}/out.hpp -o ${CMAKE_BINARY_DIR}/vk.o -std=c++20 -Wall -Wextra -g -pedantic
+    COMMENT "Compiling out.hpp manually with g++ to check if it compiles"
+)
