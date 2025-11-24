@@ -10,6 +10,31 @@
 #include "../arena.hpp"
 #include "generator.hpp"
 
+
+namespace boilerplate {
+    static const char* HANDLE_DEFINITION = ""
+        "    // author: PCJohn (peciva at fit.vut.cz)\n"
+        "    template<typename T>\n"
+        "    class Handle {\n"
+        "    protected:\n"
+        "        T _handle;\n"
+        "    public:\n"
+        "        using HandleType = T;\n"
+        "\n"
+        "        Handle() noexcept {}\n"
+        "        Handle(std::nullptr_t) noexcept : _handle(nullptr) {}\n"
+        "        Handle(T nativeHandle) noexcept : _handle(nativeHandle) {}\n"
+        "        Handle(const Handle& h) noexcept : _handle(h._handle) {}\n"
+        "        Handle(const UniqueHandle<Handle<T>>& u) noexcept : _handle(u.get().handle()) {}\n"
+        "        Handle& operator=(const Handle rhs) noexcept { _handle = rhs._handle; return *this; }\n"
+        "        Handle& operator=(const UniqueHandle<T>& rhs) noexcept { _handle = rhs._handle; return *this; }\n"
+        "        T handle() const noexcept { return _handle; }\n"
+        "        explicit operator bool() const noexcept { return _handle != nullptr; }\n"
+        "        bool operator==(const Handle rhs) const noexcept { return _handle == rhs._handle; }\n"
+        "        bool operator!=(const Handle rhs) const noexcept { return _handle != rhs._handle; }\n"
+        "    };\n";
+}
+
 using namespace vkg_gen::xml;
 
 template <typename Func>
@@ -189,7 +214,22 @@ void Type::parse_struct(const vkg_gen::xml::Element& elem, vkg_gen::Arena& arena
 
 
 void Type::parse_union(const vkg_gen::xml::Element& elem, vkg_gen::Arena& arena) {
+    for (Node* child : elem.children) {
+        if (child->isText()) {
+            std::cout << "- Skipping TEXT: " << child->asText() << std::endl;
+            continue;
+        }
 
+        auto& ch = child->asElement();
+
+        if (ch.tag == "comment")
+            union_->members.emplace_back(Member(ch, arena, Member::ParentType::Union, true));
+        else if (ch.tag == "member")
+            union_->members.emplace_back(Member(ch, arena, Member::ParentType::Union));
+        else {
+            throw std::runtime_error{ "Unknown child element: " + std::string(ch.tag) };
+        }
+    }
 };
 
 Type::Type(const vkg_gen::xml::Element& elem, vkg_gen::Arena& arena) : elem(elem) {
@@ -316,7 +356,7 @@ Type::Type(const vkg_gen::xml::Element& elem, vkg_gen::Arena& arena) : elem(elem
     if (name.empty()) {
         auto it = std::ranges::find_if(elem.children, has_tag("name"));
         if (it != elem.children.end()) {
-            name = (*it)->asElement().children[0]->asText().data();
+            name = (*it)->asElement().children[0]->asText();
         } else {
             throw std::runtime_error("name attribute or <name> tag is required in <type>");
         }
@@ -356,6 +396,59 @@ void _gen_arbitrary_C_code_in_type(const vkg_gen::xml::Element& elem, std::ofstr
 }
 
 
+//FIXME: helper function
+bool exclude_platforms(sv name) {
+    static sv platforms[] = {
+        "Xlib",
+        "Xcb",
+        "Wayland",
+        "DirectFB",
+        "Android",
+        "Win32",
+        "Vi",
+        "Ios",
+        "Macos",
+        "Metal",
+        "Fuchsia",
+        "Ggp",
+        "Sci",
+        "Provisional",
+        "Screen",
+        "Ohos"
+    };
+    static sv platforms_caps[] = {
+        "XLIB",
+        "XCB",
+        "WAYLAND",
+        "DIRECTFB",
+        "ANDROID",
+        "WIN32",
+        "VI",
+        "IOS",
+        "MACOS",
+        "METAL",
+        "FUCHSIA",
+        "GGP",
+        "SCI",
+        "PROVISIONAL",
+        "SCREEN",
+        "OHOS"
+    };
+
+    if (std::ranges::any_of(platforms_caps, [&name](sv& plat) { return name.ends_with(plat); })) return true;
+    if (std::ranges::any_of(platforms, [&name](sv& plat) {
+        auto pos = name.find(plat);
+        if (pos == std::string::npos)
+            return false;
+        auto next_index = pos + plat.size();
+        if (next_index >= name.size()) return false;
+        return (name[next_index] >= 'A' && name[next_index] <= 'Z');
+        })) return true;
+
+    return false;
+}
+
+
 
 void generate_type(const vkg_gen::xml::Element& type, vkg_gen::Arena& arena, std::ofstream& file) {
     Type t(type, arena);
@@ -365,6 +458,7 @@ void generate_type(const vkg_gen::xml::Element& type, vkg_gen::Arena& arena, std
     }
 
     switch (t.category) {
+
     case Type::Category::Basetype:
         if (!t.deprecated.empty()) throw std::runtime_error("deprecated basetype not supported yet");
         _gen_arbitrary_C_code_in_type(type, file);
@@ -893,6 +987,18 @@ constexpr std::string_view bitwidth_to_str_type(TypeEnum::Bitwidth w) {
     }
 }
 
+
+
+void Generator::generate_enum_alias(Type& e, std::ofstream& file) {
+    if (e.alias.empty())
+        return;
+
+    if (!e.comment.empty())
+        file << "// " << e.comment << "\n";
+
+    file << "using " << e.name << " = " << e.alias << ";\n\n";
+}
+
 void Generator::generate_enum(TypeEnum& e, std::ofstream& file) {
     if (!e.comment.empty())
         file << "// " << e.comment << "\n";
@@ -918,12 +1024,6 @@ void Generator::generate_enum(TypeEnum& e, std::ofstream& file) {
             file << "/* " << item.comment << " */\n";
             continue;
         }
-
-        if (item.name == "VK_CLUSTER_ACCELERATION_STRUCTURE_ADDRESS_RESOLUTION_NONE_NV") {
-            std::cout << "debug VK_CLUSTER_ACCELERATION_STRUCTURE_ADDRESS_RESOLUTION_NONE_NV\n";
-        }
-
-
 
         file << "    " << item.name << " ";
         if (!item.deprecated.empty())
@@ -987,14 +1087,88 @@ void Generator::generate_struct(Type& s, std::ofstream& file) {
         file << '\n';
     }
     file << "};\n\n";
-
 }
+
+void Generator::generate_union(Type& s, std::ofstream& file) {
+    assert(s.category == Type::Category::Union);
+
+    std::cout << "Generating union: " << s.name << std::endl;
+
+    if (!s.comment.empty())
+        file << "// " << s.comment << "\n";
+
+    if (!s.alias.empty())
+        file << "using ";
+    else
+        file << "union ";
+
+    if (!s.deprecated.empty())
+        file << "[[deprecated(\"" << s.deprecated << "\")]] ";
+    file << s.name;
+    if (!s.alias.empty()) {
+        file << " = " << s.alias << ";\n";
+        return;
+    }
+
+    file << " {\n";
+    for (auto& member : s.union_->members) {
+        file << "    " << member.stringify;
+        if (!member.comment.empty())
+            file << " // " << member.comment;
+        file << '\n';
+    }
+    file << "};\n\n";
+}
+
+void Generator::generate_bitmask(Type& bitmask, std::ofstream& file) {
+    if (!bitmask.comment.empty())
+        file << "// " << bitmask.comment << "\n";
+
+    file << "using ";
+    if (!bitmask.deprecated.empty())
+        file << "[[deprecated(\"" << bitmask.deprecated << "\")]] ";
+    file << bitmask.name << " = ";
+    if (!bitmask.alias.empty()) {
+        file << bitmask.alias << ";\n";
+
+    } else {
+        auto it = std::ranges::find_if(bitmask.elem.children, has_tag("type"));
+        if (it == bitmask.elem.children.end())
+            throw std::runtime_error{ "bitmask type not found" };
+        file << (*it)->asElement().children[0]->asText() << ";\n"; // TODO: check children
+        std::cout << "bitmask: " << bitmask.name << " = " << (*it)->asElement().children[0]->asText() << std::endl;
+    }
+
+};
+
+
+
+void Generator::generate_handle(Type& h, std::ofstream& file, TypeEnum& obj_enum) {
+    assert(h.category == Type::Category::Handle);
+
+    auto it = std::ranges::find(obj_enum.items, h.handle->objtypeenum, &TypeEnum::EnumItem::name);
+    if (it == obj_enum.items.end())
+        std::cout << "FIXME: Handle '" << h.name << "' did not found matching objtypeenum '" << h.handle->objtypeenum << "' in enum '" << obj_enum.name << "'" << std::endl;
+    //throw std::runtime_error{ std::format("Handle '{}' did not found matching objtypeenum '{}' in enum '{}'", h.name, h.handle->objtypeenum, obj_enum.name) };
+
+    file << "using ";
+    if (!h.deprecated.empty())
+        file << "[[deprecated(\"" << h.deprecated << "\")]] ";
+    file << h.name << " = " << "Handle<struct " << obj_enum.name << "_T*>" << ";";
+
+    if (!h.comment.empty())
+        file << " // " << h.comment;
+
+    file << '\n';
+};
 
 
 void Generator::generate(vkg_gen::xml::Dom& dom, std::ofstream& file, void* config) {
-#if 0
+#if 1
     file << "typedef uint32_t VkFlags;\n";
     file << "typedef uint64_t VkFlags64;\n";
+
+    file << boilerplate::HANDLE_DEFINITION << "\n";
 
     //generate_API_constants(dom, file);
     //generate_types(dom, file);
@@ -1010,21 +1184,36 @@ void Generator::generate(vkg_gen::xml::Dom& dom, std::ofstream& file, void* conf
     //    throw std::runtime_error{ "API Constants not found" };
     //generate_enum(it->second, file);
 
-    for (auto& e : enums) {
-        generate_enum(e.second, file);
+    for (auto& [_, enum_] : enums) {
+        generate_enum(enum_, file);
     }
 
     for (auto& [_, type] : types) {
+        if (exclude_platforms(type.name)) {
+            std::cout << "Excluding: " << type.name << std::endl;
+            continue;
+        }
+
         switch (type.category) {
         case Type::Category::Struct:
             generate_struct(type, file);
             break;
+        case Type::Category::Union:
+            generate_union(type, file);
+            break;
+        case Type::Category::Enum:
+            generate_enum_alias(type, file);
+            break;
 
+        case Type::Category::Bitmask:
+            generate_bitmask(type, file);
+            break;
             // TODO: provizorní řešení
         case Type::Category::Basetype:
-        case Type::Category::Bitmask:
             _gen_arbitrary_C_code_in_type(type.elem, file);
             break;
+        case Type::Category::Handle:
+            generate_handle(type, file, enums.at(TypeHandle::obj_enum_name));
 
         default:
             break;

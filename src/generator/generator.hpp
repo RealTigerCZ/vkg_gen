@@ -202,6 +202,8 @@ namespace vkg_gen::Generator {
 
 struct TypeHandle {
     using sv = std::string_view;
+    static constexpr sv obj_enum_name = "VkObjectType";
+
     sv parent; // Notes another type with the 'handle'
     // category that acts as a parent object for
     // this type.
@@ -324,12 +326,7 @@ struct TypeStruct {
     std::vector<Member> members;
 };
 
-struct TypeUnion {
-    bool returned_only = false; // Notes that this union is going to be filled in
-    // by the API, rather than an application filling
-    // it out and passing it to the API.
-
-};
+using TypeUnion = TypeStruct;
 
 struct TypeEnum {
     using sv = std::string_view;
@@ -473,7 +470,11 @@ class Generator {
     void parse_enums(vkg_gen::xml::Dom& dom);
 
     void generate_enum(TypeEnum& enum_, std::ofstream& file);
+    void generate_enum_alias(Type& enum_, std::ofstream& file);
     void generate_struct(Type& struct_, std::ofstream& file);
+    void generate_union(Type& struct_, std::ofstream& file);
+    void generate_bitmask(Type& bitmask, std::ofstream& file);
+    void generate_handle(Type& handle, std::ofstream& file, TypeEnum& obj_enum);
 
 public:
     Generator() {}
