@@ -722,7 +722,7 @@ TypeEnum::TypeEnum(const vkg_gen::xml::Element& e, vkg_gen::Arena& arena) {
         auto& ch = child->asElement();
 
         if (ch.tag == "comment") {
-            items.emplace_back(EnumItem(ch, arena, this, true));
+            items.emplace_back(EnumItem::from_xml(ch, arena, this, true));
             continue;
         }
 
@@ -734,7 +734,7 @@ TypeEnum::TypeEnum(const vkg_gen::xml::Element& e, vkg_gen::Arena& arena) {
         if (ch.tag != "enum")
             throw std::runtime_error("unknown child of <enum>: " + std::string(ch.tag));
 
-        items.emplace_back(EnumItem(ch, arena, this));
+        items.emplace_back(EnumItem::from_xml(ch, arena, this));
     };
 };
 
@@ -873,62 +873,76 @@ Member::Member(const vkg_gen::xml::Element& e, vkg_gen::Arena& arena, ParentType
     stringify += ";";
 }
 
-TypeEnum::EnumItem::EnumItem(const vkg_gen::xml::Element& e, vkg_gen::Arena& arena, TypeEnum* parent, bool is_standalone_comment)
-    : is_standalone_comment(is_standalone_comment) {
+TypeEnum::EnumItem TypeEnum::EnumItem::from_xml(const vkg_gen::xml::Element& elem, vkg_gen::Arena& arena, TypeEnum* parent, bool is_standalone_comment, bool extend_parent) {
+    EnumItem item{ .is_standalone_comment = is_standalone_comment };
+
+    assert(!(is_standalone_comment && extend_parent));
 
     if (is_standalone_comment) {
-        assert(e.tag == "comment");
-        comment = e.children[0]->asText();
-        return;
+        assert(elem.tag == "comment");
+        item.comment = elem.children[0]->asText();
+        return item;
     }
 
-    assert(e.tag == "enum");
+    assert(elem.tag == "enum");
 
     bool value_specified = false;
+    bool offset_specified = false;
 
-    for (auto& attr : e.attrs) {
+    sv extnumber;
+    sv dir;
+    sv offset;
+
+    for (auto& attr : elem.attrs) {
         if (attr.name == "name") {
-            name = attr.value;
+            item.name = attr.value;
         } else if (attr.name == "comment") {
-            comment = attr.value;
+            item.comment = attr.value;
         } else if (attr.name == "api") {
-            api = attr.value;
+            item.api = attr.value;
         } else if (attr.name == "protect") {
-            protect = attr.value;
+            item.protect = attr.value;
         } else if (attr.name == "deprecated") {
-            deprecated = attr.value;
+            item.deprecated = attr.value;
         } else if (attr.name == "alias") {
             if (value_specified)
-                throw std::runtime_error{ "Enum item cannot have both 'value' and 'alias'" };
-            alias = attr.value;
-            is_alias = true;
+                throw std::runtime_error{ "Enum item cannot have both 'value/bitpos' and 'alias'" };
+            if (offset_specified)
+                throw std::runtime_error{ "Enum item cannot have both 'alias' and 'extnumber/dir/offset'" };
+
+            item.alias = attr.value;
+            item.is_alias = true;
         } else if (attr.name == "value") {
-            if (is_alias)
+            if (item.is_alias)
                 throw std::runtime_error{ "Enum item cannot have both 'value' and 'alias'" };
             if (value_specified)
                 throw std::runtime_error{ "Enum item cannot have both 'value' and 'bitpos'" };
+            if (offset_specified)
+                throw std::runtime_error{ "Enum item cannot have both 'value' and 'extnumber/dir/offset'" };
 
             if (parent->type == Type::Constants)
-                constant.value = attr.value;
+                item.constant.value = attr.value;
             else if (parent->type == Type::Normal)
-                normal.value = attr.value;
+                item.normal.value = attr.value;
             else if (parent->type == Type::Bitmask)
-                bitmask.value = attr.value;
+                item.bitmask.value = attr.value;
             else
                 assert(false);
 
             value_specified = true;
 
         } else if (attr.name == "bitpos") {
-            if (is_alias)
-                throw std::runtime_error{ "Enum item cannot have both 'value' and 'alias'" };
+            if (item.is_alias)
+                throw std::runtime_error{ "Enum item cannot have both 'bitpos' and 'alias'" };
             if (value_specified)
-                throw std::runtime_error{ "Enum item cannot have both 'value' and 'bitpos'" };
+                throw std::runtime_error{ "Enum item cannot have both 'bitpos' and 'value'" };
+            if (offset_specified)
+                throw std::runtime_error{ "Enum item cannot have both 'bitpos' and 'extnumber/dir/offset'" };
 
             if (parent->type != Type::Bitmask)
                 throw std::runtime_error{ "Invalid 'bitpos' attribute for enum type: " + to_string(parent->type) };
-            bitmask.bitpos = bitpos_from_string(attr.value);
-            bitmask.is_bitfield = true;
+            item.bitmask.bitpos = bitpos_from_string(attr.value);
+            item.bitmask.is_bitfield = true;
             // TODO: check range with bitwidth
             // TODO: remove from_chars and write own parser
             value_specified = true;
@@ -937,17 +951,57 @@ TypeEnum::EnumItem::EnumItem(const vkg_gen::xml::Element& e, vkg_gen::Arena& are
             if (parent->type != Type::Constants)
                 throw std::runtime_error{ "Invalid 'type' attribute for enum type: " + to_string(parent->type) };
             assert(parent->bitwidth == Bitwidth::None);
-            constant.type = attr.value; // TODO: parse
+            item.constant.type = attr.value; // TODO: parse
+        } else if (extend_parent && (attr.name == "extends" || attr.name == "extnumber" || attr.name == "dir" || attr.name == "offset")) {
+            if (attr.name != "extends") {
+                offset_specified = true;
+                if (value_specified)
+                    throw std::runtime_error{ "Enum item cannot have both 'value/bitpos' and 'extnumber/dir/offset'" };
+                if (item.is_alias)
+                    throw std::runtime_error{ "Enum item cannot have both 'alias' and 'extnumber/dir/offset'" };
+            }
+
+            if (attr.name == "extnumber")
+                extnumber = attr.value;
+            else if (attr.name == "dir")
+                dir = attr.value;
+            else if (attr.name == "offset")
+                offset = attr.value;
         } else {
             throw std::runtime_error{ "Unknown attribute: " + std::string(attr.name) };
+
         }
     };
 
-    if (name.empty())
+    if (item.name.empty())
         throw std::runtime_error{ "Enum item must have a name" };
 
-    if (!value_specified && !is_alias)
-        throw std::runtime_error{ "Enum item must have 'value'/'bitpos' or 'alias' attribute" };
+
+
+    if (extend_parent) {
+        if (!value_specified && !item.is_alias && !offset_specified)
+            // TODO: add information on where wre we and some enum info
+            throw std::runtime_error{ "Enum item must have'value'/'bitpos', 'alias' or 'offset' attribute when extending parent." };
+    } else {
+        if (!value_specified && !item.is_alias)
+            throw std::runtime_error{ "Enum item must have 'value'/'bitpos' or 'alias' attribute" };
+    }
+
+    if (offset_specified) {
+        std::cout << "FIXME: Extending with 'extnumber/dir/offset' is not supported yet\n";
+        // Handle extend with 'extnumber/dir/offset'
+        item.comment = arena.storeString("Value incorrect. Extending with 'extnumber/dir/offset' is not supported yet!");
+        sv value = arena.storeString("0");
+
+        if (parent->type == Type::Constants)
+            item.constant.value = value;
+        else if (parent->type == Type::Normal)
+            item.normal.value = value;
+        else if (parent->type == Type::Bitmask)
+            item.bitmask.value = value;
+    }
+
+    return item;
 }
 
 
@@ -1251,6 +1305,12 @@ void Generator::add_required_type(sv name, std::vector<Type*>& required_types) {
                 add_required_type(member.type, required_types);
             }
         }
+
+        // CHECK: Im not sure about this logic. What if we have struct, that is defined and want to also be accessed by this alias?
+        if (!type->alias.empty() && index.find(type->alias) == index.end()) {
+            add_required_type(type->alias, required_types);
+        }
+
         break;
 
     case Type::Category::Funcpointer:
@@ -1262,8 +1322,63 @@ void Generator::add_required_type(sv name, std::vector<Type*>& required_types) {
     required_types.pop_back();
     index[type->name] = required_types_ordered.size();
     required_types_ordered.push_back(type);
-};
+}
 
+
+void Generator::add_required_feature(Element& feature, vkg_gen::Arena& arena) {
+    // TODO: check arguments of the feature.
+
+    for (Node* node : feature.children) {
+        if (node->isText()) {
+            std::cout << "- Skipping: " << node->asText() << std::endl;
+            continue;
+        }
+
+        auto& elem = node->asElement();
+        if (elem.tag == "require") {
+            for (Node* type : elem.children) {
+                if (type->isText()) {
+                    std::cout << "- Skipping TEXT: " << type->asText() << std::endl;
+                    continue;
+                }
+
+                Element& elem = type->asElement();
+
+                if (elem.tag == "type") {
+                    sv name = elem.get_attr_value("name");
+                    if (index.find(name) == index.end()) {
+                        // CHECK: are type aliases handled correctly?
+                        add_required_type(name);
+                    }
+                } else if (elem.tag == "enum") {
+                    auto it = std::ranges::find(elem.attrs, "extends", &Attribute::name);
+                    if (it != elem.attrs.end()) {
+                        extend_enum(it->value, elem, arena);
+                    }
+                    // Currently generating all enums
+
+                } else if (elem.tag == "command") {
+                    // Currently ignoring commands
+
+                } else {
+                    std::cout << "- FIXME: currently ignoring: ";
+                    helper_test(std::cout, type) << std::endl;
+                    continue;
+                }
+
+
+
+            }
+
+        }
+    }
+}
+
+void Generator::extend_enum(sv extends, Element& elem, vkg_gen::Arena& arena) {
+
+    TypeEnum& enum_ = enums.find(extends)->second;
+    enum_.items.emplace_back(TypeEnum::EnumItem::from_xml(elem, arena, &enum_, false, true));
+}
 
 void Generator::generate(vkg_gen::xml::Dom& dom, std::ofstream& file, void* config) {
 
@@ -1290,49 +1405,16 @@ void Generator::generate(vkg_gen::xml::Dom& dom, std::ofstream& file, void* conf
     if (it == dom.root->asElement().children.end()) {
         throw std::runtime_error{ "VK_VERSION_1_0 not found" };
     }
-    Element& vk_1_0 = (*it)->asElement();
+    add_required_feature((*it)->asElement(), dom.arena);
 
 
 
-    for (Node* node : vk_1_0.children) {
-        if (node->isText()) {
-            std::cout << "- Skipping: " << node->asText() << std::endl;
-            continue;
-        }
-
-        auto& elem = node->asElement();
-        if (elem.tag == "require") {
-            for (Node* type : elem.children) {
-                if (type->isText()) {
-                    std::cout << "- Skipping TEXT: " << type->asText() << std::endl;
-                    continue;
-                }
-
-                Element& elem = type->asElement();
-
-                if (elem.tag == "type") {
-                    sv name = elem.get_attr_value("name");
-                    if (index.find(name) == index.end()) {
-                        // CHECK: are type aliases handled correctly?
-                        add_required_type(name);
-
-                    }
-                } else if (elem.tag == "enum") {
-                    // Currently generating all enums
-
-                } else if (elem.tag == "command") {
-                    // Currently ignoring commands
-
-                } else {
-                    std::cout << "- FIXME: currently ignoring: ";
-                    helper_test(std::cout, type) << std::endl;
-                    continue;
-                }
-
-            }
-
-        }
+    it = std::ranges::find_if(dom.root->asElement().children, has_tag("feature") && has_attr("name", "VK_VERSION_1_1"));
+    if (it == dom.root->asElement().children.end()) {
+        throw std::runtime_error{ "VK_VERSION_1_0 not found" };
     }
+    add_required_feature((*it)->asElement(), dom.arena);
+
 
     for (auto& [_, enum_] : enums) {
         generate_enum(enum_, file);

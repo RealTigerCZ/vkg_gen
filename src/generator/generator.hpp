@@ -367,7 +367,7 @@ struct TypeEnum {
         bool is_alias = false;
         bool is_standalone_comment = false; //TODO:
 
-        EnumItem(const vkg_gen::xml::Element& elem, vkg_gen::Arena& arena, TypeEnum* parent, bool is_standalone_comment = false);
+        static EnumItem from_xml(const vkg_gen::xml::Element& elem, vkg_gen::Arena& arena, TypeEnum* parent, bool is_standalone_comment = false, bool extend_parent = false);
     };
 
 
@@ -469,7 +469,6 @@ class Generator {
 
 
     using Index = std::size_t;
-
     std::map<sv, Index> index;
     std::vector<Type*> required_types_ordered;
 
@@ -488,6 +487,10 @@ class Generator {
     // Wrapper around add_required_type
     void add_required_type(sv name);
     void add_required_type(sv name, std::vector<Type*>& required_types);
+
+    void add_required_feature(vkg_gen::xml::Element& feature, vkg_gen::Arena& arena);
+
+    void extend_enum(sv extends, vkg_gen::xml::Element& elem, vkg_gen::Arena& arena);
 
 public:
     Generator() {}
