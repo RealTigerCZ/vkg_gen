@@ -12,6 +12,7 @@
 
 #include "../xml/xml.hpp"
 #include <map>
+#include <stack>
 
 constexpr int BITPOS_MAX = 64 - 1;
 
@@ -270,7 +271,7 @@ struct Member {
     // enum values indicating that member is valid
     sv selection;
     bool noautovalidity; // tag stating that no automatic validity language should be generated
-    sv values; // omma-separated list of legal values, usually used only for sType enums
+    sv values; // comma-separated list of legal values, usually used only for sType enums
 
     // Only applicable for members of VkPhysicalDeviceProperties and
     // VkPhysicalDeviceProperties2, their substructures, and extensions.
@@ -461,9 +462,17 @@ bool bool_from_string(std::string_view s);
 
 class Generator {
     using sv = std::string_view;
+    std::vector<Type*> types_flat_ordered = {};
     std::map<sv, Type> types = {};
     std::map<sv, TypeEnum> enums = {};
     std::map<sv, Type*> enum_index = {};
+
+
+    using Index = std::size_t;
+
+    std::map<sv, Index> index;
+    std::vector<Type*> required_types_ordered;
+
 
     // FIXME: this is a hack, parse types should not need to use file
     void parse_types(vkg_gen::xml::Dom& dom, std::ofstream& file);
@@ -475,6 +484,10 @@ class Generator {
     void generate_union(Type& struct_, std::ofstream& file);
     void generate_bitmask(Type& bitmask, std::ofstream& file);
     void generate_handle(Type& handle, std::ofstream& file, TypeEnum& obj_enum);
+
+    // Wrapper around add_required_type
+    void add_required_type(sv name);
+    void add_required_type(sv name, std::vector<Type*>& required_types);
 
 public:
     Generator() {}

@@ -13,6 +13,9 @@
 
 namespace boilerplate {
     static const char* HANDLE_DEFINITION = ""
+        "// FIXME: \n"
+        "template<typename Type> class UniqueHandle;\n"
+
         "    // author: PCJohn (peciva at fit.vut.cz)\n"
         "    template<typename T>\n"
         "    class Handle {\n"
@@ -33,6 +36,21 @@ namespace boilerplate {
         "        bool operator==(const Handle rhs) const noexcept { return _handle == rhs._handle; }\n"
         "        bool operator!=(const Handle rhs) const noexcept { return _handle != rhs._handle; }\n"
         "    };\n";
+
+    //FIXME:
+    static const char* VIDEO_INCLUDES = ""
+        "#include \"vk_video/vulkan_video_codec_av1std_decode.h\"\n"
+        "#include \"vk_video/vulkan_video_codec_h265std_decode.h\"\n"
+        "#include \"vk_video/vulkan_video_codec_av1std_encode.h\"\n"
+        "#include \"vk_video/vulkan_video_codec_h265std_encode.h\"\n"
+        "#include \"vk_video/vulkan_video_codec_av1std.h\"\n"
+        "#include \"vk_video/vulkan_video_codec_h265std.h\"\n"
+        "#include \"vk_video/vulkan_video_codec_h264std_decode.h\"\n"
+        "#include \"vk_video/vulkan_video_codecs_common.h\"\n"
+        "#include \"vk_video/vulkan_video_codec_h264std_encode.h\"\n"
+        "#include \"vk_video/vulkan_video_codec_vp9std_decode.h\"\n"
+        "#include \"vk_video/vulkan_video_codec_h264std.h\"\n"
+        "#include \"vk_video/vulkan_video_codec_vp9std.h\"\n";
 }
 
 using namespace vkg_gen::xml;
@@ -834,11 +852,16 @@ Member::Member(const vkg_gen::xml::Element& e, vkg_gen::Arena& arena, ParentType
             stringify += " ";
             stringify += name;
         } else if (ch.tag == "type" || ch.tag == "enum") {
-            if (!type.empty())
-                std::cout << "FIXME: Duplicate type in member: " << std::string(type) << std::endl;
+            if (type.empty()) {
+                type = ch.children[0]->asText();
+                stringify += type;
+            } else {
 
-            type = ch.children[0]->asText();
-            stringify += type;
+                // THIS CAN HAPPEN: for example with "VkPipelineCacheHeaderVersionOne", <member><type>uint8_t</type><name>pipelineCacheUUID</name>[<enum>VK_UUID_SIZE</enum>]</member>
+                std::cout << "FIXME: Duplicate type in member: " << std::string(name) << std::endl;
+                stringify += ch.children[0]->asText();
+            }
+
         } else if (ch.tag == "comment") {
             if (!comment.empty())
                 throw std::runtime_error{ "Duplicate comment in member: " + std::string(comment) };
@@ -955,7 +978,11 @@ void Generator::parse_types(vkg_gen::xml::Dom& dom, std::ofstream& file) {
 
             Type t(type, dom.arena);
             std::cout << "- " << t.name << std::endl;
-            this->types.emplace(t.name, std::move(t));
+            auto [it, inserted] = this->types.emplace(t.name, std::move(t));
+            if (inserted) {
+                this->types_flat_ordered.push_back(&it->second);
+            }
+
         }
     }
 
@@ -1030,7 +1057,9 @@ void Generator::generate_enum(TypeEnum& e, std::ofstream& file) {
             file << "[[deprecated(\"" << item.deprecated << "\")]] ";
         file << "= ";
 
-        if (e.type == TypeEnum::Type::Normal) {
+        if (item.is_alias) {
+            file << item.alias;
+        } else if (e.type == TypeEnum::Type::Normal) {
             file << item.normal.value;
         } else if (e.type == TypeEnum::Type::Bitmask) {
             if (item.bitmask.is_bitfield) {
@@ -1081,6 +1110,11 @@ void Generator::generate_struct(Type& s, std::ofstream& file) {
 
     file << " {\n";
     for (auto& member : s.struct_->members) {
+        if (!member.api.empty() && member.api != "vulkan") {
+            std::cout << " TODO: skipping member due to api(could be duplicated): " << member.stringify << "\n";
+            continue;
+        }
+
         file << "    " << member.stringify;
         if (!member.comment.empty())
             file << " // " << member.comment;
@@ -1160,11 +1194,87 @@ void Generator::generate_handle(Type& h, std::ofstream& file, TypeEnum& obj_enum
         file << " // " << h.comment;
 
     file << '\n';
+}
+void Generator::add_required_type(sv name) {
+    std::vector<Type*> required_types;
+    add_required_type(name, required_types);
+    assert(required_types.size() == 0);
+}
+
+void Generator::add_required_type(sv name, std::vector<Type*>& required_types) {
+    Type* type = &types.find(name)->second;
+    if (std::ranges::find(required_types, type) == required_types.end())
+        required_types.push_back(type);
+    else {
+        std::cout << "FIXME: Returning from circular dependency: " << name << "\n";
+        return;
+    }
+
+
+    using sv = std::string_view;
+
+
+    // TODO: Write own split
+    for (auto&& part : type->requires_ | std::views::split(',')) {
+        sv req(&*part.begin(), std::ranges::distance(part));
+        if (req.empty()) {
+            std::cout << "FIXME: empty requires NOT HANDLED" << std::endl;
+            break;
+        }
+
+        // FIXME: Circular dependency
+        if (index.find(req) == index.end()) {
+            add_required_type(req, required_types);
+        }
+
+    }
+
+    switch (type->category) {
+
+        /// These types do not require any special handling
+    case Type::Category::Basetype: // fallthrough
+    case Type::Category::Bitmask:  // fallthrough
+    case Type::Category::Define:   // fallthrough
+    case Type::Category::Enum:     // fallthrough
+        // CHECK: handle too?
+    case Type::Category::Handle:   // fallthrough
+    case Type::Category::Include:  // fallthrough
+    case Type::Category::None:
+        break;
+
+    case Type::Category::Struct:   // fallthrough
+    case Type::Category::Union:
+        for (auto& member : type->struct_->members) {
+            if (member.is_standalone_comment)
+                continue;
+            if (index.find(member.type) == index.end()) {
+                add_required_type(member.type, required_types);
+            }
+        }
+        break;
+
+    case Type::Category::Funcpointer:
+        // FIXME: function pointer not handled
+        break;
+
+    }
+
+    required_types.pop_back();
+    index[type->name] = required_types_ordered.size();
+    required_types_ordered.push_back(type);
 };
 
 
 void Generator::generate(vkg_gen::xml::Dom& dom, std::ofstream& file, void* config) {
+
+
+
 #if 1
+    file << "#pragma once\n";
+    file << boilerplate::VIDEO_INCLUDES << "\n";
+
+    file << "#define VKAPI_PTR\n";
+
     file << "typedef uint32_t VkFlags;\n";
     file << "typedef uint64_t VkFlags64;\n";
 
@@ -1176,19 +1286,60 @@ void Generator::generate(vkg_gen::xml::Dom& dom, std::ofstream& file, void* conf
     parse_types(dom, file);
     parse_enums(dom);
 
+    auto it = std::ranges::find_if(dom.root->asElement().children, has_tag("feature") && has_attr("name", "VK_VERSION_1_0"));
+    if (it == dom.root->asElement().children.end()) {
+        throw std::runtime_error{ "VK_VERSION_1_0 not found" };
+    }
+    Element& vk_1_0 = (*it)->asElement();
 
 
 
-    //auto it = enums.find("API Constants");
-    //if (it == enums.end())
-    //    throw std::runtime_error{ "API Constants not found" };
-    //generate_enum(it->second, file);
+    for (Node* node : vk_1_0.children) {
+        if (node->isText()) {
+            std::cout << "- Skipping: " << node->asText() << std::endl;
+            continue;
+        }
+
+        auto& elem = node->asElement();
+        if (elem.tag == "require") {
+            for (Node* type : elem.children) {
+                if (type->isText()) {
+                    std::cout << "- Skipping TEXT: " << type->asText() << std::endl;
+                    continue;
+                }
+
+                Element& elem = type->asElement();
+
+                if (elem.tag == "type") {
+                    sv name = elem.get_attr_value("name");
+                    if (index.find(name) == index.end()) {
+                        // CHECK: are type aliases handled correctly?
+                        add_required_type(name);
+
+                    }
+                } else if (elem.tag == "enum") {
+                    // Currently generating all enums
+
+                } else if (elem.tag == "command") {
+                    // Currently ignoring commands
+
+                } else {
+                    std::cout << "- FIXME: currently ignoring: ";
+                    helper_test(std::cout, type) << std::endl;
+                    continue;
+                }
+
+            }
+
+        }
+    }
 
     for (auto& [_, enum_] : enums) {
         generate_enum(enum_, file);
     }
 
-    for (auto& [_, type] : types) {
+    for (Type* p : required_types_ordered) {
+        auto& type = *p;
         if (exclude_platforms(type.name)) {
             std::cout << "Excluding: " << type.name << std::endl;
             continue;
@@ -1210,11 +1361,13 @@ void Generator::generate(vkg_gen::xml::Dom& dom, std::ofstream& file, void* conf
             break;
             // TODO: provizorní řešení
         case Type::Category::Basetype:
+            //case Type::Category::Define:
+        case Type::Category::Funcpointer:
             _gen_arbitrary_C_code_in_type(type.elem, file);
             break;
         case Type::Category::Handle:
             generate_handle(type, file, enums.at(TypeHandle::obj_enum_name));
-
+            break;
         default:
             break;
         }
