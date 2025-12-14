@@ -516,7 +516,10 @@ void generate_type(const vkg_gen::xml::Element& type, vkg_gen::Arena& arena, std
     };
 
     if (!t.alias.empty()) {
-        file << "using " << t.name << " = " << t.alias << ";\n";
+        file << "using " << t.name;
+        if (!t.deprecated.empty())
+            file << " [[deprecated(\"" << t.deprecated << "\")]]";
+        file << " = " << t.alias << ";\n";
     }
 
 
@@ -1074,42 +1077,31 @@ void Generator::generate_enum_alias(Type& e, std::ofstream& file) {
     if (e.alias.empty())
         return;
 
-    if (!e.comment.empty())
-        file << "// " << e.comment << "\n";
-
-    file << "using " << e.name << " = " << e.alias << ";\n\n";
+    file << LineComment{ e.comment, true };
+    file << "using " << e.name << Deprecate{ e.deprecated } << "= " << e.alias << ";\n\n";
 }
 
 void Generator::generate_enum(TypeEnum& e, std::ofstream& file) {
-    if (!e.comment.empty())
-        file << "// " << e.comment << "\n";
+    file << LineComment{ e.comment, true };
 
     if (e.type == TypeEnum::Type::Constants) {
         for (auto& item : e.items) {
-            file << "constexpr " << item.constant.type << " " << item.name << " = " << item.constant.value << ";";
-            if (!item.comment.empty())
-                file << " // " << item.comment;
-            file << '\n';
+            file << "constexpr " << item.constant.type << " " << item.name << " = " << item.constant.value << ";"
+                << LineComment{ item.comment } << '\n';
         }
         file << '\n';
         return;
     }
 
-    file << "enum class ";
-    //    if (e.deprecated) {
-    //        /* code */
-    //    }
-    file << e.name << " " << bitwidth_to_str_type(e.bitwidth) << " {\n";
+    file << "enum class" << Deprecate{ e.deprecated } << e.name << " " << bitwidth_to_str_type(e.bitwidth) << " {\n";
+
     for (auto& item : e.items) {
         if (item.is_standalone_comment) {
             file << "/* " << item.comment << " */\n";
             continue;
         }
 
-        file << "    " << item.name << " ";
-        if (!item.deprecated.empty())
-            file << "[[deprecated(\"" << item.deprecated << "\")]] ";
-        file << "= ";
+        file << "    " << item.name << Deprecate{ item.deprecated } << "= ";
 
         if (item.is_alias) {
             file << item.alias;
@@ -1130,13 +1122,11 @@ void Generator::generate_enum(TypeEnum& e, std::ofstream& file) {
             }
 
         } else {
+            throw std::runtime_error("TODO: internal error");
             assert(false);
         }
 
-        file << ",";
-        if (!item.comment.empty())
-            file << " // " << item.comment;
-        file << '\n';
+        file << "," << LineComment{ item.comment } << '\n';
     }
     file << "};\n\n";
 }
@@ -1146,33 +1136,22 @@ void Generator::generate_struct(Type& s, std::ofstream& file) {
 
     std::cout << "Generating struct: " << s.name << std::endl;
 
-    if (!s.comment.empty())
-        file << "// " << s.comment << "\n";
+    file << LineComment{ s.comment };
 
-    if (!s.alias.empty())
-        file << "using ";
-    else
-        file << "struct ";
-
-    if (!s.deprecated.empty())
-        file << "[[deprecated(\"" << s.deprecated << "\")]] ";
-    file << s.name;
     if (!s.alias.empty()) {
-        file << " = " << s.alias << ";\n";
+        file << "using " << s.name << Deprecate{ s.deprecated } << "= " << s.alias << ";\n";
         return;
     }
 
-    file << " {\n";
+    file << "struct" << Deprecate{ s.deprecated } << s.name << " {\n";
+
     for (auto& member : s.struct_->members) {
         if (!member.api.empty() && member.api != "vulkan") {
             std::cout << " TODO: skipping member due to api(could be duplicated): " << member.stringify << "\n";
             continue;
         }
 
-        file << "    " << member.stringify;
-        if (!member.comment.empty())
-            file << " // " << member.comment;
-        file << '\n';
+        file << "    " << member.stringify << LineComment{ member.comment, false } << '\n';
     }
     file << "};\n\n";
 }
@@ -1182,47 +1161,34 @@ void Generator::generate_union(Type& s, std::ofstream& file) {
 
     std::cout << "Generating union: " << s.name << std::endl;
 
-    if (!s.comment.empty())
-        file << "// " << s.comment << "\n";
+    file << LineComment{ s.comment };
 
-    if (!s.alias.empty())
-        file << "using ";
-    else
-        file << "union ";
-
-    if (!s.deprecated.empty())
-        file << "[[deprecated(\"" << s.deprecated << "\")]] ";
-    file << s.name;
     if (!s.alias.empty()) {
-        file << " = " << s.alias << ";\n";
+        file << "using " << s.name << Deprecate{ s.deprecated } << "= " << s.alias << ";\n";
         return;
     }
 
-    file << " {\n";
+    file << "union" << Deprecate{ s.deprecated } << s.name << " {\n";
+
     for (auto& member : s.union_->members) {
-        file << "    " << member.stringify;
-        if (!member.comment.empty())
-            file << " // " << member.comment;
-        file << '\n';
+        file << "    " << member.stringify << LineComment{ member.comment, false } << '\n';
     }
     file << "};\n\n";
 }
 
 void Generator::generate_bitmask(Type& bitmask, std::ofstream& file) {
-    if (!bitmask.comment.empty())
-        file << "// " << bitmask.comment << "\n";
+    file << LineComment{ bitmask.comment, true };
 
-    file << "using ";
-    if (!bitmask.deprecated.empty())
-        file << "[[deprecated(\"" << bitmask.deprecated << "\")]] ";
-    file << bitmask.name << " = ";
+    file << "using " << bitmask.name << Deprecate{ bitmask.deprecated } << "= ";
     if (!bitmask.alias.empty()) {
         file << bitmask.alias << ";\n";
 
     } else {
+        // CHECK: revisit this
         auto it = std::ranges::find_if(bitmask.elem.children, has_tag("type"));
         if (it == bitmask.elem.children.end())
             throw std::runtime_error{ "bitmask type not found" };
+
         file << (*it)->asElement().children[0]->asText() << ";\n"; // TODO: check children
         std::cout << "bitmask: " << bitmask.name << " = " << (*it)->asElement().children[0]->asText() << std::endl;
     }
@@ -1239,16 +1205,10 @@ void Generator::generate_handle(Type& h, std::ofstream& file, TypeEnum& obj_enum
         std::cout << "FIXME: Handle '" << h.name << "' did not found matching objtypeenum '" << h.handle->objtypeenum << "' in enum '" << obj_enum.name << "'" << std::endl;
     //throw std::runtime_error{ std::format("Handle '{}' did not found matching objtypeenum '{}' in enum '{}'", h.name, h.handle->objtypeenum, obj_enum.name) };
 
-    file << "using ";
-    if (!h.deprecated.empty())
-        file << "[[deprecated(\"" << h.deprecated << "\")]] ";
-    file << h.name << " = " << "Handle<struct " << obj_enum.name << "_T*>" << ";";
-
-    if (!h.comment.empty())
-        file << " // " << h.comment;
-
-    file << '\n';
+    file << "using " << h.name << Deprecate{ h.deprecated } << "= "
+        << "Handle<struct " << obj_enum.name << "_T*>" << ";" << LineComment{ h.comment } << '\n';
 }
+
 void Generator::add_required_type(sv name) {
     std::vector<Type*> required_types;
     add_required_type(name, required_types);

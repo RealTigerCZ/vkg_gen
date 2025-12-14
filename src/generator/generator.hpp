@@ -388,6 +388,7 @@ struct TypeEnum {
 
     sv name;
     sv comment;
+    sv deprecated;
     Type type = Type::None;
     Bitwidth bitwidth = Bitwidth::None;
     // TODO: what about <unused>?
@@ -493,6 +494,43 @@ class Generator {
     void extend_enum(sv extends, vkg_gen::xml::Element& elem, vkg_gen::Arena& arena);
 
 public:
+    struct Deprecate {
+        sv msg;
+    };
+    struct LineComment {
+        sv comment;
+        bool alone = true;
+    };
+
+    struct StandaloneComment {
+        sv comment;
+        bool generate = true;
+    };
+
     Generator() {}
     void generate(vkg_gen::xml::Dom& dom, std::ofstream& file, void* config = nullptr);
 };
+
+inline std::ostream& operator<<(std::ostream& os, Generator::Deprecate d) {
+    if (!d.msg.empty()) {
+        return os << " [[deprecated(\"" << d.msg << "\")]] ";
+    }
+    return os << ' ';
+}
+
+inline std::ostream& operator<<(std::ostream& os, Generator::LineComment c) {
+    if (!c.comment.empty()) {
+        if (c.alone)
+            os << "// " << c.comment << '\n';
+        else
+            os << " // " << c.comment;
+    }
+    return os;
+}
+
+inline std::ostream& operator<<(std::ostream& os, Generator::StandaloneComment c) {
+    if (c.generate && !c.comment.empty()) {
+        os << "/* " << c.comment << " */";
+    }
+    return os;
+}
