@@ -3,9 +3,9 @@
  * @author Jaroslav Hucel (xhucel00@vutbr.cz)
  * @brief
  * @date Created: 02. 11. 2025
- * @date Modified: 2. 11. 2025
+ * @date Modified: 14. 12. 2025
  *
- * @copyright Copyright (c) 2025
+ * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
 
 #pragma once
@@ -463,7 +463,6 @@ bool bool_from_string(std::string_view s);
 
 class Generator {
     using sv = std::string_view;
-    std::vector<Type*> types_flat_ordered = {};
     std::map<sv, Type> types = {};
     std::map<sv, TypeEnum> enums = {};
     std::map<sv, Type*> enum_index = {};
@@ -471,11 +470,11 @@ class Generator {
 
     using Index = std::size_t;
     std::map<sv, Index> index;
+    // Could contain nullptrs because of removing types
     std::vector<Type*> required_types_ordered;
 
 
-    // FIXME: this is a hack, parse types should not need to use file
-    void parse_types(vkg_gen::xml::Dom& dom, std::ofstream& file);
+    void parse_types(vkg_gen::xml::Dom& dom);
     void parse_enums(vkg_gen::xml::Dom& dom);
 
     void generate_enum(TypeEnum& enum_, std::ofstream& file);
@@ -489,7 +488,7 @@ class Generator {
     void add_required_type(sv name);
     void add_required_type(sv name, std::vector<Type*>& required_types);
 
-    void add_required_feature(vkg_gen::xml::Element& feature, vkg_gen::Arena& arena);
+    void add_required_version_feature(sv name, vkg_gen::xml::Dom& dom);
 
     void extend_enum(sv extends, vkg_gen::xml::Element& elem, vkg_gen::Arena& arena);
 

@@ -1,3 +1,13 @@
+/**
+ * @file generator.hpp
+ * @author Jaroslav Hucel (xhucel00@vutbr.cz)
+ * @brief
+ * @date Created: 12. 11. 2025
+ * @date Modified: 14. 12. 2025
+ *
+ * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
+ */
+
 
 #include <concepts>
 #include <string_view>
@@ -6,6 +16,7 @@
 #include <fstream>
 #include <iostream>
 #include <cassert>
+
 #include "../xml/xml.hpp"
 #include "../arena.hpp"
 #include "generator.hpp"
@@ -78,6 +89,14 @@ struct Or {
     }
 };
 
+template <NodePredicate P>
+struct Not {
+    P pred;
+    inline constexpr bool operator()(const Node* n) const noexcept {
+        return !pred(n);
+    }
+};
+
 template <NodePredicate L, NodePredicate R>
 inline constexpr auto operator&&(L lhs, R rhs) noexcept {
     return And<L, R>{lhs, rhs};
@@ -86,6 +105,11 @@ inline constexpr auto operator&&(L lhs, R rhs) noexcept {
 template <NodePredicate L, NodePredicate R>
 inline constexpr auto operator||(L lhs, R rhs) noexcept {
     return Or<L, R>{lhs, rhs};
+}
+
+template <NodePredicate P>
+inline constexpr auto operator!(P pred) noexcept {
+    return Not<P>{pred};
 }
 
 struct HasTag {
@@ -467,7 +491,7 @@ bool exclude_platforms(sv name) {
 }
 
 
-
+#if 0
 void generate_type(const vkg_gen::xml::Element& type, vkg_gen::Arena& arena, std::ofstream& file) {
     Type t(type, arena);
 
@@ -675,6 +699,7 @@ void generate_API_constants(const vkg_gen::xml::Dom& dom, std::ofstream& file) {
     }
     file << '\n';
 }
+#endif
 
 TypeEnum::Type TypeEnum::type_from_string(std::string_view s) {
     if (s == "bitmask") return Type::Bitmask;
@@ -991,17 +1016,21 @@ TypeEnum::EnumItem TypeEnum::EnumItem::from_xml(const vkg_gen::xml::Element& ele
     }
 
     if (offset_specified) {
-        std::cout << "FIXME: Extending with 'extnumber/dir/offset' is not supported yet\n";
-        // Handle extend with 'extnumber/dir/offset'
-        item.comment = arena.storeString("Value incorrect. Extending with 'extnumber/dir/offset' is not supported yet!");
-        sv value = arena.storeString("0");
+        if (parent->type != Type::Normal)
+            throw std::runtime_error{ "Offset/extnumber/dir can only be used with 'normal' enum type, not bitmask or constant." };
 
-        if (parent->type == Type::Constants)
-            item.constant.value = value;
-        else if (parent->type == Type::Normal)
-            item.normal.value = value;
-        else if (parent->type == Type::Bitmask)
-            item.bitmask.value = value;
+        if (extnumber.empty())
+            std::cout << "FIXME: unhandled missing extnumber." << std::endl;
+
+
+        int ext_number = std::stoi(extnumber.data()) - 1;
+        int offset_i = std::stoi(offset.data());
+        if (offset_i > 1000) // 3 digits
+            throw std::runtime_error{ "Offset must be less than 1000" };
+
+        // Vulkan spec:
+        long normal_value = 1000'000'000 + ext_number * 1000 + offset_i;
+        item.normal.value = arena.storeString(std::string(dir) + std::to_string(normal_value));
     }
 
     return item;
@@ -1009,7 +1038,7 @@ TypeEnum::EnumItem TypeEnum::EnumItem::from_xml(const vkg_gen::xml::Element& ele
 
 
 
-void Generator::parse_types(vkg_gen::xml::Dom& dom, std::ofstream& file) {
+void Generator::parse_types(vkg_gen::xml::Dom& dom) {
     auto& registry = dom.root->asElement();
     assert(registry.tag == "registry");
 
@@ -1035,10 +1064,7 @@ void Generator::parse_types(vkg_gen::xml::Dom& dom, std::ofstream& file) {
 
             Type t(type, dom.arena);
             std::cout << "- " << t.name << std::endl;
-            auto [it, inserted] = this->types.emplace(t.name, std::move(t));
-            if (inserted) {
-                this->types_flat_ordered.push_back(&it->second);
-            }
+            this->types.emplace(t.name, std::move(t));
 
         }
     }
@@ -1146,8 +1172,9 @@ void Generator::generate_struct(Type& s, std::ofstream& file) {
     file << "struct" << Deprecate{ s.deprecated } << s.name << " {\n";
 
     for (auto& member : s.struct_->members) {
-        if (!member.api.empty() && member.api != "vulkan") {
-            std::cout << " TODO: skipping member due to api(could be duplicated): " << member.stringify << "\n";
+        // TODO: custom split
+        if (!member.api.empty() && !std::ranges::contains(std::views::split(member.api, ','), "vulkan", [](auto&& rng) { return sv(rng); })) {
+            std::cout << " TODO: Skipping member '" << member.stringify << "' of struct '" << s.name << "', because it does not contain 'vulkan' api.\n";
             continue;
         }
 
@@ -1171,6 +1198,12 @@ void Generator::generate_union(Type& s, std::ofstream& file) {
     file << "union" << Deprecate{ s.deprecated } << s.name << " {\n";
 
     for (auto& member : s.union_->members) {
+        // TODO: custom split
+        if (!member.api.empty() && !std::ranges::contains(std::views::split(member.api, ','), "vulkan", [](auto&& rng) { return sv(rng); })) {
+            std::cout << " TODO: Skipping member '" << member.stringify << "' of union '" << s.name << "', because it does not contain 'vulkan' api.\n";
+            continue;
+        }
+
         file << "    " << member.stringify << LineComment{ member.comment, false } << '\n';
     }
     file << "};\n\n";
@@ -1285,17 +1318,43 @@ void Generator::add_required_type(sv name, std::vector<Type*>& required_types) {
 }
 
 
-void Generator::add_required_feature(Element& feature, vkg_gen::Arena& arena) {
+void Generator::add_required_version_feature(sv name, vkg_gen::xml::Dom& dom) {
+    // TODO: some feature map is needed
+    auto it = std::ranges::find_if(dom.root->asElement().children, has_tag("feature") && has_attr("name", name));
+    if (it == dom.root->asElement().children.end()) {
+        throw std::runtime_error{ std::format("Feature (version) '{}' not found", name) };
+    }
+    Element& feature = (*it)->asElement();
+
     // TODO: check arguments of the feature.
+    // attributes:
+    // api - comma separated list,
+    // apitype - values: 'internal' or 'public' <- default
+    // name: we wont protect the feature, because we will generate specific features
+    // number: major.minor
+    // depends: 😭 String containing a boolean expression of one or more API core version and extension names. The feature requires the expression in the string to be satisfied to use any functionality it defines. Supported operators include , for logical OR, ` for logical AND, and `(` `)` for grouping. `,` and ` are of equal precedence, and lower than ( ). Expressions must be evaluated left-to-right for operators of the same precedence. Terms which are core version names are true if the corresponding API version is supported. Terms which are extension names are true if the corresponding extension is enabled.
+    // sortorder
+    // comment
+
+    sv depends = feature.get_attr_value("depends");
+
+    if (!depends.empty() && (depends.contains(',') || depends.contains('+'))) {
+        std::cout << "FIXME: Compound dependencies not supported yet" << std::endl;
+    } else if (!depends.empty()) {
+        // TODO: circular dependency
+        add_required_version_feature(depends, dom);
+
+    }
+
 
     for (Node* node : feature.children) {
         if (node->isText()) {
             std::cout << "- Skipping: " << node->asText() << std::endl;
             continue;
         }
-
         auto& elem = node->asElement();
         if (elem.tag == "require") {
+            // FIXME: handle arguments: depends, profile, api
             for (Node* type : elem.children) {
                 if (type->isText()) {
                     std::cout << "- Skipping TEXT: " << type->asText() << std::endl;
@@ -1313,7 +1372,7 @@ void Generator::add_required_feature(Element& feature, vkg_gen::Arena& arena) {
                 } else if (elem.tag == "enum") {
                     auto it = std::ranges::find(elem.attrs, "extends", &Attribute::name);
                     if (it != elem.attrs.end()) {
-                        extend_enum(it->value, elem, arena);
+                        extend_enum(it->value, elem, dom.arena);
                     }
                     // Currently generating all enums
 
@@ -1325,12 +1384,66 @@ void Generator::add_required_feature(Element& feature, vkg_gen::Arena& arena) {
                     helper_test(std::cout, type) << std::endl;
                     continue;
                 }
+            }
+        } else if (elem.tag == "deprecate") {
+            // TODO: handle profile and api attributes
+            sv explanation = elem.get_attr_value("explanationlink");
 
+            for (Node* type : elem.children) {
+                if (type->isText()) {
+                    std::cout << "- Skipping TEXT: " << type->asText() << std::endl;
+                    continue;
+                }
 
+                Element& elem = type->asElement();
 
+                if (elem.tag == "type") {
+                    sv name = elem.get_attr_value("name");
+                    types.find(name)->second.deprecated = explanation;
+                } else if (elem.tag == "enum") {
+                    // TODO: enum can have also api attribute
+                    sv name = elem.get_attr_value("name");
+                    enums.find(name)->second.deprecated = explanation;
+                } else if (elem.tag == "command") {
+                    // TODO: Currently ignoring commands
+                } else if (elem.tag == "comment") {
+                    // CHECK: ignore standalone comments?
+                } else {
+                    throw std::runtime_error{ "Unknown tag '" + std::string(elem.tag) + "' in deprecate tag." };
+                }
             }
 
+        } else if (elem.tag == "remove") {
+            // TODO: handle profile, api, reasonlink and comment attributes
+            for (Node* type : elem.children) {
+                if (type->isText()) {
+                    std::cout << "- Skipping TEXT: " << type->asText() << std::endl;
+                    continue;
+                }
+
+                Element& elem = type->asElement();
+
+                if (elem.tag == "type") {
+                    sv name = elem.get_attr_value("name");
+                    Index i = index.find(name)->second;
+                    required_types_ordered[i] = nullptr;
+                    index.erase(name);
+
+                } else if (elem.tag == "enum") {
+                    // TODO: currently cant remove enums
+                } else if (elem.tag == "command") {
+                    // TODO: Currently ignoring commands
+                } else if (elem.tag == "comment") {
+                    // CHECK: ignore standalone comments?
+                } else {
+                    throw std::runtime_error{ "Unknown tag '" + std::string(elem.tag) + "' in remove tag." };
+                }
+            }
+
+        } else {
+            std::cout << "- TODO: skipping: " << elem.tag << std::endl;
         }
+
     }
 }
 
@@ -1358,22 +1471,10 @@ void Generator::generate(vkg_gen::xml::Dom& dom, std::ofstream& file, void* conf
     //generate_API_constants(dom, file);
     //generate_types(dom, file);
 
-    parse_types(dom, file);
+    parse_types(dom);
     parse_enums(dom);
 
-    auto it = std::ranges::find_if(dom.root->asElement().children, has_tag("feature") && has_attr("name", "VK_VERSION_1_0"));
-    if (it == dom.root->asElement().children.end()) {
-        throw std::runtime_error{ "VK_VERSION_1_0 not found" };
-    }
-    add_required_feature((*it)->asElement(), dom.arena);
-
-
-
-    it = std::ranges::find_if(dom.root->asElement().children, has_tag("feature") && has_attr("name", "VK_VERSION_1_1"));
-    if (it == dom.root->asElement().children.end()) {
-        throw std::runtime_error{ "VK_VERSION_1_0 not found" };
-    }
-    add_required_feature((*it)->asElement(), dom.arena);
+    add_required_version_feature("VK_VERSION_1_4", dom);
 
 
     for (auto& [_, enum_] : enums) {
@@ -1381,6 +1482,9 @@ void Generator::generate(vkg_gen::xml::Dom& dom, std::ofstream& file, void* conf
     }
 
     for (Type* p : required_types_ordered) {
+        if (p == nullptr)
+            continue;
+
         auto& type = *p;
         if (exclude_platforms(type.name)) {
             std::cout << "Excluding: " << type.name << std::endl;
@@ -1428,12 +1532,48 @@ void Generator::generate(vkg_gen::xml::Dom& dom, std::ofstream& file, void* conf
 //
     //};
 
-    auto extension_filter = has_tag("extension");
-    auto extensions = dom.getChildrenByTag("extensions")[0]->asElement();
-    for (Node* child : extensions.children | std::views::filter(extension_filter)) {
-        auto& ch = child->asElement();
-        std::cout << ch.get_attr_value("name") << " = " << ch.get_attr_value("number") << ",\n";
+    //auto extension_filter = has_tag("extension");
+    //auto extensions = dom.getChildrenByTag("extensions")[0]->asElement();
+    //for (Node* child : extensions.children | std::views::filter(extension_filter)) {
+    //    auto& ch = child->asElement();
+    //    std::cout << ch.get_attr_value("name") << " = " << ch.get_attr_value("number") << ",\n";
+    //}
+    using Element = vkg_gen::xml::Element;
+
+    //auto asElementConstTransform = std::views::transform([](const Node* n) ->const Element& { return n->asElement(); });
+    auto feature_filter = has_tag("feature") && [](const Node* n) { return n->isElement() && n->asElement().get_attr_value("name").contains("VK_VERSION"); };
+
+
+    auto asElementTransform = std::views::transform([](Node* n) -> Element& { return n->asElement(); });
+    auto it = std::ranges::find_if(dom.root->asElement().children, has_tag("extensions"));
+    Element& extensionsTag = (*it)->asElement();
+
+    //parse_enums(dom);
+
+    for (Element& extension : extensionsTag.children | std::views::filter(has_tag("extension")) | asElementTransform) {
+        for (Element& require : extension.children | std::views::filter(has_tag("require")) | asElementTransform) {
+            for (Element& enum_ : require.children | std::views::filter(has_tag("enum") && has_attr_name("offset") && !has_attr_name("extnumber")) | asElementTransform) {
+                std::cout << "Found enum extension with offset and without extnumber: " << "<enum ";
+                for (auto& attr : enum_.attrs) {
+                    std::cout << attr.name << "='" << attr.value << "', ";
+                }
+                std::cout << ">\n";
+            }
+
+            //for (Element& enum_ : require.children | std::views::filter(has_tag("enum") && has_attr_name("offset")) | asElementTransform) {
+            //    TypeEnum& parent = enums.find(enum_.get_attr_value("extends"))->second;
+            //    if (parent.type != TypeEnum::Type::Normal) {
+            //        std::cout << "Found enum extension with offset on enum(" << to_string(parent.type) << "): " << "<enum ";
+            //        for (auto& attr : enum_.attrs) {
+            //            std::cout << attr.name << "='" << attr.value << "', ";
+            //        }
+            //        std::cout << ">\n";
+//
+            //    }
+            //}
+        }
     }
 #endif
-}
+};
+
 
