@@ -3,7 +3,7 @@
  * @author Jaroslav Hucel (xhucel00@vutbr.cz)
  * @brief
  * @date Created: 12. 11. 2025
- * @date Modified: 14. 12. 2025
+ * @date Modified: 15. 12. 2025
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -20,7 +20,6 @@
 #include "../xml/xml.hpp"
 #include "../arena.hpp"
 #include "generator.hpp"
-
 
 namespace boilerplate {
     static const char* HANDLE_DEFINITION = ""
@@ -64,7 +63,11 @@ namespace boilerplate {
         "#include \"vk_video/vulkan_video_codec_vp9std.h\"\n";
 }
 
+
+//FIXME:
 using namespace vkg_gen::xml;
+
+using namespace vkg_gen::Generator;
 
 template <typename Func>
 concept NodePredicate = requires(const Func & f, const Node * n) {
@@ -183,7 +186,7 @@ std::ostream& helper_test(std::ostream& os, const vkg_gen::xml::Node* node) {
 }
 
 
-bool bool_from_string(std::string_view s) {
+bool vkg_gen::Generator::bool_from_string(std::string_view s) {
     if (s == "true")
         return true;
     if (s == "false")
@@ -194,7 +197,7 @@ bool bool_from_string(std::string_view s) {
         return false;
     }
 
-    throw std::runtime_error("Invalid boolean value: '" + std::string(s) + "'");
+    throw my_error("Invalid boolean value: '" + std::string(s) + "'");
 }
 
 Member::ExternSync externsync_from_string(std::string_view s) {
@@ -205,7 +208,7 @@ Member::ExternSync externsync_from_string(std::string_view s) {
     if (s == "maybe")
         return Member::ExternSync::Maybe;
 
-    throw std::runtime_error("Invalid externsync value: '" + std::string(s) + "'");
+    throw my_error("Invalid externsync value: '" + std::string(s) + "'");
 }
 
 
@@ -231,7 +234,7 @@ Type::Category Type::category_from_string(std::string_view s) const {
     }
     err += '}';
 
-    throw std::runtime_error(err);
+    throw my_error(err);
 }
 
 void Type::parse_struct(const vkg_gen::xml::Element& elem, vkg_gen::Arena& arena) {
@@ -248,7 +251,7 @@ void Type::parse_struct(const vkg_gen::xml::Element& elem, vkg_gen::Arena& arena
         else if (ch.tag == "member")
             struct_->members.emplace_back(Member(ch, arena, Member::ParentType::Struct));
         else {
-            throw std::runtime_error{ "Unknown child element: " + std::string(ch.tag) };
+            throw my_error{ "Unknown child element: " + std::string(ch.tag) };
         }
     }
 
@@ -269,7 +272,7 @@ void Type::parse_union(const vkg_gen::xml::Element& elem, vkg_gen::Arena& arena)
         else if (ch.tag == "member")
             union_->members.emplace_back(Member(ch, arena, Member::ParentType::Union));
         else {
-            throw std::runtime_error{ "Unknown child element: " + std::string(ch.tag) };
+            throw my_error{ "Unknown child element: " + std::string(ch.tag) };
         }
     }
 };
@@ -297,7 +300,7 @@ Type::Type(const vkg_gen::xml::Element& elem, vkg_gen::Arena& arena) : elem(elem
                     break;
                 }
             } else if (specific_attr != category)
-                throw std::runtime_error("Invalid combination of attributes and category on <type>");
+                throw my_error("Invalid combination of attributes and category on <type>");
 
         } else if (attr.name == "name")
             name = attr.value;
@@ -321,7 +324,7 @@ Type::Type(const vkg_gen::xml::Element& elem, vkg_gen::Arena& arena) : elem(elem
             if (specific_attr == Category::None) {
                 handle = arena.make<TypeHandle>();
             } else if (specific_attr != Category::Handle) {
-                throw std::runtime_error("unexpected attribute on <type>");
+                throw my_error("unexpected attribute on <type>");
             }
 
             if (attr.name == "parent")
@@ -330,22 +333,22 @@ Type::Type(const vkg_gen::xml::Element& elem, vkg_gen::Arena& arena) : elem(elem
                 handle->objtypeenum = attr.value;
         } else if (attr.name == "returnedonly") {
             if (specific_attr == Category::None) {
-                //FIXME:
+                // TODO: this is a hack, and duplicates code
                 auto it = std::ranges::find(elem.attrs, "category", &Attribute::name);
                 if (it == elem.attrs.end())
-                    throw std::runtime_error("unexpected attribute on <type>");
+                    throw my_error("unexpected attribute on <type>");
                 specific_attr = category_from_string(it->value);
 
                 if (specific_attr == Category::Struct) {
-
                     struct_ = arena.make<TypeStruct>();
                     struct_->returned_only = bool_from_string(attr.value);
-                } else if (specific_attr == Category::Union) {
 
+                } else if (specific_attr == Category::Union) {
                     union_ = arena.make<TypeUnion>();
                     union_->returned_only = bool_from_string(attr.value);
+
                 } else {
-                    throw std::runtime_error("unexpected attribute on <type>");
+                    throw my_error("unexpected attribute on <type>");
                 }
 
 
@@ -354,7 +357,7 @@ Type::Type(const vkg_gen::xml::Element& elem, vkg_gen::Arena& arena) : elem(elem
             } else if (specific_attr == Category::Union) {
                 union_->returned_only = bool_from_string(attr.value);
             } else {
-                throw std::runtime_error("unexpected attribute on <type>");
+                throw my_error("unexpected attribute on <type>");
             }
 
 
@@ -363,7 +366,7 @@ Type::Type(const vkg_gen::xml::Element& elem, vkg_gen::Arena& arena) : elem(elem
             if (specific_attr == Category::None) {
                 struct_ = arena.make<TypeStruct>();
             } else if (specific_attr != Category::Struct && specific_attr != Category::Union) {
-                throw std::runtime_error("unexpected attribute on <type>");
+                throw my_error("unexpected attribute on <type>");
             }
 
             if (attr.name == "structextends")
@@ -374,19 +377,19 @@ Type::Type(const vkg_gen::xml::Element& elem, vkg_gen::Arena& arena) : elem(elem
                 struct_->returned_only = bool_from_string(attr.value);
         } else if (attr.name == "bitvalues") {
             if (specific_attr != Category::None && specific_attr != Category::Bitmask) {
-                throw std::runtime_error("unexpected attribute on <type>");
+                throw my_error("unexpected attribute on <type>");
             }
 
             specific_attr = Category::Bitmask;
             bitvalues = attr.value;
         } else {
-            throw std::runtime_error("unknown attribute on <type>: " + std::string(attr.name));
+            throw my_error("unknown attribute on <type>: " + std::string(attr.name));
         }
 
     }
 
     if (specific_attr == Category::Handle && handle->objtypeenum.empty() && alias.empty())
-        throw std::runtime_error("objtypeenum attribute is required on <type category=\"handle\"> if alias attribute is not present");
+        throw my_error("objtypeenum attribute is required on <type category=\"handle\"> if alias attribute is not present");
 
 
     if (specific_attr == Category::Struct)
@@ -395,12 +398,13 @@ Type::Type(const vkg_gen::xml::Element& elem, vkg_gen::Arena& arena) : elem(elem
     if (specific_attr == Category::Union)
         parse_union(elem, arena);
 
+    // TODO: check which types can have arbutrary C code
     if (name.empty()) {
         auto it = std::ranges::find_if(elem.children, has_tag("name"));
         if (it != elem.children.end()) {
             name = (*it)->asElement().children[0]->asText();
         } else {
-            throw std::runtime_error("name attribute or <name> tag is required in <type>");
+            throw my_error("name attribute or <name> tag is required in <type>");
         }
     };
 }
@@ -502,15 +506,15 @@ void generate_type(const vkg_gen::xml::Element& type, vkg_gen::Arena& arena, std
     switch (t.category) {
 
     case Type::Category::Basetype:
-        if (!t.deprecated.empty()) throw std::runtime_error("deprecated basetype not supported yet");
+        if (!t.deprecated.empty()) throw my_error("deprecated basetype not supported yet");
         _gen_arbitrary_C_code_in_type(type, file);
         break;
     case Type::Category::Bitmask:
-        if (!t.deprecated.empty()) throw std::runtime_error("deprecated bitmask not supported yet");
+        if (!t.deprecated.empty()) throw my_error("deprecated bitmask not supported yet");
         _gen_arbitrary_C_code_in_type(type, file); // bitvalues??
         break;
     case Type::Category::Define:
-        if (!t.deprecated.empty()) throw std::runtime_error("deprecated define not supported yet");
+        if (!t.deprecated.empty()) throw my_error("deprecated define not supported yet");
         _gen_arbitrary_C_code_in_type(type, file);
         break;
     case Type::Category::Enum:
@@ -520,12 +524,12 @@ void generate_type(const vkg_gen::xml::Element& type, vkg_gen::Arena& arena, std
         break;
 
     case Type::Category::Handle:
-        if (!t.deprecated.empty()) throw std::runtime_error("deprecated handle not supported yet");
+        if (!t.deprecated.empty()) throw my_error("deprecated handle not supported yet");
         if (type.children.size() == 0)
             _gen_arbitrary_C_code_in_type(type, file);
         break; // TODO: handle
     case Type::Category::Funcpointer:
-        if (!t.deprecated.empty()) throw std::runtime_error("deprecated handle not supported yet");
+        if (!t.deprecated.empty()) throw my_error("deprecated handle not supported yet");
         _gen_arbitrary_C_code_in_type(type, file);
         break;
     case Type::Category::Include:
@@ -556,7 +560,7 @@ void generate_types(vkg_gen::xml::Dom& dom, std::ofstream& file) {
         });
 
     if (it == children.end()) {
-        throw std::runtime_error("expected <types> tag");
+        throw my_error("expected <types> tag");
     };
 
     for (; it != children.end(); ++it)
@@ -583,7 +587,7 @@ void generate_base_types(const vkg_gen::xml::Dom& dom, std::ofstream& file) {
     auto it = std::ranges::find_if(children, has_tag("types"));
 
     if (it == children.end()) {
-        throw std::runtime_error("expected <types> tag");
+        throw my_error("expected <types> tag");
     };
 
     for (; it != children.end(); ++it)
@@ -599,7 +603,7 @@ void generate_base_types(const vkg_gen::xml::Dom& dom, std::ofstream& file) {
                 if (ch.tag == "name") {
                     // TODO: register it
                     if (ch.children.size() != 1 || !ch.children[0]->isText()) {
-                        throw std::runtime_error("expected <name> to have one text child");
+                        throw my_error("expected <name> to have one text child");
                     };
 
                     file << ch.children[0]->asText();
@@ -607,7 +611,7 @@ void generate_base_types(const vkg_gen::xml::Dom& dom, std::ofstream& file) {
                 } else if (ch.tag == "type") {
                     // TODO: find it
                     if (ch.children.size() != 1 || !ch.children[0]->isText()) {
-                        throw std::runtime_error("expected <name> to have one text child");
+                        throw my_error("expected <name> to have one text child");
                     };
 
                     file << ch.children[0]->asText();
@@ -650,7 +654,7 @@ void generate_enums(const vkg_gen::xml::Dom& dom, std::ofstream& file) {
                 if (!val.get_attr_value("alias").empty())
                     file << " = " << val.get_attr_value("alias");
                 else
-                    throw std::runtime_error{ "No alias for enum value: " + std::string(val.get_attr_value("name")) };
+                    throw my_error{ "No alias for enum value: " + std::string(val.get_attr_value("name")) };
             } else {
                 file << " = " << val.get_attr_value("value");
             }
@@ -684,7 +688,7 @@ void generate_API_constants(const vkg_gen::xml::Dom& dom, std::ofstream& file) {
 
     auto tmp = get_single_if_exists(dom.children(dom.root) | std::views::filter(expr));
     if (tmp == nullptr) {
-        throw std::runtime_error{ "API constants must have only one element" };
+        throw my_error{ "API constants must have only one element" };
     }
 
     auto& constants = (*tmp)->asElement();
@@ -705,7 +709,7 @@ TypeEnum::Type TypeEnum::type_from_string(std::string_view s) {
     if (s == "bitmask") return Type::Bitmask;
     if (s == "enum") return Type::Normal;
     if (s == "constants") return Type::Constants;
-    throw std::runtime_error{ "Unknown type: " + std::string(s) };
+    throw my_error{ "Unknown type of enum: " + std::string(s) };
 }
 
 TypeEnum::Bitwidth TypeEnum::bitwidth_from_string(std::string_view s) {
@@ -713,7 +717,7 @@ TypeEnum::Bitwidth TypeEnum::bitwidth_from_string(std::string_view s) {
     if (s == "16") return Bitwidth::_16;
     if (s == "32") return Bitwidth::_32;
     if (s == "64") return Bitwidth::_64;
-    throw std::runtime_error{ "Unknown bitwidth: " + std::string(s) };
+    throw my_error{ "Unknown bitwidth: " + std::string(s) };
 }
 
 TypeEnum::TypeEnum(const vkg_gen::xml::Element& e, vkg_gen::Arena& arena) {
@@ -727,18 +731,18 @@ TypeEnum::TypeEnum(const vkg_gen::xml::Element& e, vkg_gen::Arena& arena) {
         } else if (attr.name == "bitwidth") {
             bitwidth = bitwidth_from_string(attr.value);
         } else {
-            throw std::runtime_error{ "Unknown attribute: " + std::string(attr.name) };
+            throw my_error{ "Unknown attribute: " + std::string(attr.name) };
         }
     };
 
     if (name.empty())
-        throw std::runtime_error{ "Enum must have a name" };
+        throw my_error{ "Enum must have a name" };
 
     if (type == Type::None)
-        throw std::runtime_error{ "Enum must have a type" };
+        throw my_error{ "Enum must have a type" };
 
     if (bitwidth != Bitwidth::None && type == Type::Constants)
-        throw std::runtime_error{ "Constants cannot have a bitwidth, they specify the type instead" };
+        throw my_error{ "Constants cannot have a bitwidth, they specify the type instead" };
 
 
     for (Node* child : e.children) {
@@ -760,14 +764,23 @@ TypeEnum::TypeEnum(const vkg_gen::xml::Element& e, vkg_gen::Arena& arena) {
         }
 
         if (ch.tag != "enum")
-            throw std::runtime_error("unknown child of <enum>: " + std::string(ch.tag));
+            throw my_error("unknown child of <enum>: " + std::string(ch.tag));
 
         items.emplace_back(EnumItem::from_xml(ch, arena, this));
     };
 };
 
-//FIXME:
-std::string to_string(TypeEnum::Bitwidth b) { return "TODO"; }
+std::string to_string(TypeEnum::Bitwidth b) {
+    switch (b) {
+    case TypeEnum::Bitwidth::_8: return "8";
+    case TypeEnum::Bitwidth::_16: return "16";
+    case TypeEnum::Bitwidth::_32: return "32";
+    case TypeEnum::Bitwidth::_64: return "64";
+    case TypeEnum::Bitwidth::None: return "None";
+    }
+    // TODO: UNREACHABLE
+    throw my_error{ "Unknown bitwidth" };
+}
 std::string to_string(TypeEnum::Type t) {
     switch (t) {
     case TypeEnum::Type::None: return "None";
@@ -776,17 +789,17 @@ std::string to_string(TypeEnum::Type t) {
     case TypeEnum::Type::Constants: return "constants";
     }
     //TODO:
-    throw std::runtime_error{ "Unknown type" };
+    throw my_error{ "Unknown type" };
 }
 
 uint8_t bitpos_from_string(std::string_view s) {
     int value = 0;
     for (char c : s) {
         if (c < '0' || c > '9')
-            throw std::runtime_error{ "Invalid bitpos: " + std::string(s) };
+            throw my_error{ "Invalid bitpos: " + std::string(s) };
         value = value * 10 + (c - '0');
         if (value > BITPOS_MAX)
-            throw std::runtime_error{ "Invalid bitpos: " + std::string(s) };
+            throw my_error{ "Invalid bitpos: " + std::string(s) };
     }
     return value;
 }
@@ -794,7 +807,7 @@ uint8_t bitpos_from_string(std::string_view s) {
 Member::LimitType Member::limit_type_from_string(std::string_view s) {
     uint16_t value = 0;
 
-#define LIMIT(x, y) if (tok == x) { if (value & (uint16_t)LimitType::y) throw std::runtime_error{ "Duplicate limit of " x " in: " + std::string(s) } ; value |= (uint16_t)LimitType::y;}
+#define LIMIT(x, y) (tok == x) { if (value & (uint16_t)LimitType::y) throw my_error{ "Duplicate limit of " x " in: " + std::string(s) } ; value |= (uint16_t)LimitType::y;}
 
     size_t start = 0;
 
@@ -802,21 +815,22 @@ Member::LimitType Member::limit_type_from_string(std::string_view s) {
         sv tok = s.substr(start, s.find(','));
         start += tok.size() + 1;
 
-        LIMIT("min", Min)
-else LIMIT("max", Max)
-        else LIMIT("not", Not)
-        else LIMIT("pot", Pot)
-        else LIMIT("mul", Mul)
-        else LIMIT("bits", Bits)
-        else LIMIT("bitmask", Bitmask)
-        else LIMIT("range", Range)
-        else LIMIT("struct", Struct)
-        else LIMIT("exact", Exact)
-        else LIMIT("noauto", NoAuto)
+        if LIMIT("min", Min)
+        else if LIMIT("max", Max)
+        else if LIMIT("not", Not)
+        else if LIMIT("pot", Pot)
+        else if LIMIT("mul", Mul)
+        else if LIMIT("bits", Bits)
+        else if LIMIT("bitmask", Bitmask)
+        else if LIMIT("range", Range)
+        else if LIMIT("struct", Struct)
+        else if LIMIT("exact", Exact)
+        else if LIMIT("noauto", NoAuto)
         else
-            throw std::runtime_error{ "Unknown limit type: " + std::string(s) };
+            throw my_error{ "Unknown limit type: " + std::string(s) };
     }
     return (Member::LimitType)value;
+#undef LIMIT
 }
 
 Member::Member(const vkg_gen::xml::Element& e, vkg_gen::Arena& arena, ParentType parent_type, bool is_standalone_comment) :
@@ -863,7 +877,7 @@ Member::Member(const vkg_gen::xml::Element& e, vkg_gen::Arena& arena, ParentType
         } else if (attr.name == "featurelink") {
             featurelink = attr.value;
         } else {
-            throw std::runtime_error{ "Unknown attribute: " + std::string(attr.name) };
+            throw my_error{ "Unknown attribute for member: " + std::string(attr.name) };
         }
     }
 
@@ -875,7 +889,7 @@ Member::Member(const vkg_gen::xml::Element& e, vkg_gen::Arena& arena, ParentType
         auto& ch = child->asElement();
         if (ch.tag == "name") {
             if (!name.empty())
-                throw std::runtime_error{ "Duplicate name in member: " + std::string(name) };
+                throw my_error{ "Duplicate name in member: " + std::string(name) };
             name = ch.children[0]->asText(); // TODO: check_name
             stringify += " ";
             stringify += name;
@@ -892,10 +906,10 @@ Member::Member(const vkg_gen::xml::Element& e, vkg_gen::Arena& arena, ParentType
 
         } else if (ch.tag == "comment") {
             if (!comment.empty())
-                throw std::runtime_error{ "Duplicate comment in member: " + std::string(comment) };
+                throw my_error{ "Duplicate comment in member: " + std::string(comment) };
             comment = ch.children[0]->asText();
         } else {
-            throw std::runtime_error{ "Unknown child: " + std::string(ch.tag) };
+            throw my_error{ "Unknown child: " + std::string(ch.tag) };
         }
     }
     stringify += ";";
@@ -934,19 +948,19 @@ TypeEnum::EnumItem TypeEnum::EnumItem::from_xml(const vkg_gen::xml::Element& ele
             item.deprecated = attr.value;
         } else if (attr.name == "alias") {
             if (value_specified)
-                throw std::runtime_error{ "Enum item cannot have both 'value/bitpos' and 'alias'" };
+                throw my_error{ "Enum item cannot have both 'value/bitpos' and 'alias'" };
             if (offset_specified)
-                throw std::runtime_error{ "Enum item cannot have both 'alias' and 'extnumber/dir/offset'" };
+                throw my_error{ "Enum item cannot have both 'alias' and 'extnumber/dir/offset'" };
 
             item.alias = attr.value;
             item.is_alias = true;
         } else if (attr.name == "value") {
             if (item.is_alias)
-                throw std::runtime_error{ "Enum item cannot have both 'value' and 'alias'" };
+                throw my_error{ "Enum item cannot have both 'value' and 'alias'" };
             if (value_specified)
-                throw std::runtime_error{ "Enum item cannot have both 'value' and 'bitpos'" };
+                throw my_error{ "Enum item cannot have both 'value' and 'bitpos'" };
             if (offset_specified)
-                throw std::runtime_error{ "Enum item cannot have both 'value' and 'extnumber/dir/offset'" };
+                throw my_error{ "Enum item cannot have both 'value' and 'extnumber/dir/offset'" };
 
             if (parent->type == Type::Constants)
                 item.constant.value = attr.value;
@@ -961,14 +975,14 @@ TypeEnum::EnumItem TypeEnum::EnumItem::from_xml(const vkg_gen::xml::Element& ele
 
         } else if (attr.name == "bitpos") {
             if (item.is_alias)
-                throw std::runtime_error{ "Enum item cannot have both 'bitpos' and 'alias'" };
+                throw my_error{ "Enum item cannot have both 'bitpos' and 'alias'" };
             if (value_specified)
-                throw std::runtime_error{ "Enum item cannot have both 'bitpos' and 'value'" };
+                throw my_error{ "Enum item cannot have both 'bitpos' and 'value'" };
             if (offset_specified)
-                throw std::runtime_error{ "Enum item cannot have both 'bitpos' and 'extnumber/dir/offset'" };
+                throw my_error{ "Enum item cannot have both 'bitpos' and 'extnumber/dir/offset'" };
 
             if (parent->type != Type::Bitmask)
-                throw std::runtime_error{ "Invalid 'bitpos' attribute for enum type: " + to_string(parent->type) };
+                throw my_error{ "Invalid 'bitpos' attribute for enum type: " + to_string(parent->type) };
             item.bitmask.bitpos = bitpos_from_string(attr.value);
             item.bitmask.is_bitfield = true;
             // TODO: check range with bitwidth
@@ -977,16 +991,16 @@ TypeEnum::EnumItem TypeEnum::EnumItem::from_xml(const vkg_gen::xml::Element& ele
 
         } else if (attr.name == "type") {
             if (parent->type != Type::Constants)
-                throw std::runtime_error{ "Invalid 'type' attribute for enum type: " + to_string(parent->type) };
+                throw my_error{ "Invalid 'type' attribute for enum type: " + to_string(parent->type) };
             assert(parent->bitwidth == Bitwidth::None);
             item.constant.type = attr.value; // TODO: parse
         } else if (extend_parent && (attr.name == "extends" || attr.name == "extnumber" || attr.name == "dir" || attr.name == "offset")) {
             if (attr.name != "extends") {
                 offset_specified = true;
                 if (value_specified)
-                    throw std::runtime_error{ "Enum item cannot have both 'value/bitpos' and 'extnumber/dir/offset'" };
+                    throw my_error{ "Enum item cannot have both 'value/bitpos' and 'extnumber/dir/offset'" };
                 if (item.is_alias)
-                    throw std::runtime_error{ "Enum item cannot have both 'alias' and 'extnumber/dir/offset'" };
+                    throw my_error{ "Enum item cannot have both 'alias' and 'extnumber/dir/offset'" };
             }
 
             if (attr.name == "extnumber")
@@ -996,28 +1010,28 @@ TypeEnum::EnumItem TypeEnum::EnumItem::from_xml(const vkg_gen::xml::Element& ele
             else if (attr.name == "offset")
                 offset = attr.value;
         } else {
-            throw std::runtime_error{ "Unknown attribute: " + std::string(attr.name) };
+            throw my_error{ "Unknown attribute: " + std::string(attr.name) };
 
         }
     };
 
     if (item.name.empty())
-        throw std::runtime_error{ "Enum item must have a name" };
+        throw my_error{ "Enum item must have a name" };
 
 
 
     if (extend_parent) {
         if (!value_specified && !item.is_alias && !offset_specified)
             // TODO: add information on where wre we and some enum info
-            throw std::runtime_error{ "Enum item must have'value'/'bitpos', 'alias' or 'offset' attribute when extending parent." };
+            throw my_error{ "Enum item must have'value'/'bitpos', 'alias' or 'offset' attribute when extending parent." };
     } else {
         if (!value_specified && !item.is_alias)
-            throw std::runtime_error{ "Enum item must have 'value'/'bitpos' or 'alias' attribute" };
+            throw my_error{ "Enum item must have 'value'/'bitpos' or 'alias' attribute" };
     }
 
     if (offset_specified) {
         if (parent->type != Type::Normal)
-            throw std::runtime_error{ "Offset/extnumber/dir can only be used with 'normal' enum type, not bitmask or constant." };
+            throw my_error{ "Offset/extnumber/dir can only be used with 'normal' enum type, not bitmask or constant." };
 
         if (extnumber.empty())
             std::cout << "FIXME: unhandled missing extnumber." << std::endl;
@@ -1026,7 +1040,7 @@ TypeEnum::EnumItem TypeEnum::EnumItem::from_xml(const vkg_gen::xml::Element& ele
         int ext_number = std::stoi(extnumber.data()) - 1;
         int offset_i = std::stoi(offset.data());
         if (offset_i > 1000) // 3 digits
-            throw std::runtime_error{ "Offset must be less than 1000" };
+            throw my_error{ "Offset must be less than 1000" };
 
         // Vulkan spec:
         long normal_value = 1000'000'000 + ext_number * 1000 + offset_i;
@@ -1103,17 +1117,17 @@ void Generator::generate_enum_alias(Type& e, std::ofstream& file) {
     if (e.alias.empty())
         return;
 
-    file << LineComment{ e.comment, true };
+    file << LineComment{ e.comment };
     file << "using " << e.name << Deprecate{ e.deprecated } << "= " << e.alias << ";\n\n";
 }
 
 void Generator::generate_enum(TypeEnum& e, std::ofstream& file) {
-    file << LineComment{ e.comment, true };
+    file << LineComment{ e.comment };
 
     if (e.type == TypeEnum::Type::Constants) {
         for (auto& item : e.items) {
             file << "constexpr " << item.constant.type << " " << item.name << " = " << item.constant.value << ";"
-                << LineComment{ item.comment } << '\n';
+                << LineComment{ item.comment, false } << '\n';
         }
         file << '\n';
         return;
@@ -1148,11 +1162,11 @@ void Generator::generate_enum(TypeEnum& e, std::ofstream& file) {
             }
 
         } else {
-            throw std::runtime_error("TODO: internal error");
+            throw my_error("TODO: internal error");
             assert(false);
         }
 
-        file << "," << LineComment{ item.comment } << '\n';
+        file << "," << LineComment{ item.comment, false } << '\n';
     }
     file << "};\n\n";
 }
@@ -1210,7 +1224,7 @@ void Generator::generate_union(Type& s, std::ofstream& file) {
 }
 
 void Generator::generate_bitmask(Type& bitmask, std::ofstream& file) {
-    file << LineComment{ bitmask.comment, true };
+    file << LineComment{ bitmask.comment };
 
     file << "using " << bitmask.name << Deprecate{ bitmask.deprecated } << "= ";
     if (!bitmask.alias.empty()) {
@@ -1220,7 +1234,7 @@ void Generator::generate_bitmask(Type& bitmask, std::ofstream& file) {
         // CHECK: revisit this
         auto it = std::ranges::find_if(bitmask.elem.children, has_tag("type"));
         if (it == bitmask.elem.children.end())
-            throw std::runtime_error{ "bitmask type not found" };
+            throw my_error{ "bitmask type not found" };
 
         file << (*it)->asElement().children[0]->asText() << ";\n"; // TODO: check children
         std::cout << "bitmask: " << bitmask.name << " = " << (*it)->asElement().children[0]->asText() << std::endl;
@@ -1236,10 +1250,10 @@ void Generator::generate_handle(Type& h, std::ofstream& file, TypeEnum& obj_enum
     auto it = std::ranges::find(obj_enum.items, h.handle->objtypeenum, &TypeEnum::EnumItem::name);
     if (it == obj_enum.items.end())
         std::cout << "FIXME: Handle '" << h.name << "' did not found matching objtypeenum '" << h.handle->objtypeenum << "' in enum '" << obj_enum.name << "'" << std::endl;
-    //throw std::runtime_error{ std::format("Handle '{}' did not found matching objtypeenum '{}' in enum '{}'", h.name, h.handle->objtypeenum, obj_enum.name) };
+    //throw my_error{ std::format("Handle '{}' did not found matching objtypeenum '{}' in enum '{}'", h.name, h.handle->objtypeenum, obj_enum.name) };
 
     file << "using " << h.name << Deprecate{ h.deprecated } << "= "
-        << "Handle<struct " << obj_enum.name << "_T*>" << ";" << LineComment{ h.comment } << '\n';
+        << "Handle<struct " << obj_enum.name << "_T*>" << ";" << LineComment{ h.comment, false } << '\n';
 }
 
 void Generator::add_required_type(sv name) {
@@ -1322,7 +1336,7 @@ void Generator::add_required_version_feature(sv name, vkg_gen::xml::Dom& dom) {
     // TODO: some feature map is needed
     auto it = std::ranges::find_if(dom.root->asElement().children, has_tag("feature") && has_attr("name", name));
     if (it == dom.root->asElement().children.end()) {
-        throw std::runtime_error{ std::format("Feature (version) '{}' not found", name) };
+        throw my_error{ std::format("Feature (version) '{}' not found", name) };
     }
     Element& feature = (*it)->asElement();
 
@@ -1409,7 +1423,7 @@ void Generator::add_required_version_feature(sv name, vkg_gen::xml::Dom& dom) {
                 } else if (elem.tag == "comment") {
                     // CHECK: ignore standalone comments?
                 } else {
-                    throw std::runtime_error{ "Unknown tag '" + std::string(elem.tag) + "' in deprecate tag." };
+                    throw my_error{ "Unknown tag '" + std::string(elem.tag) + "' in deprecate tag." };
                 }
             }
 
@@ -1436,7 +1450,7 @@ void Generator::add_required_version_feature(sv name, vkg_gen::xml::Dom& dom) {
                 } else if (elem.tag == "comment") {
                     // CHECK: ignore standalone comments?
                 } else {
-                    throw std::runtime_error{ "Unknown tag '" + std::string(elem.tag) + "' in remove tag." };
+                    throw my_error{ "Unknown tag '" + std::string(elem.tag) + "' in remove tag." };
                 }
             }
 
@@ -1476,7 +1490,7 @@ void Generator::generate(vkg_gen::xml::Dom& dom, std::ofstream& file, void* conf
 
     add_required_version_feature("VK_VERSION_1_4", dom);
 
-
+    // Currently generating all enums
     for (auto& [_, enum_] : enums) {
         generate_enum(enum_, file);
     }
@@ -1499,15 +1513,17 @@ void Generator::generate(vkg_gen::xml::Dom& dom, std::ofstream& file, void* conf
             generate_union(type, file);
             break;
         case Type::Category::Enum:
+            // TODO: this should not be needed and should not even happen
             generate_enum_alias(type, file);
             break;
 
         case Type::Category::Bitmask:
             generate_bitmask(type, file);
             break;
-            // TODO: provizorní řešení
+
+            // TODO: temporary solution
         case Type::Category::Basetype:
-            //case Type::Category::Define:
+            // case Type::Category::Define:
         case Type::Category::Funcpointer:
             _gen_arbitrary_C_code_in_type(type.elem, file);
             break;

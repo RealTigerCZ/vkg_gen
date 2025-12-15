@@ -5,16 +5,22 @@
 
 #include <assert.h>
 
+
 #if	defined(NDEBUG) || defined(IGNORE_NOT_IMPLEMENTED)
 #define NOT_IMPLEMENTED()
+#define UNUSED(x)
 #define my_error std::runtime_error
 #else
 
-// Using gcc specific experimental library
+// Using gcc specific experimental library, but it should be part of C++23
 #include <stacktrace>
+
 #include <source_location>
 #include <iostream>
 #include <sstream>
+#include <ranges>
+
+#define UNUSED(x) (void)(x)
 
 [[noreturn]] inline void NOT_IMPLEMENTED() {
     std::cerr << "ERROR: Called NOT_IMPLEMENTED.\nStacktrace:\n";

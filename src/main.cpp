@@ -3,7 +3,7 @@
  * @author Jaroslav Hucel (xhucel00@vutbr.cz)
  * @brief TODO:
  * @date Created: 30. 07. 2025
- * @date Modified: 1. 11. 2025
+ * @date Modified: 15. 12. 2025
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -20,7 +20,7 @@
 static const char* FILE_PATH = "vk.xml";
 static const char* OUT_PATH = "out.hpp";
 
-
+#if 0
 void debug_print_node(const vkg_gen::xml::Node& node, int indent = 0, int max_indent = 0) {
     if (max_indent > 0 && indent > max_indent)
         return;
@@ -115,7 +115,7 @@ void debug_print(const vkg_gen::xml::Dom& dom) {
     std::cout << "Root: " << '\n';
     debug_print_node_short(*dom.root);
 }
-
+#endif
 
 
 void test(vkg_gen::xml::Dom& dom) {
@@ -135,7 +135,7 @@ void test(vkg_gen::xml::Dom& dom) {
     //generate_API_constants(dom, file);
     //generate_enums(dom, file);
 
-    Generator generator;
+    vkg_gen::Generator::Generator generator;
     generator.generate(dom, file);
 
 }
