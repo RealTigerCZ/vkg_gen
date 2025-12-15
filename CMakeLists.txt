@@ -24,10 +24,14 @@ set(APP_INCLUDES
 add_executable(${APP_NAME} ${APP_SOURCES} ${APP_INCLUDES})
 
 # TODO: debug flags
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -g -pedantic -O0")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -g -pedantic -O0 -fdiagnostics-color=always")
 # TODO: remove this
 target_compile_options(${APP_NAME} PRIVATE -fdiagnostics-color=always)
-
+# Assuming your target is named vkg_gen
+target_link_libraries(vkg_gen
+    PRIVATE
+    stdc++exp           # <stacktrace>
+)
 
 # Debug target to check if out.hpp is compilable
 add_custom_target(out_comp
