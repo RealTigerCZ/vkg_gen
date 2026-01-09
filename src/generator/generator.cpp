@@ -3,7 +3,7 @@
  * @author Jaroslav Hucel (xhucel00@vutbr.cz)
  * @brief
  * @date Created: 12. 11. 2025
- * @date Modified: 15. 12. 2025
+ * @date Modified: 09. 01. 2026
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -22,11 +22,10 @@
 #include "generator.hpp"
 
 namespace boilerplate {
+    // author: PCJohn (peciva at fit.vut.cz)
     static const char* HANDLE_DEFINITION = ""
         "// FIXME: \n"
         "template<typename Type> class UniqueHandle;\n"
-
-        "    // author: PCJohn (peciva at fit.vut.cz)\n"
         "    template<typename T>\n"
         "    class Handle {\n"
         "    protected:\n"
@@ -69,6 +68,8 @@ using namespace vkg_gen::xml;
 
 using namespace vkg_gen::Generator;
 
+// TASK: 090126_01
+#ifdef CONCEPT_FILTERING
 template <typename Func>
 concept NodePredicate = requires(const Func & f, const Node * n) {
     { f(n) } -> std::convertible_to<bool>;
@@ -171,7 +172,9 @@ inline constexpr auto has_attr(std::string_view n, std::string_view v) noexcept 
 inline constexpr auto has_attr_name(std::string_view n) noexcept { return HasAttrName{ n }; }
 inline constexpr auto has_attr_value(std::string_view v) noexcept { return HasAttrValue{ v }; }
 
+#endif // CONCEPT_FILTERING
 
+// TASK: 090126_03
 std::ostream& helper_test(std::ostream& os, const vkg_gen::xml::Node* node) {
     if (!node) return os << "(NULL)";
     if (!node->isElement())
@@ -225,14 +228,11 @@ Type::Category Type::category_from_string(std::string_view s) const {
     if (s == "include") return Category::Include;
     if (s == "union") return Category::Union;
 
-    std::string err("Invalid category: '");
-    err += s;
-    err += "' {";
-    for (auto c : s) {
-        err += c;
-        err += ", ";
-    }
-    err += '}';
+    std::stringstream err;
+    err << "Invalid category: '" << s << "' {";
+    for (auto c : s)
+        err << '\'' << c << "\', ";
+    err << "}";
 
     throw my_error(err);
 }
@@ -240,7 +240,7 @@ Type::Category Type::category_from_string(std::string_view s) const {
 void Type::parse_struct(const vkg_gen::xml::Element& elem, vkg_gen::Arena& arena) {
     for (Node* child : elem.children) {
         if (child->isText()) {
-            std::cout << "- Skipping TEXT: " << child->asText() << std::endl;
+            std::cout << "- TASK: 090126_04 - Skipping TEXT: " << child->asText() << std::endl;
             continue;
         }
 
@@ -261,7 +261,7 @@ void Type::parse_struct(const vkg_gen::xml::Element& elem, vkg_gen::Arena& arena
 void Type::parse_union(const vkg_gen::xml::Element& elem, vkg_gen::Arena& arena) {
     for (Node* child : elem.children) {
         if (child->isText()) {
-            std::cout << "- Skipping TEXT: " << child->asText() << std::endl;
+            std::cout << "- TASK: 090126_04 - Skipping TEXT: " << child->asText() << std::endl;
             continue;
         }
 
@@ -409,6 +409,7 @@ Type::Type(const vkg_gen::xml::Element& elem, vkg_gen::Arena& arena) : elem(elem
     };
 }
 
+// TASK: 090126_03
 void _gen_arbitrary_C_code_in_type(const vkg_gen::xml::Element& elem, std::ofstream& file) {
     bool last_was_element = false;
     for (Node* child : elem.children) {
@@ -442,7 +443,7 @@ void _gen_arbitrary_C_code_in_type(const vkg_gen::xml::Element& elem, std::ofstr
 }
 
 
-//FIXME: helper function
+// TASK: 090126_05
 bool exclude_platforms(sv name) {
     static sv platforms[] = {
         "Xlib",
@@ -493,217 +494,6 @@ bool exclude_platforms(sv name) {
 
     return false;
 }
-
-
-#if 0
-void generate_type(const vkg_gen::xml::Element& type, vkg_gen::Arena& arena, std::ofstream& file) {
-    Type t(type, arena);
-
-    if (!t.comment.empty()) {
-        file << "// " << t.comment << "\n";
-    }
-
-    switch (t.category) {
-
-    case Type::Category::Basetype:
-        if (!t.deprecated.empty()) throw my_error("deprecated basetype not supported yet");
-        _gen_arbitrary_C_code_in_type(type, file);
-        break;
-    case Type::Category::Bitmask:
-        if (!t.deprecated.empty()) throw my_error("deprecated bitmask not supported yet");
-        _gen_arbitrary_C_code_in_type(type, file); // bitvalues??
-        break;
-    case Type::Category::Define:
-        if (!t.deprecated.empty()) throw my_error("deprecated define not supported yet");
-        _gen_arbitrary_C_code_in_type(type, file);
-        break;
-    case Type::Category::Enum:
-        file << "enum class ";
-        if (!t.deprecated.empty()) file << " [[deprecated(\"" << t.deprecated << "\")]] ";
-        file << t.name << ";\n";
-        break;
-
-    case Type::Category::Handle:
-        if (!t.deprecated.empty()) throw my_error("deprecated handle not supported yet");
-        if (type.children.size() == 0)
-            _gen_arbitrary_C_code_in_type(type, file);
-        break; // TODO: handle
-    case Type::Category::Funcpointer:
-        if (!t.deprecated.empty()) throw my_error("deprecated handle not supported yet");
-        _gen_arbitrary_C_code_in_type(type, file);
-        break;
-    case Type::Category::Include:
-        break;
-
-    case Type::Category::Struct:
-        break;
-    case Type::Category::Union:
-        break;
-    case Type::Category::None:
-        break;
-    };
-
-    if (!t.alias.empty()) {
-        file << "using " << t.name;
-        if (!t.deprecated.empty())
-            file << " [[deprecated(\"" << t.deprecated << "\")]]";
-        file << " = " << t.alias << ";\n";
-    }
-
-
-}
-
-void generate_types(vkg_gen::xml::Dom& dom, std::ofstream& file) {
-    auto& children = dom.root->asElement().children;
-    auto it = std::ranges::find_if(children, [](Node* n) {
-        return n->isElement() && n->asElement().tag == "types";
-        });
-
-    if (it == children.end()) {
-        throw my_error("expected <types> tag");
-    };
-
-    for (; it != children.end(); ++it)
-        for (Node* node : (*it)->asElement().children) {
-            if (node->isText()) {
-                std::cout << "- Skipping: " << node->asText() << std::endl;
-                continue;
-            }
-            auto& node_elem = node->asElement();
-            if (node_elem.tag != "type") {
-                std::cout << "- Skipping: ";
-                helper_test(std::cout, node) << std::endl;
-                continue;
-            }
-            generate_type(node_elem, dom.arena, file);
-        }
-};
-
-
-void generate_base_types(const vkg_gen::xml::Dom& dom, std::ofstream& file) {
-    auto base_types = has_tag("type") && has_attr("category", "basetype");
-    auto& children = dom.root->asElement().children;
-
-    auto it = std::ranges::find_if(children, has_tag("types"));
-
-    if (it == children.end()) {
-        throw my_error("expected <types> tag");
-    };
-
-    for (; it != children.end(); ++it)
-        for (Node* node : dom.children(*it) | std::views::filter(base_types)) {
-            auto& type = node->asElement();
-
-            for (Node* child : type.children) {
-                if (child->isText()) {
-                    file << child->asText();
-                    continue;
-                }
-                auto& ch = child->asElement();
-                if (ch.tag == "name") {
-                    // TODO: register it
-                    if (ch.children.size() != 1 || !ch.children[0]->isText()) {
-                        throw my_error("expected <name> to have one text child");
-                    };
-
-                    file << ch.children[0]->asText();
-
-                } else if (ch.tag == "type") {
-                    // TODO: find it
-                    if (ch.children.size() != 1 || !ch.children[0]->isText()) {
-                        throw my_error("expected <name> to have one text child");
-                    };
-
-                    file << ch.children[0]->asText();
-
-                } else {
-                    std::cout << " - Skipping: ";
-                    helper_test(std::cout, child) << '\n';
-                }
-            }
-            file << '\n';
-        }
-}
-
-void generate_enums(const vkg_gen::xml::Dom& dom, std::ofstream& file) {
-    auto expr = has_tag("enums") && has_attr("type", "enum");
-
-    for (Node* node : dom.children(dom.root) | std::views::filter(expr)) {
-        auto& enum_ = node->asElement();
-        file << "enum class " << enum_.get_attr_value("name") << " {\n";
-
-        for (Node* val_ : enum_.children) {
-            auto& val = val_->asElement();
-            if (val.tag == "comment") {
-                file << "    /* " << val.children[0]->asText() << " */\n";
-                continue;
-            }
-
-            if (val.tag != "enum") {
-                std::cout << " - Skipping: ";
-                helper_test(std::cout, val_) << '\n';
-                continue;
-            }
-
-
-            file << "    " << val.get_attr_value("name");
-            if (!val.get_attr_value("deprecated").empty())
-                file << "    [[deprecated(\"" << val.get_attr_value("deprecated") << "\")]] ";
-
-            if (val.get_attr_value("value").empty()) {
-                if (!val.get_attr_value("alias").empty())
-                    file << " = " << val.get_attr_value("alias");
-                else
-                    throw my_error{ "No alias for enum value: " + std::string(val.get_attr_value("name")) };
-            } else {
-                file << " = " << val.get_attr_value("value");
-            }
-
-
-            if (val_ != enum_.children.back()) {
-                file << ",";
-            }
-
-            if (!val.get_attr_value("comment").empty())
-                file << " // " << val.get_attr_value("comment");
-            file << '\n';
-        }
-
-        file << "};\n";
-    }
-}
-
-template <std::ranges::input_range R>
-std::ranges::range_value_t<R>* get_single_if_exists(R&& range) {
-    auto it = std::ranges::begin(range);
-    if (it == std::ranges::end(range)) return nullptr; // empty
-    auto first = it;
-    ++it;
-    if (it != std::ranges::end(range)) return nullptr; // more than one
-    return &(*first);
-}
-
-void generate_API_constants(const vkg_gen::xml::Dom& dom, std::ofstream& file) {
-    auto expr = has_tag("enums") && has_attr("type", "constants");
-
-    auto tmp = get_single_if_exists(dom.children(dom.root) | std::views::filter(expr));
-    if (tmp == nullptr) {
-        throw my_error{ "API constants must have only one element" };
-    }
-
-    auto& constants = (*tmp)->asElement();
-
-    file << "// " << constants.get_attr_value("comment") << '\n';
-    for (Node* constant : constants.children) {
-        auto& c = constant->asElement();
-        file << "constexpr " << c.get_attr_value("type") << " " << c.get_attr_value("name") << " = " << c.get_attr_value("value") << ";";
-        if (!c.get_attr_value("comment").empty())
-            file << " // " << c.get_attr_value("comment");
-        file << '\n';
-    }
-    file << '\n';
-}
-#endif
 
 TypeEnum::Type TypeEnum::type_from_string(std::string_view s) {
     if (s == "bitmask") return Type::Bitmask;
@@ -788,7 +578,7 @@ std::string to_string(TypeEnum::Type t) {
     case TypeEnum::Type::Bitmask: return "bitmask";
     case TypeEnum::Type::Constants: return "constants";
     }
-    //TODO:
+    //TODO: UNREACHABLE
     throw my_error{ "Unknown type" };
 }
 
@@ -1272,9 +1062,6 @@ void Generator::add_required_type(sv name, std::vector<Type*>& required_types) {
     }
 
 
-    using sv = std::string_view;
-
-
     // TODO: Write own split
     for (auto&& part : type->requires_ | std::views::split(',')) {
         sv req(&*part.begin(), std::ranges::distance(part));
@@ -1500,6 +1287,7 @@ void Generator::generate(vkg_gen::xml::Dom& dom, std::ofstream& file, void* conf
             continue;
 
         auto& type = *p;
+        // TODO: this should not be needed
         if (exclude_platforms(type.name)) {
             std::cout << "Excluding: " << type.name << std::endl;
             continue;

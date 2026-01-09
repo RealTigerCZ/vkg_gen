@@ -1,0 +1,17 @@
+// TASK: 090126_01
+ - Decide if we will be using filtering nodes by the new concept and lamda like structures.
+ - if not, remove it
+
+// TASK: 090126_02
+ - Decide if we will be using "using sv = std::string_view;" in header files."
+ - if not, remove it
+ - if yes, make it global for a given namespace
+
+// TASK: 090126_03
+ - Temporary helper functions
+
+// TASK: 090126_04
+ - Text nodes in places where we expect element nodes - need to be handled
+
+// TASK: 090126_05
+ - exclude_platforms helper function is a hack to filter unhandled problems with platforms

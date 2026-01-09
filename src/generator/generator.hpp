@@ -3,7 +3,7 @@
  * @author Jaroslav Hucel (xhucel00@vutbr.cz)
  * @brief
  * @date Created: 02. 11. 2025
- * @date Modified: 15. 12. 2025
+ * @date Modified: 09. 01. 2026
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -16,10 +16,14 @@
 #include <map>
 #include <stack>
 
+ // TASK: 090126_01
+#define CONCEPT_FILTERING
 
 namespace vkg_gen::Generator {
+    // CHECK: vulkan spec
     constexpr int BITPOS_MAX = 64 - 1;
-    // TODO:
+
+    // TASK: 090126_02
     using sv = std::string_view;
 
     // TODO: can we optimize size of optional attributes?
@@ -55,7 +59,6 @@ namespace vkg_gen::Generator {
 
 
     struct TypeHandle {
-        using sv = std::string_view;
         // Name of the enum class containing VK_OBJECT_TYPE_*
         static constexpr sv obj_enum_name = "VkObjectType";
 
@@ -162,7 +165,6 @@ namespace vkg_gen::Generator {
 
 
     struct TypeStruct {
-        using sv = std::string_view;
 
         bool returned_only = false; // Notes that this struct is going to be filled in
         // by the API, rather than an application filling
@@ -184,7 +186,6 @@ namespace vkg_gen::Generator {
     using TypeUnion = TypeStruct;
 
     struct TypeEnum {
-        using sv = std::string_view;
 
         struct ValueNormal {
             sv value;
@@ -259,9 +260,6 @@ namespace vkg_gen::Generator {
 
     class Type {
     public:
-        // TODO: change to static from_xml(...)
-        Type(const vkg_gen::xml::Element& elem, vkg_gen::Arena& arena);
-
         enum class State : uint8_t {
             NotUsed,
             Declared,
@@ -297,8 +295,10 @@ namespace vkg_gen::Generator {
             sv bitvalues; // only for category Bitmask, name of an enum definition that defines the valid values for parameters of that type
         };
 
-
         const xml::Element& elem;
+
+        // TODO: change to static from_xml(...)
+        Type(const xml::Element& elem, vkg_gen::Arena& arena);
 
     private:
         Category category_from_string(sv s) const;
@@ -321,6 +321,7 @@ namespace vkg_gen::Generator {
 
 
         using Index = std::size_t;
+        // CHECK: rename this, maybe use Type*
         std::map<sv, Index> index;
 
         // Can contain nullptrs because of removing types
@@ -349,6 +350,7 @@ namespace vkg_gen::Generator {
         Generator() {}
         void generate(vkg_gen::xml::Dom& dom, std::ofstream& file, void* config = nullptr);
 
+        // TODO:
         xml::Node* Types;
         xml::Node* Enums;
         xml::Node* Commands;

@@ -52,6 +52,7 @@ class tracable_runtime_error : public std::runtime_error {
 
 public:
     tracable_runtime_error(std::string_view msg) : std::runtime_error(transform_message(msg)) {};
+    tracable_runtime_error(const std::stringstream& msg) : std::runtime_error(transform_message(msg.str())) {};
 };
 
 #define my_error tracable_runtime_error
