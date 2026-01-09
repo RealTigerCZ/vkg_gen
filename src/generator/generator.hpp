@@ -306,6 +306,75 @@ namespace vkg_gen::Generator {
         void parse_union(const xml::Element& elem, Arena& arena);
     };
 
+    class CommandParameter {
+    public:
+        sv api = {}; // comma separated list, optional
+        // TASK: 090126_07
+        sv len = {};
+        sv altlen = {};
+        sv stride = {};
+        sv optional = {}; // can be comma separated, if not present, it is false, value should be provided for every indirection
+        sv selector = {}; // only if parameter is union
+        sv noautovalidity = {}; // optional
+        sv externsync = {}; // optional
+        sv objecttype = {}; // optional
+        sv validstructs = {}; // optional
+
+        sv type;
+        sv name;
+
+
+        // TODO: the content of the tag should be a valid arbitrary C code after removing xml tags
+        std::string stringify;
+
+        static CommandParameter from_xml(const xml::Element& elem, vkg_gen::Arena& arena);
+
+    };
+
+    class CommandAlias {
+        sv name;
+        sv alias;
+        sv api = {}; // comma separated list, optional
+        sv comment = {}; // optional
+    };
+
+    class Command {
+    public:
+        enum class Scope : uint8_t {
+            None,
+            Inside,
+            Outside,
+            Both
+        };
+
+        // TASK: 090126_06
+        sv tasks = {}; // comma separated list, optional
+        sv queues = {}; // comma separated list, optional
+        sv success_codes = {}; // comma separated list, optional
+        sv error_codes = {}; // comma separated list, optional
+        Scope render_pass = Scope::None; // optional
+        Scope video_encoding = Scope::None; // optional
+        sv cmd_buffer_level = {}; // comma separated list, optional
+        sv conditional_rendering = {}; // required for vkCmd* commands.Not allowed for other commands. Values true/false
+        bool allow_no_queues = false; // optional, default false
+        sv export_ = {}; // comma separated list, optional
+        sv api = {}; // comma separated list, optional
+        sv description = {};
+
+        xml::Element* implicit_extern_sync_params = nullptr;
+
+        sv comment = {};
+
+        sv name;
+        sv type; // TODO: link with types? dependencies?
+
+        // TODO: the return type and parameters can contain arbitrary C code
+        std::string declatarion;
+
+        std::vector<CommandParameter> parameters = {};
+
+        static Command from_xml(const xml::Element& elem, vkg_gen::Arena& arena);
+    };
 
 
     class Generator {
@@ -318,6 +387,7 @@ namespace vkg_gen::Generator {
         // CHECK: use unordered map
         std::map<sv, Type> types = {};
         std::map<sv, TypeEnum> enums = {};
+        std::map<sv, Command> commands = {};
 
 
         using Index = std::size_t;
@@ -326,10 +396,12 @@ namespace vkg_gen::Generator {
 
         // Can contain nullptrs because of removing types
         std::vector<Type*> required_types_ordered;
+        std::vector<Command*> required_commands;
 
 
         void parse_types(vkg_gen::xml::Dom& dom);
         void parse_enums(vkg_gen::xml::Dom& dom);
+        void parse_commands(vkg_gen::xml::Dom& dom);
 
         void generate_enum(TypeEnum& enum_, std::ofstream& file);
         void generate_enum_alias(Type& enum_, std::ofstream& file);
@@ -337,6 +409,10 @@ namespace vkg_gen::Generator {
         void generate_union(Type& struct_, std::ofstream& file);
         void generate_bitmask(Type& bitmask, std::ofstream& file);
         void generate_handle(Type& handle, std::ofstream& file, TypeEnum& obj_enum);
+
+        std::ofstream& generate_command_params(Command& cmd, std::ofstream& file);
+        void generate_command(Command& cmd, std::ofstream& file);
+        void generate_command_PFN(Command& cmd, std::ofstream& file);
 
         // Wrapper around add_required_type
         void add_required_type(sv name);
@@ -401,6 +477,7 @@ namespace vkg_gen::Generator {
     };
 
     bool bool_from_string(std::string_view s);
+    Command::Scope scope_from_string(std::string_view s);
 
 } // namespace vkg_gen::Generator
 

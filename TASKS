@@ -15,3 +15,14 @@
 
 // TASK: 090126_05
  - exclude_platforms helper function is a hack to filter unhandled problems with platforms
+
+// TASK: 090126_06
+ - Decide what to do with attributes of Command class, how to handle if, if we will be parsing them and so on
+
+// TASK: 090126_07
+ - Decide what to do with attributes of CommandAlias class, how to handle if, if we will be parsing them and so on
+
+// TASK: 090126_08
+ - Handle mere than one type in one parameter/member.
+ - It can happen for example with "VkPipelineCacheHeaderVersionOne", <member><type>uint8_t</type><name>pipelineCacheUUID</name>[<enum>VK_UUID_SIZE</enum>]</member>
+

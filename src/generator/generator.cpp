@@ -173,6 +173,17 @@ inline constexpr auto has_attr_name(std::string_view n) noexcept { return HasAtt
 inline constexpr auto has_attr_value(std::string_view v) noexcept { return HasAttrValue{ v }; }
 
 #endif // CONCEPT_FILTERING
+namespace vkg_gen::xml {
+
+    // TASK: 090126_03
+    std::ostream& operator<<(std::ostream& os, const Element& elem) {
+        os << "<" << elem.tag;
+        for (auto& attr : elem.attrs) {
+            os << " " << attr.name << "=\"" << attr.value << '"';
+        }
+        return os << ">";
+    }
+}
 
 // TASK: 090126_03
 std::ostream& helper_test(std::ostream& os, const vkg_gen::xml::Node* node) {
@@ -180,14 +191,8 @@ std::ostream& helper_test(std::ostream& os, const vkg_gen::xml::Node* node) {
     if (!node->isElement())
         return os << "(TEXT: " << node->asText() << ")";
 
-    auto& elem = node->asElement();
-    os << "<" << elem.tag;
-    for (auto& attr : elem.attrs) {
-        os << " " << attr.name << "=\"" << attr.value << '"';
-    }
-    return os << ">";
+    return os << node->asElement();
 }
-
 
 bool vkg_gen::Generator::bool_from_string(std::string_view s) {
     if (s == "true")
@@ -201,6 +206,13 @@ bool vkg_gen::Generator::bool_from_string(std::string_view s) {
     }
 
     throw my_error("Invalid boolean value: '" + std::string(s) + "'");
+}
+
+Command::Scope vkg_gen::Generator::scope_from_string(std::string_view s) {
+    if (s == "inside") return Command::Scope::Inside;
+    if (s == "outside") return Command::Scope::Outside;
+    if (s == "both") return Command::Scope::Both;
+    throw my_error("Invalid scope: '" + std::string(s) + "'");
 }
 
 Member::ExternSync externsync_from_string(std::string_view s) {
@@ -688,8 +700,7 @@ Member::Member(const vkg_gen::xml::Element& e, vkg_gen::Arena& arena, ParentType
                 type = ch.children[0]->asText();
                 stringify += type;
             } else {
-
-                // THIS CAN HAPPEN: for example with "VkPipelineCacheHeaderVersionOne", <member><type>uint8_t</type><name>pipelineCacheUUID</name>[<enum>VK_UUID_SIZE</enum>]</member>
+                // TASK: 090126_08 - THIS CAN HAPPEN
                 std::cout << "FIXME: Duplicate type in member: " << std::string(name) << std::endl;
                 stringify += ch.children[0]->asText();
             }
@@ -879,10 +890,39 @@ void Generator::parse_enums(vkg_gen::xml::Dom& dom) {
     auto& registry = dom.root->asElement();
     assert(registry.tag == "registry");
 
-    for (Node* type : registry.children | std::views::filter(has_tag("enums"))) {
-        TypeEnum e(type->asElement(), dom.arena);
+    for (Node* enum_ : registry.children | std::views::filter(has_tag("enums"))) {
+        TypeEnum e(enum_->asElement(), dom.arena);
         std::cout << "- " << e.name << std::endl;
         this->enums.emplace(e.name, std::move(e));
+    }
+}
+
+void vkg_gen::Generator::Generator::parse_commands(vkg_gen::xml::Dom& dom) {
+    auto& registry = dom.root->asElement();
+    assert(registry.tag == "registry");
+
+    auto all_commands = registry.children | std::views::filter(has_tag("commands"));
+    for (Node* cmds : all_commands) {
+        for (Node* child : cmds->asElement().children) {
+            if (child->isText()) {
+                std::cout << " TASK: 090126_04 - Skipping TEXT: " << child->asText() << std::endl;
+                continue;
+            }
+
+            auto& cmd = child->asElement();
+            if (cmd.tag != "command") {
+                std::cout << "- FIXME: ";
+                helper_test(std::cout, child) << std::endl;
+                continue;
+            };
+            //FIXME: aliased commands
+            if (std::ranges::find(cmd.attrs, "alias", &Attribute::name) != cmd.attrs.end())
+                continue;
+
+            Command c = Command::from_xml(cmd, dom.arena);
+            std::cout << "- " << c.name << std::endl;
+            this->commands.emplace(c.name, std::move(c));
+        }
     }
 }
 
@@ -1046,6 +1086,36 @@ void Generator::generate_handle(Type& h, std::ofstream& file, TypeEnum& obj_enum
         << "Handle<struct " << obj_enum.name << "_T*>" << ";" << LineComment{ h.comment, false } << '\n';
 }
 
+std::ofstream& vkg_gen::Generator::Generator::generate_command_params(Command& cmd, std::ofstream& file) {
+    file << "(";
+    bool first = true;
+    for (auto& param : cmd.parameters) {
+        if (first)
+            first = false;
+        else
+            file << ", ";
+
+        file << param.stringify;
+    }
+
+    file << ");\n";
+    return file;
+}
+
+void Generator::generate_command(Command& cmd, std::ofstream& file) {
+    file << LineComment{ cmd.comment };
+    // FIXME: cmd can have any arbitraty C code
+    file << "VKAPI_ATTR " << cmd.type << " VKAPI_CALL " << cmd.name;
+    generate_command_params(cmd, file);
+
+}
+
+void vkg_gen::Generator::Generator::generate_command_PFN(Command& cmd, std::ofstream& file) {
+    // FIXME: cmd can have any arbitraty C code
+    file << "typedef " << cmd.type << " (VKAPI_PTR* PFN_" << cmd.name << ")";
+    generate_command_params(cmd, file);
+}
+
 void Generator::add_required_type(sv name) {
     std::vector<Type*> required_types;
     add_required_type(name, required_types);
@@ -1178,7 +1248,16 @@ void Generator::add_required_version_feature(sv name, vkg_gen::xml::Dom& dom) {
                     // Currently generating all enums
 
                 } else if (elem.tag == "command") {
-                    // Currently ignoring commands
+                    Command* cmd = &commands[elem.get_attr_value("name")];
+                    required_commands.push_back(cmd);
+
+                    if (index.find(cmd->type) == index.end())
+                        add_required_type(cmd->type);
+
+                    for (auto& param : cmd->parameters) {
+                        if (index.find(param.type) == index.end())
+                            add_required_type(param.type);
+                    }
 
                 } else {
                     std::cout << "- FIXME: currently ignoring: ";
@@ -1269,11 +1348,15 @@ void Generator::generate(vkg_gen::xml::Dom& dom, std::ofstream& file, void* conf
 
     file << boilerplate::HANDLE_DEFINITION << "\n";
 
+    file << "#define VKAPI_CALL\n";
+    file << "#define VKAPI_ATTR\n";
+
     //generate_API_constants(dom, file);
     //generate_types(dom, file);
 
     parse_types(dom);
     parse_enums(dom);
+    parse_commands(dom);
 
     add_required_version_feature("VK_VERSION_1_4", dom);
 
@@ -1321,6 +1404,14 @@ void Generator::generate(vkg_gen::xml::Dom& dom, std::ofstream& file, void* conf
         default:
             break;
         }
+    }
+
+    for (Command* cmd : required_commands) {
+        generate_command(*cmd, file);
+    }
+
+    for (Command* cmd : required_commands) {
+        generate_command_PFN(*cmd, file);
     }
 
 #else
@@ -1379,5 +1470,171 @@ void Generator::generate(vkg_gen::xml::Dom& dom, std::ofstream& file, void* conf
     }
 #endif
 };
+
+CommandParameter CommandParameter::from_xml(const xml::Element& elem, vkg_gen::Arena& arena) {
+    assert(elem.tag == "param");
+
+    CommandParameter param;
+
+    for (const Attribute& attr : elem.attrs) {
+        if (attr.name == "type")
+            param.type = attr.value;
+        else if (attr.name == "api")
+            param.api = attr.value;
+        else if (attr.name == "len")
+            param.len = attr.value;
+        else if (attr.name == "altlen")
+            param.altlen = attr.value;
+        else if (attr.name == "stride")
+            param.stride = attr.value;
+        else if (attr.name == "optional")
+            param.optional = attr.value;
+        else if (attr.name == "selector")
+            param.selector = attr.value;
+        else if (attr.name == "noautovalidity")
+            param.noautovalidity = attr.value;
+        else if (attr.name == "externsync")
+            param.externsync = attr.value;
+        else if (attr.name == "objecttype")
+            param.objecttype = attr.value;
+        else if (attr.name == "validstructs")
+            param.validstructs = attr.value;
+        else
+            throw my_error{ "Unknown attribute for command parameter: " + std::string(attr.name) };
+    };
+    for (Node* child : elem.children) {
+        if (child->isText()) {
+            param.stringify += child->asText();
+            continue;
+        }
+
+        auto& ch = child->asElement();
+        if (ch.tag == "name") {
+
+            if (!param.name.empty())
+                throw my_error{ "Command parameter can only have one name!" };
+            param.name = ch.children[0]->asText();
+            param.stringify += " ";
+            param.stringify += param.name;
+
+        } else if (ch.tag == "type") {
+            if (param.type.empty()) {
+                param.type = ch.children[0]->asText();
+            } else {
+                // TASK: 090126_08 - THIS CAN HAPPEN
+                std::cout << "TODO: Duplicate type in member: " << std::string(param.name) << std::endl;
+            }
+            param.stringify += ch.children[0]->asText();
+        } else {
+            throw my_error{ "Unknown child element for command parameter: " + std::string(ch.tag) };
+        }
+    }
+    if (param.name.empty())
+        throw my_error{ "Command parameter must have a name!" };
+
+    // CHECK: in vulkan spec it's said to be optional
+    if (param.type.empty())
+        throw my_error{ "Command parameter must have a type!" };
+    return param;
+}
+
+Command Command::from_xml(const xml::Element& elem, vkg_gen::Arena& arena) {
+    Command cmd;
+
+    for (const Attribute& attr : elem.attrs) {
+        if (attr.name == "tasks")
+            cmd.tasks = attr.value;
+        else if (attr.name == "queues")
+            cmd.queues = attr.value;
+        else if (attr.name == "successcodes")
+            cmd.success_codes = attr.value;
+        else if (attr.name == "errorcodes")
+            cmd.error_codes = attr.value;
+        else if (attr.name == "renderpass")
+            cmd.render_pass = scope_from_string(attr.value);
+        else if (attr.name == "videocoding")
+            cmd.video_encoding = scope_from_string(attr.value);
+        else if (attr.name == "cmdbufferlevel")
+            cmd.cmd_buffer_level = attr.value;
+        else if (attr.name == "conditionalrendering")
+            cmd.conditional_rendering = attr.value;
+        else if (attr.name == "allownoqueues")
+            cmd.allow_no_queues = bool_from_string(attr.value); // TODO: no ',' allowed
+        else if (attr.name == "export")
+            cmd.export_ = attr.value;
+        else if (attr.name == "api")
+            cmd.api = attr.value;
+        else if (attr.name == "comment")
+            cmd.comment = attr.value;
+        else if (attr.name == "alias" || attr.name == "name")
+            throw my_error{ "Command attribute '" + std::string(attr.name) + "' is not supported" };
+        else {
+            std::cerr << elem << std::endl;
+            throw my_error{ "Unknown attribute for command: " + std::string(attr.name) };
+
+        }
+    };
+
+    if (elem.children.size() == 0)
+        throw my_error{ "Command must have at least <proto> element!" };
+
+    Node* proto = elem.children[0];
+    if (proto->isText())
+        throw my_error{ "Command must start with <proto> element!" };
+
+    if (proto->asElement().tag != "proto")
+        throw my_error{ "Command must start with <proto> element!" };
+
+    for (Node* child : proto->asElement().children) {
+        if (child->isText()) {
+
+            cmd.declatarion += child->asText();
+            continue;
+        }
+        auto& ch = child->asElement();
+        if (ch.tag == "name") {
+            if (!cmd.name.empty())
+                throw my_error{ "Command can only have one name!" };
+            cmd.name = ch.children[0]->asText();
+            cmd.declatarion += cmd.name;
+        } else if (ch.tag == "type") {
+            if (cmd.type.empty()) {
+                cmd.type = ch.children[0]->asText();
+            } else {
+                // TASK: 090126_08 - THIS CAN HAPPEN
+                std::cout << "TODO: Duplicate type in member: " << std::string(cmd.name) << std::endl;
+            }
+            cmd.declatarion += ch.children[0]->asText();
+        } else
+            throw my_error{ "Unknown child element for command: " + std::string(child->asElement().tag) };
+    }
+
+    if (cmd.name.empty())
+        throw my_error{ "Command must have a name!" };
+
+    // CHECK: in vulkan spec it is said to be optional
+    if (cmd.type.empty())
+        throw my_error{ "Command must have a type!" };
+
+    for (Node* child : elem.children | std::views::drop(1)) {
+        if (child->isText()) {
+            std::cout << "- TASK: 090126_04 - Skipping TEXT: " << child->asText() << std::endl;
+            continue;
+        }
+        auto& ch = child->asElement();
+
+        if (ch.tag == "param")
+            cmd.parameters.emplace_back(CommandParameter::from_xml(child->asElement(), arena));
+        else if (ch.tag == "implicitexternsyncparams")
+            cmd.implicit_extern_sync_params = &child->asElement();
+        else if (ch.tag == "description")
+            cmd.description = ch.children[0]->asText();
+        else
+            throw my_error{ "Unknown child element for command: " + std::string(child->asElement().tag) };
+
+    }
+
+    return cmd;
+}
 
 
