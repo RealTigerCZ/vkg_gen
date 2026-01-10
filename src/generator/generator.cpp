@@ -716,7 +716,7 @@ Member::Member(const vkg_gen::xml::Element& e, vkg_gen::Arena& arena, ParentType
     stringify += ";";
 }
 
-TypeEnum::EnumItem TypeEnum::EnumItem::from_xml(const vkg_gen::xml::Element& elem, vkg_gen::Arena& arena, TypeEnum* parent, bool is_standalone_comment, bool extend_parent) {
+TypeEnum::EnumItem TypeEnum::EnumItem::from_xml(const vkg_gen::xml::Element& elem, vkg_gen::Arena& arena, TypeEnum* parent, bool is_standalone_comment, bool extend_parent, sv block_ext_number) {
     EnumItem item{ .is_standalone_comment = is_standalone_comment };
 
     assert(!(is_standalone_comment && extend_parent));
@@ -835,8 +835,10 @@ TypeEnum::EnumItem TypeEnum::EnumItem::from_xml(const vkg_gen::xml::Element& ele
             throw my_error{ "Offset/extnumber/dir can only be used with 'normal' enum type, not bitmask or constant." };
 
         if (extnumber.empty())
-            std::cout << "FIXME: unhandled missing extnumber." << std::endl;
-
+            if (block_ext_number.empty())
+                throw my_error{ "Cannot infer extnumber when extending enum with offset! (Move this enum to <extension> tag or add 'extnumber' attribute)" };
+            else
+                extnumber = block_ext_number;
 
         int ext_number = std::stoi(extnumber.data()) - 1;
         int offset_i = std::stoi(offset.data());
@@ -962,8 +964,8 @@ void Generator::generate_enum(TypeEnum& e, std::ofstream& file) {
         file << '\n';
         return;
     }
-
-    file << "enum class" << Deprecate{ e.deprecated } << e.name << " " << bitwidth_to_str_type(e.bitwidth) << " {\n";
+    // FIXME: this should be congigurable by config file, TASK: 100126_01
+    file << "enum" << (0 ? " class" : "") << Deprecate{ e.deprecated } << e.name << " " << bitwidth_to_str_type(e.bitwidth) << " {\n";
 
     for (auto& item : e.items) {
         if (item.is_standalone_comment) {
@@ -1082,7 +1084,10 @@ void Generator::generate_handle(Type& h, std::ofstream& file, TypeEnum& obj_enum
         std::cout << "FIXME: Handle '" << h.name << "' did not found matching objtypeenum '" << h.handle->objtypeenum << "' in enum '" << obj_enum.name << "'" << std::endl;
     //throw my_error{ std::format("Handle '{}' did not found matching objtypeenum '{}' in enum '{}'", h.name, h.handle->objtypeenum, obj_enum.name) };
 
-    file << "using " << h.name << Deprecate{ h.deprecated } << "= "
+    if (true /*FIXME: OLD C HANDLES*/)
+        file << "VK_DEFINE_HANDLE(" << h.name << ")\n";
+    else
+        file << "using " << h.name << Deprecate{ h.deprecated } << "= "
         << "Handle<struct " << obj_enum.name << "_T*>" << ";" << LineComment{ h.comment, false } << '\n';
 }
 
@@ -1090,6 +1095,11 @@ std::ofstream& vkg_gen::Generator::Generator::generate_command_params(Command& c
     file << "(";
     bool first = true;
     for (auto& param : cmd.parameters) {
+        if (!param.api.empty() && !std::ranges::contains(std::views::split(param.api, ','), "vulkan", [](auto&& rng) { return sv(rng); })) {
+            std::cout << " TODO: Skipping parameter '" << param.stringify << "' of command '" << cmd.name << "', because it does not contain 'vulkan' api.\n";
+            continue;
+        }
+
         if (first)
             first = false;
         else
@@ -1178,7 +1188,11 @@ void Generator::add_required_type(sv name, std::vector<Type*>& required_types) {
         break;
 
     case Type::Category::Funcpointer:
-        // FIXME: function pointer not handled
+        constexpr auto asElementGetFirstChildAsTextTransform = std::views::transform([](Node* n) -> Node::Text& { return n->asElement().children[0]->asText(); });
+        for (sv& param_type : type->elem.children | std::views::filter(has_tag("type")) | asElementGetFirstChildAsTextTransform)
+            if (index.find(param_type) == index.end())
+                add_required_type(param_type, required_types);
+
         break;
 
     }
@@ -1243,6 +1257,7 @@ void Generator::add_required_version_feature(sv name, vkg_gen::xml::Dom& dom) {
                 } else if (elem.tag == "enum") {
                     auto it = std::ranges::find(elem.attrs, "extends", &Attribute::name);
                     if (it != elem.attrs.end()) {
+                        // TODO: block extension number
                         extend_enum(it->value, elem, dom.arena);
                     }
                     // Currently generating all enums
@@ -1327,13 +1342,83 @@ void Generator::add_required_version_feature(sv name, vkg_gen::xml::Dom& dom) {
     }
 }
 
-void Generator::extend_enum(sv extends, Element& elem, vkg_gen::Arena& arena) {
+void Generator::extend_enum(sv extends, Element& elem, vkg_gen::Arena& arena, sv block_ext_number) {
 
     TypeEnum& enum_ = enums.find(extends)->second;
-    enum_.items.emplace_back(TypeEnum::EnumItem::from_xml(elem, arena, &enum_, false, true));
+    enum_.items.emplace_back(TypeEnum::EnumItem::from_xml(elem, arena, &enum_, false, true, block_ext_number));
 }
 
-void Generator::generate(vkg_gen::xml::Dom& dom, std::ofstream& file, void* config) {
+// TASK: 100126_01
+void Generator::add_extension_prototype(sv number, xml::Dom& dom) {
+    auto& registry = dom.root->asElement();
+    assert(registry.tag == "registry");
+
+    Node* extensions = (registry.children | std::views::filter(has_tag("extensions"))).front();
+    if (extensions == nullptr)
+        throw my_error{ "Could not find extensions tag" };
+
+    Node* extension = (extensions->asElement().children | std::views::filter(has_attr("number", number))).front();
+    if (extension == nullptr)
+        throw my_error{ "Could not find extension with number " + std::string(number) };
+
+    for (Node* node : extension->asElement().children) {
+        if (node->isText()) {
+            std::cout << "- Skipping: " << node->asText() << std::endl;
+            continue;
+        }
+
+        auto& elem = node->asElement();
+        if (elem.tag == "require") {
+            for (Node* type : elem.children) {
+                if (type->isText()) {
+                    std::cout << "- Skipping TEXT: " << type->asText() << std::endl;
+                    continue;
+                }
+
+                Element& elem = type->asElement();
+
+                if (elem.tag == "type") {
+                    sv name = elem.get_attr_value("name");
+                    if (index.find(name) == index.end()) {
+                        // CHECK: are type aliases handled correctly?
+                        add_required_type(name);
+                    }
+                } else if (elem.tag == "enum") {
+                    auto it = std::ranges::find(elem.attrs, "extends", &Attribute::name);
+                    if (it != elem.attrs.end()) {
+                        extend_enum(it->value, elem, dom.arena, number);
+                    }
+                    it = std::ranges::find(elem.attrs, "value", &Attribute::name);
+                    if (it != elem.attrs.end()) {
+                        sv name = elem.get_attr_value("name");
+                        required_defines.push_back({ name, it->value, elem });
+                    }
+                    // Currently generating all enums
+
+                } else if (elem.tag == "command") {
+                    Command* cmd = &commands[elem.get_attr_value("name")];
+                    required_commands.push_back(cmd);
+
+                    if (index.find(cmd->type) == index.end())
+                        add_required_type(cmd->type);
+
+                    for (auto& param : cmd->parameters) {
+                        if (index.find(param.type) == index.end())
+                            add_required_type(param.type);
+                    }
+
+                } else {
+                    std::cout << "- FIXME: currently ignoring: ";
+                    helper_test(std::cout, type) << std::endl;
+                    continue;
+                }
+            }
+        }
+    }
+}
+
+
+void Generator::generate(xml::Dom& dom, std::ofstream& file, void* config) {
 
 
 
@@ -1350,6 +1435,7 @@ void Generator::generate(vkg_gen::xml::Dom& dom, std::ofstream& file, void* conf
 
     file << "#define VKAPI_CALL\n";
     file << "#define VKAPI_ATTR\n";
+    file << "#define VK_DEFINE_HANDLE(object) typedef struct object##_T* object;\n";
 
     //generate_API_constants(dom, file);
     //generate_types(dom, file);
@@ -1358,11 +1444,20 @@ void Generator::generate(vkg_gen::xml::Dom& dom, std::ofstream& file, void* conf
     parse_enums(dom);
     parse_commands(dom);
 
-    add_required_version_feature("VK_VERSION_1_4", dom);
+    add_required_version_feature("VK_VERSION_1_0", dom);
+
+    add_extension_prototype("1", dom);
+    add_extension_prototype("2", dom);
+    add_extension_prototype("129", dom);
 
     // Currently generating all enums
     for (auto& [_, enum_] : enums) {
         generate_enum(enum_, file);
+    }
+
+    // TASK: 100126_01
+    for (auto& define : required_defines) {
+        file << "#define " << define.name << " " << define.value << "\n";
     }
 
     for (Type* p : required_types_ordered) {
@@ -1394,7 +1489,7 @@ void Generator::generate(vkg_gen::xml::Dom& dom, std::ofstream& file, void* conf
 
             // TODO: temporary solution
         case Type::Category::Basetype:
-            // case Type::Category::Define:
+            //case Type::Category::Define:
         case Type::Category::Funcpointer:
             _gen_arbitrary_C_code_in_type(type.elem, file);
             break;
@@ -1406,9 +1501,11 @@ void Generator::generate(vkg_gen::xml::Dom& dom, std::ofstream& file, void* conf
         }
     }
 
+    file << "extern \"C\" {\n";
     for (Command* cmd : required_commands) {
         generate_command(*cmd, file);
     }
+    file << "}\n";
 
     for (Command* cmd : required_commands) {
         generate_command_PFN(*cmd, file);

@@ -222,7 +222,7 @@ namespace vkg_gen::Generator {
             bool is_alias = false;
             bool is_standalone_comment = false; //TODO:
 
-            static EnumItem from_xml(const vkg_gen::xml::Element& elem, vkg_gen::Arena& arena, TypeEnum* parent, bool is_standalone_comment = false, bool extend_parent = false);
+            static EnumItem from_xml(const vkg_gen::xml::Element& elem, vkg_gen::Arena& arena, TypeEnum* parent, bool is_standalone_comment = false, bool extend_parent = false, sv block_ext_number = "");
         };
 
 
@@ -376,6 +376,11 @@ namespace vkg_gen::Generator {
         static Command from_xml(const xml::Element& elem, vkg_gen::Arena& arena);
     };
 
+    struct DefineExt {
+        sv name;
+        sv value;
+        xml::Element& elem;
+    };
 
     class Generator {
         // Currently expecting only one Platforms tag
@@ -397,7 +402,8 @@ namespace vkg_gen::Generator {
         // Can contain nullptrs because of removing types
         std::vector<Type*> required_types_ordered;
         std::vector<Command*> required_commands;
-
+        // TASK: 100126_01
+        std::vector<DefineExt> required_defines;
 
         void parse_types(vkg_gen::xml::Dom& dom);
         void parse_enums(vkg_gen::xml::Dom& dom);
@@ -420,7 +426,9 @@ namespace vkg_gen::Generator {
 
         void add_required_version_feature(sv name, vkg_gen::xml::Dom& dom);
 
-        void extend_enum(sv extends, vkg_gen::xml::Element& elem, vkg_gen::Arena& arena);
+        void extend_enum(sv extends, vkg_gen::xml::Element& elem, vkg_gen::Arena& arena, sv block_ext_number = {});
+
+        void add_extension_prototype(sv number, xml::Dom& dom);
 
     public:
         Generator() {}

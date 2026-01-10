@@ -26,3 +26,6 @@
  - Handle mere than one type in one parameter/member.
  - It can happen for example with "VkPipelineCacheHeaderVersionOne", <member><type>uint8_t</type><name>pipelineCacheUUID</name>[<enum>VK_UUID_SIZE</enum>]</member>
 
+// TASK: 100126_01
+ - Remove the "add_extension_prototype" function and implement handling extensions into the generator
+ - Handle "defines" in extensions defined as <enum value="" name=".."></enum>
