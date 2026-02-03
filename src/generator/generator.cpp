@@ -3,7 +3,7 @@
  * @author Jaroslav Hucel (xhucel00@vutbr.cz)
  * @brief
  * @date Created: 12. 11. 2025
- * @date Modified: 09. 01. 2026
+ * @date Modified: 03. 02. 2026
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -918,8 +918,12 @@ void vkg_gen::Generator::Generator::parse_commands(vkg_gen::xml::Dom& dom) {
                 continue;
             };
             //FIXME: aliased commands
-            if (std::ranges::find(cmd.attrs, "alias", &Attribute::name) != cmd.attrs.end())
+            if (std::ranges::find(cmd.attrs, "alias", &Attribute::name) != cmd.attrs.end()) {
+                CommandAlias ca = CommandAlias::from_xml(cmd, dom.arena);
+                std::cout << "- " << ca.name << std::endl;
+                this->command_aliases.emplace(ca.name, std::move(ca));
                 continue;
+            }
 
             Command c = Command::from_xml(cmd, dom.arena);
             std::cout << "- " << c.name << std::endl;
@@ -953,6 +957,49 @@ void Generator::generate_enum_alias(Type& e, std::ofstream& file) {
     file << "using " << e.name << Deprecate{ e.deprecated } << "= " << e.alias << ";\n\n";
 }
 
+// TASK: 030226_01, Also AI function
+void sort_enum_items(std::vector<TypeEnum::EnumItem>& items) {
+    // STEP 1: Move all concrete definitions (non-aliases) to the front.
+    // std::stable_partition maintains the relative order of the concrete values
+    // (preserving your bit-order logic like 1<<25, 1<<26 etc.)
+    auto alias_start = std::stable_partition(items.begin(), items.end(),
+        [](const TypeEnum::EnumItem& item) {
+            return !item.is_alias;
+        });
+
+    // STEP 2: Resolve alias chains (e.g., A = B, B = C).
+    // We need 'C' then 'B' then 'A'.
+    // We iterate through the alias section and bubble up dependencies.
+
+    bool changed = true;
+    int max_passes = items.size(); // Safety break for circular dependencies
+
+    while (changed && max_passes-- > 0) {
+        changed = false;
+
+        // Iterate only through the items identified as aliases
+        for (auto it = alias_start; it != items.end(); ++it) {
+
+            // Look ahead to see if the item this alias points to
+            // is currently sitting *below* us in the list.
+            auto dependency_it = std::find_if(std::next(it), items.end(),
+                [&](const TypeEnum::EnumItem& potential_dep) {
+                    return potential_dep.name == it->alias;
+                });
+
+            if (dependency_it != items.end()) {
+                // We found the dependency lower down. Move it to right before us.
+                // std::rotate effectively pulls dependency_it up to position it
+                std::rotate(it, dependency_it, dependency_it + 1);
+
+                // Since we shifted the list, mark as changed to re-scan
+                // (in case the item we just moved up relies on something else)
+                changed = true;
+            }
+        }
+    }
+}
+
 void Generator::generate_enum(TypeEnum& e, std::ofstream& file) {
     file << LineComment{ e.comment };
 
@@ -967,11 +1014,17 @@ void Generator::generate_enum(TypeEnum& e, std::ofstream& file) {
     // FIXME: this should be congigurable by config file, TASK: 100126_01
     file << "enum" << (0 ? " class" : "") << Deprecate{ e.deprecated } << e.name << " " << bitwidth_to_str_type(e.bitwidth) << " {\n";
 
-    for (auto& item : e.items) {
+    // TASK: 030226_01 Enum member dependencies
+    sort_enum_items(e.items);
+
+    for (TypeEnum::EnumItem& item : e.items) {
         if (item.is_standalone_comment) {
             file << "/* " << item.comment << " */\n";
             continue;
         }
+
+        if (!item.api.empty() && !std::ranges::contains(std::views::split(item.api, ','), "vulkan", [](auto&& rng) { return sv(rng); }))
+            continue;
 
         file << "    " << item.name << Deprecate{ item.deprecated } << "= ";
 
@@ -1151,57 +1204,75 @@ void Generator::add_required_type(sv name, std::vector<Type*>& required_types) {
         }
 
         // FIXME: Circular dependency
-        if (index.find(req) == index.end()) {
+        if (required_types_index.find(req) == required_types_index.end()) {
             add_required_type(req, required_types);
         }
 
     }
 
-    switch (type->category) {
+    // CHECK: Im not sure about this logic. What if we have struct, that is defined and want to also be accessed by this alias?
+    if (!type->alias.empty() && required_types_index.find(type->alias) == required_types_index.end())
+        add_required_type(type->alias, required_types);
+    else
+        switch (type->category) {
 
-        /// These types do not require any special handling
-    case Type::Category::Basetype: // fallthrough
-    case Type::Category::Bitmask:  // fallthrough
-    case Type::Category::Define:   // fallthrough
-    case Type::Category::Enum:     // fallthrough
-        // CHECK: handle too?
-    case Type::Category::Handle:   // fallthrough
-    case Type::Category::Include:  // fallthrough
-    case Type::Category::None:
-        break;
+            /// These types do not require any special handling
+        case Type::Category::Basetype: // fallthrough
+        case Type::Category::Bitmask:  // fallthrough
+        case Type::Category::Define:   // fallthrough
+        case Type::Category::Enum:     // fallthrough
+            // CHECK: handle too?
+        case Type::Category::Handle:   // fallthrough
+        case Type::Category::Include:  // fallthrough
+        case Type::Category::None:
+            break;
 
-    case Type::Category::Struct:   // fallthrough
-    case Type::Category::Union:
-        for (auto& member : type->struct_->members) {
-            if (member.is_standalone_comment)
-                continue;
-            if (index.find(member.type) == index.end()) {
-                add_required_type(member.type, required_types);
+        case Type::Category::Struct:   // fallthrough
+        case Type::Category::Union:
+            for (auto& member : type->struct_->members) {
+                if (member.is_standalone_comment)
+                    continue;
+                if (required_types_index.find(member.type) == required_types_index.end()) {
+                    add_required_type(member.type, required_types);
+                }
             }
+            break;
+
+        case Type::Category::Funcpointer:
+            constexpr auto asElementGetFirstChildAsTextTransform = std::views::transform([](Node* n) -> Node::Text& { return n->asElement().children[0]->asText(); });
+            for (sv& param_type : type->elem.children | std::views::filter(has_tag("type")) | asElementGetFirstChildAsTextTransform)
+                if (required_types_index.find(param_type) == required_types_index.end())
+                    add_required_type(param_type, required_types);
+
+            break;
+
         }
-
-        // CHECK: Im not sure about this logic. What if we have struct, that is defined and want to also be accessed by this alias?
-        if (!type->alias.empty() && index.find(type->alias) == index.end()) {
-            add_required_type(type->alias, required_types);
-        }
-
-        break;
-
-    case Type::Category::Funcpointer:
-        constexpr auto asElementGetFirstChildAsTextTransform = std::views::transform([](Node* n) -> Node::Text& { return n->asElement().children[0]->asText(); });
-        for (sv& param_type : type->elem.children | std::views::filter(has_tag("type")) | asElementGetFirstChildAsTextTransform)
-            if (index.find(param_type) == index.end())
-                add_required_type(param_type, required_types);
-
-        break;
-
-    }
 
     required_types.pop_back();
-    index[type->name] = required_types_ordered.size();
+    required_types_index[type->name] = required_types_ordered.size();
     required_types_ordered.push_back(type);
 }
 
+void Generator::add_required_command(sv name) {
+    auto it = commands.find(name);
+    if (it != commands.end()) {
+        Command* cmd = &(it->second);
+        required_commands.push_back(cmd);
+
+        if (required_types_index.find(cmd->type) == required_types_index.end())
+            add_required_type(cmd->type);
+
+        for (auto& param : cmd->parameters) {
+            if (required_types_index.find(param.type) == required_types_index.end())
+                add_required_type(param.type);
+        }
+    } else {
+        CommandAlias* ca = &command_aliases[name];
+        required_command_aliases.push_back(ca);
+        // FIXME: also add required commands
+    }
+
+}
 
 void Generator::add_required_version_feature(sv name, vkg_gen::xml::Dom& dom) {
     // TODO: some feature map is needed
@@ -1250,7 +1321,7 @@ void Generator::add_required_version_feature(sv name, vkg_gen::xml::Dom& dom) {
 
                 if (elem.tag == "type") {
                     sv name = elem.get_attr_value("name");
-                    if (index.find(name) == index.end()) {
+                    if (required_types_index.find(name) == required_types_index.end()) {
                         // CHECK: are type aliases handled correctly?
                         add_required_type(name);
                     }
@@ -1263,16 +1334,7 @@ void Generator::add_required_version_feature(sv name, vkg_gen::xml::Dom& dom) {
                     // Currently generating all enums
 
                 } else if (elem.tag == "command") {
-                    Command* cmd = &commands[elem.get_attr_value("name")];
-                    required_commands.push_back(cmd);
-
-                    if (index.find(cmd->type) == index.end())
-                        add_required_type(cmd->type);
-
-                    for (auto& param : cmd->parameters) {
-                        if (index.find(param.type) == index.end())
-                            add_required_type(param.type);
-                    }
+                    add_required_command(elem.get_attr_value("name"));
 
                 } else {
                     std::cout << "- FIXME: currently ignoring: ";
@@ -1320,9 +1382,9 @@ void Generator::add_required_version_feature(sv name, vkg_gen::xml::Dom& dom) {
 
                 if (elem.tag == "type") {
                     sv name = elem.get_attr_value("name");
-                    Index i = index.find(name)->second;
+                    Index i = required_types_index.find(name)->second;
                     required_types_ordered[i] = nullptr;
-                    index.erase(name);
+                    required_types_index.erase(name);
 
                 } else if (elem.tag == "enum") {
                     // TODO: currently cant remove enums
@@ -1345,7 +1407,13 @@ void Generator::add_required_version_feature(sv name, vkg_gen::xml::Dom& dom) {
 void Generator::extend_enum(sv extends, Element& elem, vkg_gen::Arena& arena, sv block_ext_number) {
 
     TypeEnum& enum_ = enums.find(extends)->second;
-    enum_.items.emplace_back(TypeEnum::EnumItem::from_xml(elem, arena, &enum_, false, true, block_ext_number));
+    auto item = TypeEnum::EnumItem::from_xml(elem, arena, &enum_, false, true, block_ext_number);
+
+    // TASK: 030226_01: Enum member dependencies/redundancy
+    if (std::ranges::find(enum_.items, item.name, &TypeEnum::EnumItem::name) != enum_.items.end())
+        std::cout << "- WARNING: duplicate enum item: '" << item.name << "' in enum '" << extends << "\n";
+    else
+        enum_.items.emplace_back(std::move(item));
 }
 
 // TASK: 100126_01
@@ -1353,64 +1421,76 @@ void Generator::add_extension_prototype(sv number, xml::Dom& dom) {
     auto& registry = dom.root->asElement();
     assert(registry.tag == "registry");
 
+
     Node* extensions = (registry.children | std::views::filter(has_tag("extensions"))).front();
     if (extensions == nullptr)
         throw my_error{ "Could not find extensions tag" };
 
+#if 0
     Node* extension = (extensions->asElement().children | std::views::filter(has_attr("number", number))).front();
     if (extension == nullptr)
         throw my_error{ "Could not find extension with number " + std::string(number) };
+#endif
 
-    for (Node* node : extension->asElement().children) {
-        if (node->isText()) {
-            std::cout << "- Skipping: " << node->asText() << std::endl;
+    for (Node* extension : extensions->asElement().children) {
+        if (extension->isText() || extension->asElement().tag != "extension")
             continue;
-        }
 
-        auto& elem = node->asElement();
-        if (elem.tag == "require") {
-            for (Node* type : elem.children) {
-                if (type->isText()) {
-                    std::cout << "- Skipping TEXT: " << type->asText() << std::endl;
+        auto& ext = extension->asElement();
+
+        sv supported = ext.get_attr_value("supported");
+        if (supported == "disabled" || !std::ranges::contains(std::views::split(supported, ','), "vulkan", [](auto&& rng) { return sv(rng); }))
+            continue;
+
+        if (!ext.get_attr_value("platform").empty())
+            continue;
+
+        for (Node* node : ext.children) {
+            if (node->isText()) {
+                std::cout << "- Skipping: " << node->asText() << std::endl;
+                continue;
+            }
+
+            auto& elem = node->asElement();
+            if (elem.tag == "require") {
+                // FIXME:
+                if (!elem.get_attr_value("platform").empty())
                     continue;
-                }
 
-                Element& elem = type->asElement();
+                for (Node* type : elem.children) {
+                    if (type->isText()) {
+                        std::cout << "- Skipping TEXT: " << type->asText() << std::endl;
+                        continue;
+                    }
 
-                if (elem.tag == "type") {
-                    sv name = elem.get_attr_value("name");
-                    if (index.find(name) == index.end()) {
-                        // CHECK: are type aliases handled correctly?
-                        add_required_type(name);
-                    }
-                } else if (elem.tag == "enum") {
-                    auto it = std::ranges::find(elem.attrs, "extends", &Attribute::name);
-                    if (it != elem.attrs.end()) {
-                        extend_enum(it->value, elem, dom.arena, number);
-                    }
-                    it = std::ranges::find(elem.attrs, "value", &Attribute::name);
-                    if (it != elem.attrs.end()) {
+                    Element& elem = type->asElement();
+
+                    if (elem.tag == "type") {
                         sv name = elem.get_attr_value("name");
-                        required_defines.push_back({ name, it->value, elem });
+                        if (required_types_index.find(name) == required_types_index.end()) {
+                            // CHECK: are type aliases handled correctly?
+                            add_required_type(name);
+                        }
+                    } else if (elem.tag == "enum") {
+                        auto it = std::ranges::find(elem.attrs, "extends", &Attribute::name);
+                        if (it != elem.attrs.end()) {
+                            extend_enum(it->value, elem, dom.arena, number);
+                        }
+                        it = std::ranges::find(elem.attrs, "value", &Attribute::name);
+                        if (it != elem.attrs.end()) {
+                            sv name = elem.get_attr_value("name");
+                            required_defines.push_back({ name, it->value, elem });
+                        }
+                        // Currently generating all enums
+
+                    } else if (elem.tag == "command") {
+                        add_required_command(elem.get_attr_value("name"));
+
+                    } else {
+                        std::cout << "- FIXME: currently ignoring: ";
+                        helper_test(std::cout, type) << std::endl;
+                        continue;
                     }
-                    // Currently generating all enums
-
-                } else if (elem.tag == "command") {
-                    Command* cmd = &commands[elem.get_attr_value("name")];
-                    required_commands.push_back(cmd);
-
-                    if (index.find(cmd->type) == index.end())
-                        add_required_type(cmd->type);
-
-                    for (auto& param : cmd->parameters) {
-                        if (index.find(param.type) == index.end())
-                            add_required_type(param.type);
-                    }
-
-                } else {
-                    std::cout << "- FIXME: currently ignoring: ";
-                    helper_test(std::cout, type) << std::endl;
-                    continue;
                 }
             }
         }
@@ -1444,11 +1524,9 @@ void Generator::generate(xml::Dom& dom, std::ofstream& file, void* config) {
     parse_enums(dom);
     parse_commands(dom);
 
-    add_required_version_feature("VK_VERSION_1_0", dom);
+    add_required_version_feature("VK_VERSION_1_4", dom);
 
     add_extension_prototype("1", dom);
-    add_extension_prototype("2", dom);
-    add_extension_prototype("129", dom);
 
     // Currently generating all enums
     for (auto& [_, enum_] : enums) {
@@ -1503,11 +1581,21 @@ void Generator::generate(xml::Dom& dom, std::ofstream& file, void* config) {
 
     file << "extern \"C\" {\n";
     for (Command* cmd : required_commands) {
+        // TODO: this should not be needed
+        if (exclude_platforms(cmd->name)) {
+            std::cout << "Excluding: " << cmd->name << std::endl;
+            continue;
+        }
+
         generate_command(*cmd, file);
     }
     file << "}\n";
 
     for (Command* cmd : required_commands) {
+        if (exclude_platforms(cmd->name)) {
+            std::cout << "Excluding: " << cmd->name << std::endl;
+            continue;
+        }
         generate_command_PFN(*cmd, file);
     }
 
@@ -1732,6 +1820,35 @@ Command Command::from_xml(const xml::Element& elem, vkg_gen::Arena& arena) {
     }
 
     return cmd;
+}
+
+CommandAlias vkg_gen::Generator::CommandAlias::from_xml(const xml::Element& elem, vkg_gen::Arena& arena) {
+    CommandAlias ca;
+
+    for (const Attribute& attr : elem.attrs) {
+        if (attr.name == "name")
+            ca.name = attr.value;
+        else if (attr.name == "alias")
+            ca.alias = attr.value;
+        else if (attr.name == "comment")
+            ca.comment = attr.value;
+        else if (attr.name == "api")
+            ca.api = attr.value;
+        else {
+            std::cerr << elem << std::endl;
+            throw my_error{ "Unknown attribute for command: " + std::string(attr.name) };
+        }
+    };
+
+    if (elem.children.size() != 0)
+        throw my_error{ "Command alias must have no children!" };
+
+    if (ca.name.empty())
+        throw my_error{ "Command alias must have a name!" };
+
+    assert(!ca.alias.empty());
+
+    return ca;
 }
 
 

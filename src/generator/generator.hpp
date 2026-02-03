@@ -3,7 +3,7 @@
  * @author Jaroslav Hucel (xhucel00@vutbr.cz)
  * @brief
  * @date Created: 02. 11. 2025
- * @date Modified: 09. 01. 2026
+ * @date Modified: 03. 02. 2026
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -331,11 +331,14 @@ namespace vkg_gen::Generator {
 
     };
 
-    class CommandAlias {
+
+    struct  CommandAlias {
         sv name;
         sv alias;
         sv api = {}; // comma separated list, optional
         sv comment = {}; // optional
+
+        static CommandAlias from_xml(const xml::Element& elem, vkg_gen::Arena& arena);
     };
 
     class Command {
@@ -389,19 +392,27 @@ namespace vkg_gen::Generator {
         // Currently expecting only one Tags tag
         Tags tags;
 
-        // CHECK: use unordered map
-        std::map<sv, Type> types = {};
-        std::map<sv, TypeEnum> enums = {};
-        std::map<sv, Command> commands = {};
 
+
+        // CHECK: use unordered map
+        // Index of all the types defined in the <types> tags (with the category="enum" included)
+        std::map<sv, Type> types = {};
+        // Index of all the enums defined in the <enums> tags
+        std::map<sv, TypeEnum> enums = {};
+        // Index of all the commands defined in the <commands> tags
+        std::map<sv, Command> commands = {};
+        std::map<sv, CommandAlias> command_aliases = {};
 
         using Index = std::size_t;
-        // CHECK: rename this, maybe use Type*
-        std::map<sv, Index> index;
+
+
+        // CHECK: rename this, maybe use Type* (but what if required_types_ordered realocates?)
+        std::map<sv, Index> required_types_index;
 
         // Can contain nullptrs because of removing types
         std::vector<Type*> required_types_ordered;
         std::vector<Command*> required_commands;
+        std::vector<CommandAlias*> required_command_aliases;
         // TASK: 100126_01
         std::vector<DefineExt> required_defines;
 
@@ -423,6 +434,8 @@ namespace vkg_gen::Generator {
         // Wrapper around add_required_type
         void add_required_type(sv name);
         void add_required_type(sv name, std::vector<Type*>& required_types);
+
+        void add_required_command(sv name);
 
         void add_required_version_feature(sv name, vkg_gen::xml::Dom& dom);
 
