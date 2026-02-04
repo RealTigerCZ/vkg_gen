@@ -3,7 +3,7 @@
  * @author Jaroslav Hucel (xhucel00@vutbr.cz)
  * @brief
  * @date Created: 02. 11. 2025
- * @date Modified: 03. 02. 2026
+ * @date Modified: 04. 02. 2026
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -15,6 +15,8 @@
 #include "../xml/xml.hpp"
 #include <map>
 #include <stack>
+#include <unordered_map>
+#include <unordered_set>
 
  // TASK: 090126_01
 #define CONCEPT_FILTERING
@@ -385,14 +387,29 @@ namespace vkg_gen::Generator {
         xml::Element& elem;
     };
 
+
+    template <typename Type>
+    concept NameIndexable = requires (Type t) { { t.name } -> std::convertible_to<std::string_view>; };
+
     class Generator {
+        template <NameIndexable Type>
+        class NameIndex {
+            std::vector<Type*> names;
+            std::unordered_map<sv, std::size_t> nameIndex;
+
+        public:
+            bool contains(sv name) const { return nameIndex.find(name) != nameIndex.end(); }
+            void add(Type* type);
+            void add_without_check(Type* type);
+            void remove(sv name);
+            const std::vector<Type*>& get() const { return names; };
+        };
+
         // Currently expecting only one Platforms tag
         Platforms platforms;
 
         // Currently expecting only one Tags tag
         Tags tags;
-
-
 
         // CHECK: use unordered map
         // Index of all the types defined in the <types> tags (with the category="enum" included)
@@ -403,16 +420,16 @@ namespace vkg_gen::Generator {
         std::map<sv, Command> commands = {};
         std::map<sv, CommandAlias> command_aliases = {};
 
-        using Index = std::size_t;
+        NameIndex<Type> required_types;
+        NameIndex<TypeEnum> required_enums;
+        // TODO: think about splitting Alias and Commands
+        NameIndex<Command> required_commands;
+        NameIndex<CommandAlias> required_commands_aliases;
+
+        std::unordered_set<sv> included_platforms;
+        std::unordered_set<sv> included_features;
 
 
-        // CHECK: rename this, maybe use Type* (but what if required_types_ordered realocates?)
-        std::map<sv, Index> required_types_index;
-
-        // Can contain nullptrs because of removing types
-        std::vector<Type*> required_types_ordered;
-        std::vector<Command*> required_commands;
-        std::vector<CommandAlias*> required_command_aliases;
         // TASK: 100126_01
         std::vector<DefineExt> required_defines;
 
@@ -434,7 +451,7 @@ namespace vkg_gen::Generator {
         // Wrapper around add_required_type
         void add_required_type(sv name);
         void add_required_type(sv name, std::vector<Type*>& required_types);
-
+        void add_required_enum(sv name);
         void add_required_command(sv name);
 
         void add_required_version_feature(sv name, vkg_gen::xml::Dom& dom);
@@ -499,6 +516,29 @@ namespace vkg_gen::Generator {
 
     bool bool_from_string(std::string_view s);
     Command::Scope scope_from_string(std::string_view s);
+
+    template<NameIndexable Type>
+    inline void Generator::NameIndex<Type>::add(Type* type) {
+        if (contains(type->name))
+            return;
+
+        add_without_check(type);
+    }
+
+    template<NameIndexable Type>
+    inline void Generator::NameIndex<Type>::add_without_check(Type* type) {
+        nameIndex[type->name] = names.size();
+        names.push_back(type);
+    }
+
+    template<NameIndexable Type>
+    inline void Generator::NameIndex<Type>::remove(sv name) {
+        auto it = nameIndex.find(name);
+        if (it != nameIndex.end()) {
+            names[it->second] = nullptr;
+            nameIndex.erase(it);
+        }
+    }
 
 } // namespace vkg_gen::Generator
 

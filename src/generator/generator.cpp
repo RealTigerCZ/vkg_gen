@@ -3,7 +3,7 @@
  * @author Jaroslav Hucel (xhucel00@vutbr.cz)
  * @brief
  * @date Created: 12. 11. 2025
- * @date Modified: 03. 02. 2026
+ * @date Modified: 04. 02. 2026
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -1185,10 +1185,16 @@ void Generator::add_required_type(sv name) {
     assert(required_types.size() == 0);
 }
 
-void Generator::add_required_type(sv name, std::vector<Type*>& required_types) {
+void Generator::add_required_type(sv name, std::vector<Type*>& types_stack) {
+    if (required_types.contains(name))
+        return;
+
+    if (!types.contains(name))
+        std::cout << "FIXME: Required type not found: " << name << "\n";
+
     Type* type = &types.find(name)->second;
-    if (std::ranges::find(required_types, type) == required_types.end())
-        required_types.push_back(type);
+    if (std::ranges::find(types_stack, type) == types_stack.end())
+        types_stack.push_back(type);
     else {
         std::cout << "FIXME: Returning from circular dependency: " << name << "\n";
         return;
@@ -1204,15 +1210,14 @@ void Generator::add_required_type(sv name, std::vector<Type*>& required_types) {
         }
 
         // FIXME: Circular dependency
-        if (required_types_index.find(req) == required_types_index.end()) {
-            add_required_type(req, required_types);
-        }
+        add_required_type(req, types_stack);
+
 
     }
 
     // CHECK: Im not sure about this logic. What if we have struct, that is defined and want to also be accessed by this alias?
-    if (!type->alias.empty() && required_types_index.find(type->alias) == required_types_index.end())
-        add_required_type(type->alias, required_types);
+    if (!type->alias.empty())
+        add_required_type(type->alias, types_stack);
     else
         switch (type->category) {
 
@@ -1220,11 +1225,15 @@ void Generator::add_required_type(sv name, std::vector<Type*>& required_types) {
         case Type::Category::Basetype: // fallthrough
         case Type::Category::Bitmask:  // fallthrough
         case Type::Category::Define:   // fallthrough
-        case Type::Category::Enum:     // fallthrough
             // CHECK: handle too?
         case Type::Category::Handle:   // fallthrough
+            // TODO: currently generates all handles
         case Type::Category::Include:  // fallthrough
         case Type::Category::None:
+            break;
+
+        case Type::Category::Enum:
+            add_required_enum(type->name);
             break;
 
         case Type::Category::Struct:   // fallthrough
@@ -1232,46 +1241,90 @@ void Generator::add_required_type(sv name, std::vector<Type*>& required_types) {
             for (auto& member : type->struct_->members) {
                 if (member.is_standalone_comment)
                     continue;
-                if (required_types_index.find(member.type) == required_types_index.end()) {
-                    add_required_type(member.type, required_types);
-                }
+
+                add_required_type(member.type, types_stack);
             }
             break;
 
         case Type::Category::Funcpointer:
             constexpr auto asElementGetFirstChildAsTextTransform = std::views::transform([](Node* n) -> Node::Text& { return n->asElement().children[0]->asText(); });
             for (sv& param_type : type->elem.children | std::views::filter(has_tag("type")) | asElementGetFirstChildAsTextTransform)
-                if (required_types_index.find(param_type) == required_types_index.end())
-                    add_required_type(param_type, required_types);
+                add_required_type(param_type, types_stack);
+
+            for (sv& param_enum : type->elem.children | std::views::filter(has_tag("enum")) | asElementGetFirstChildAsTextTransform)
+                add_required_type(param_enum, types_stack);
 
             break;
 
         }
 
-    required_types.pop_back();
-    required_types_index[type->name] = required_types_ordered.size();
-    required_types_ordered.push_back(type);
+    types_stack.pop_back();
+    required_types.add_without_check(type);
 }
 
+void vkg_gen::Generator::Generator::add_required_enum(sv name) {
+    // FIXME: API constatnts
+    static const std::unordered_set<sv> api_constants = { "VK_MAX_PHYSICAL_DEVICE_NAME_SIZE", "VK_UUID_SIZE", "VK_LUID_SIZE", "VK_MAX_EXTENSION_NAME_SIZE", "VK_MAX_DESCRIPTION_SIZE", "VK_MAX_MEMORY_TYPES", "VK_MAX_MEMORY_HEAPS", "VK_LOD_CLAMP_NONE", "VK_REMAINING_MIP_LEVELS", "VK_REMAINING_ARRAY_LAYERS", "VK_REMAINING_3D_SLICES_EXT", "VK_WHOLE_SIZE", "VK_ATTACHMENT_UNUSED", "VK_TRUE", "VK_FALSE", "VK_QUEUE_FAMILY_IGNORED", "VK_QUEUE_FAMILY_EXTERNAL", "VK_QUEUE_FAMILY_FOREIGN_EXT", "VK_SUBPASS_EXTERNAL", "VK_MAX_DEVICE_GROUP_SIZE", "VK_MAX_DRIVER_NAME_SIZE", "VK_MAX_DRIVER_INFO_SIZE", "VK_SHADER_UNUSED_KHR", "VK_MAX_GLOBAL_PRIORITY_SIZE", "VK_MAX_SHADER_MODULE_IDENTIFIER_SIZE_EXT", "VK_MAX_PIPELINE_BINARY_KEY_SIZE_KHR", "VK_MAX_VIDEO_AV1_REFERENCES_PER_FRAME_KHR", "VK_MAX_VIDEO_VP9_REFERENCES_PER_FRAME_KHR", "VK_SHADER_INDEX_UNUSED_AMDX", "VK_PARTITIONED_ACCELERATION_STRUCTURE_PARTITION_INDEX_GLOBAL_NV", "VK_MAX_PHYSICAL_DEVICE_DATA_GRAPH_OPERATION_SET_NAME_SIZE_ARM" };
+
+    if (api_constants.contains(name))
+        name = "API Constants";
+
+    if (required_enums.contains(name) || required_types.contains(name))
+        return;
+
+    auto it = enums.find(name);
+    if (it != enums.end()) {
+        required_enums.add_without_check(&it->second);
+        return;
+    };
+
+    auto it2 = types.find(name);
+    if (it2 != types.end()) {
+        required_types.add_without_check(&it2->second);
+        add_required_enum(it2->second.alias);
+        return;
+    }
+
+    // FIXME: New enum alias can be defined in extension require tag and then other extension can depend on it without redefining it
+    // Also we're currently adding enum aliases ound in require tags into required_defines
+    if (std::ranges::find(required_defines, name, &DefineExt::name) == required_defines.end())
+        throw my_error{ std::format("Enum '{}' not found", name) };
+
+}
+
+
+
 void Generator::add_required_command(sv name) {
+    // TASK: 040226_01 non-linkable commands
+    static const std::unordered_set<sv> non_linkable_commands = { "vkGetRayTracingShaderGroupsKHR", "vkGetRayTracingCaptureReplayShaderGroupHandlesKHR", "vkGetRayTracingShaderGroupHandlesKHR", "vkGetPhysicalDeviceCalibrateableTimeDomainsKHR", "vkGetCalibratedTimestampsKHR", "vkReleaseSwapchainImagesKHR" };
+    if (non_linkable_commands.contains(name))
+        return;
+
+    if (required_commands.contains(name) || required_commands_aliases.contains(name))
+        return;
+
     auto it = commands.find(name);
     if (it != commands.end()) {
         Command* cmd = &(it->second);
-        required_commands.push_back(cmd);
+        required_commands.add_without_check(cmd);
 
-        if (required_types_index.find(cmd->type) == required_types_index.end())
-            add_required_type(cmd->type);
+        // return type
+        add_required_type(cmd->type);
 
-        for (auto& param : cmd->parameters) {
-            if (required_types_index.find(param.type) == required_types_index.end())
-                add_required_type(param.type);
-        }
+        for (auto& param : cmd->parameters)
+            add_required_type(param.type);
+
     } else {
-        CommandAlias* ca = &command_aliases[name];
-        required_command_aliases.push_back(ca);
-        // FIXME: also add required commands
-    }
+        CommandAlias* ca = &command_aliases.find(name)->second;
 
+        // TASK: 040226_01 non-linkable commands
+        if (non_linkable_commands.contains(ca->alias))
+            return;
+
+        required_commands_aliases.add_without_check(ca);
+
+        add_required_command(ca->alias);
+    }
 }
 
 void Generator::add_required_version_feature(sv name, vkg_gen::xml::Dom& dom) {
@@ -1297,11 +1350,8 @@ void Generator::add_required_version_feature(sv name, vkg_gen::xml::Dom& dom) {
     if (!depends.empty() && (depends.contains(',') || depends.contains('+'))) {
         std::cout << "FIXME: Compound dependencies not supported yet" << std::endl;
     } else if (!depends.empty()) {
-        // TODO: circular dependency
         add_required_version_feature(depends, dom);
-
     }
-
 
     for (Node* node : feature.children) {
         if (node->isText()) {
@@ -1320,18 +1370,17 @@ void Generator::add_required_version_feature(sv name, vkg_gen::xml::Dom& dom) {
                 Element& elem = type->asElement();
 
                 if (elem.tag == "type") {
-                    sv name = elem.get_attr_value("name");
-                    if (required_types_index.find(name) == required_types_index.end()) {
-                        // CHECK: are type aliases handled correctly?
-                        add_required_type(name);
-                    }
+                    add_required_type(elem.get_attr_value("name"));
                 } else if (elem.tag == "enum") {
                     auto it = std::ranges::find(elem.attrs, "extends", &Attribute::name);
                     if (it != elem.attrs.end()) {
-                        // TODO: block extension number
+                        // TASK: 040226_02 Extension number
                         extend_enum(it->value, elem, dom.arena);
+                        add_required_enum(it->value);
+                    } else {
+                        add_required_enum(elem.get_attr_value("name"));
                     }
-                    // Currently generating all enums
+
 
                 } else if (elem.tag == "command") {
                     add_required_command(elem.get_attr_value("name"));
@@ -1339,7 +1388,6 @@ void Generator::add_required_version_feature(sv name, vkg_gen::xml::Dom& dom) {
                 } else {
                     std::cout << "- FIXME: currently ignoring: ";
                     helper_test(std::cout, type) << std::endl;
-                    continue;
                 }
             }
         } else if (elem.tag == "deprecate") {
@@ -1363,6 +1411,8 @@ void Generator::add_required_version_feature(sv name, vkg_gen::xml::Dom& dom) {
                     enums.find(name)->second.deprecated = explanation;
                 } else if (elem.tag == "command") {
                     // TODO: Currently ignoring commands
+                    //sv name = elem.get_attr_value("name");
+                    //commands.find(name)->second.deprecated = explanation;
                 } else if (elem.tag == "comment") {
                     // CHECK: ignore standalone comments?
                 } else {
@@ -1381,15 +1431,11 @@ void Generator::add_required_version_feature(sv name, vkg_gen::xml::Dom& dom) {
                 Element& elem = type->asElement();
 
                 if (elem.tag == "type") {
-                    sv name = elem.get_attr_value("name");
-                    Index i = required_types_index.find(name)->second;
-                    required_types_ordered[i] = nullptr;
-                    required_types_index.erase(name);
-
+                    required_types.remove(elem.get_attr_value("name"));
                 } else if (elem.tag == "enum") {
-                    // TODO: currently cant remove enums
+                    required_enums.remove(elem.get_attr_value("name"));
                 } else if (elem.tag == "command") {
-                    // TODO: Currently ignoring commands
+                    required_commands.remove(elem.get_attr_value("name"));
                 } else if (elem.tag == "comment") {
                     // CHECK: ignore standalone comments?
                 } else {
@@ -1466,22 +1512,32 @@ void Generator::add_extension_prototype(sv number, xml::Dom& dom) {
                     Element& elem = type->asElement();
 
                     if (elem.tag == "type") {
-                        sv name = elem.get_attr_value("name");
-                        if (required_types_index.find(name) == required_types_index.end()) {
-                            // CHECK: are type aliases handled correctly?
-                            add_required_type(name);
-                        }
+                        add_required_type(elem.get_attr_value("name"));
                     } else if (elem.tag == "enum") {
                         auto it = std::ranges::find(elem.attrs, "extends", &Attribute::name);
                         if (it != elem.attrs.end()) {
+                            // TASK: 040226_02 Extension number
                             extend_enum(it->value, elem, dom.arena, number);
+                            add_required_enum(it->value);
+                            continue;
                         }
+
+                        sv name = elem.get_attr_value("name");
                         it = std::ranges::find(elem.attrs, "value", &Attribute::name);
                         if (it != elem.attrs.end()) {
-                            sv name = elem.get_attr_value("name");
                             required_defines.push_back({ name, it->value, elem });
+                            continue;
                         }
-                        // Currently generating all enums
+
+                        it = std::ranges::find(elem.attrs, "alias", &Attribute::name);
+                        if (it != elem.attrs.end()) {
+                            // FIXME: should be enum alias
+                            required_defines.push_back({ name, it->value, elem });
+                            continue;
+                        }
+
+                        add_required_enum(name);
+
 
                     } else if (elem.tag == "command") {
                         add_required_command(elem.get_attr_value("name"));
@@ -1529,8 +1585,9 @@ void Generator::generate(xml::Dom& dom, std::ofstream& file, void* config) {
     add_extension_prototype("1", dom);
 
     // Currently generating all enums
-    for (auto& [_, enum_] : enums) {
-        generate_enum(enum_, file);
+    for (TypeEnum* enum_ : required_enums.get()) {
+        if (enum_ != nullptr)
+            generate_enum(*enum_, file);
     }
 
     // TASK: 100126_01
@@ -1538,7 +1595,7 @@ void Generator::generate(xml::Dom& dom, std::ofstream& file, void* config) {
         file << "#define " << define.name << " " << define.value << "\n";
     }
 
-    for (Type* p : required_types_ordered) {
+    for (Type* p : required_types.get()) {
         if (p == nullptr)
             continue;
 
@@ -1580,24 +1637,28 @@ void Generator::generate(xml::Dom& dom, std::ofstream& file, void* config) {
     }
 
     file << "extern \"C\" {\n";
-    for (Command* cmd : required_commands) {
-        // TODO: this should not be needed
-        if (exclude_platforms(cmd->name)) {
-            std::cout << "Excluding: " << cmd->name << std::endl;
+    for (Command* cmd : required_commands.get()) {
+        if (cmd == nullptr)
             continue;
-        }
-
         generate_command(*cmd, file);
     }
-    file << "}\n";
+    file << "}\n\n";
 
-    for (Command* cmd : required_commands) {
-        if (exclude_platforms(cmd->name)) {
-            std::cout << "Excluding: " << cmd->name << std::endl;
+    for (Command* cmd : required_commands.get()) {
+        if (cmd == nullptr)
             continue;
-        }
         generate_command_PFN(*cmd, file);
     }
+
+    file << "\n";
+
+    for (CommandAlias* ca : required_commands_aliases.get()) {
+        if (ca == nullptr)
+            continue;
+        file << "using " << "PFN_" << ca->name << " = PFN_" << ca->alias << ";\n";
+        file << "auto " << ca->name << " = " << ca->alias << ";\n";
+    }
+
 
 #else
     //auto unions_filter = has_tag("type") && has_attr("category", "union");
@@ -1850,5 +1911,4 @@ CommandAlias vkg_gen::Generator::CommandAlias::from_xml(const xml::Element& elem
 
     return ca;
 }
-
 
