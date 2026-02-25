@@ -715,6 +715,7 @@ struct Config {
 
     bool generate_comments = true;
     bool generate_enums_classes = true; // false means generate C enums
+    bool generate_handle_class = true;  // false means generate C vulkan macros
     bool generate_enum_numbers = true;  // false tries to remove all unnecessary enum numbers
 
     Compact compact = Compact::Normal;

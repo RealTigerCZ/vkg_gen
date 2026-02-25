@@ -430,12 +430,15 @@ namespace vkg_gen::Generator {
         std::unordered_set<sv> included_features;
         std::vector<std::reference_wrapper<xml::Element>> included_extensions;
 
+        Config config;
+
         // TASK: 100126_01
         std::vector<DefineExt> required_defines;
 
         void parse_types(vkg_gen::xml::Dom& dom);
         void parse_enums(vkg_gen::xml::Dom& dom);
         void parse_commands(vkg_gen::xml::Dom& dom);
+        bool is_handle(sv type);
 
         void generate_enum(TypeEnum& enum_, std::ofstream& file);
         void generate_enum_alias(Type& enum_, std::ofstream& file);
@@ -480,10 +483,12 @@ namespace vkg_gen::Generator {
 
     struct Deprecate {
         sv msg;
+        bool generate = true;
     };
     struct LineComment {
         sv comment;
         bool alone = true;
+        bool generate = true;
     };
 
     struct StandaloneComment {
@@ -492,14 +497,14 @@ namespace vkg_gen::Generator {
     };
 
     inline std::ostream& operator<<(std::ostream& os, Deprecate d) {
-        if (!d.msg.empty()) {
+        if (d.generate && !d.msg.empty()) {
             return os << " [[deprecated(\"" << d.msg << "\")]] ";
         }
         return os << ' ';
     };
 
     inline std::ostream& operator<<(std::ostream& os, LineComment c) {
-        if (!c.comment.empty()) {
+        if (c.generate && !c.comment.empty()) {
             if (c.alone)
                 os << "// " << c.comment << '\n';
             else

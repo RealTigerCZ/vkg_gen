@@ -40,3 +40,7 @@
 
 // TASK: 040226_02
  - When extending enum, wee need to know ext-number, if it is not specified. Currently passing 0.
+
+// TASK: 250226_01
+ - Handle config in generator properly
+ - Currently just copying what was passed to latest generate.

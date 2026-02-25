@@ -72,7 +72,6 @@ namespace boilerplate {
         "#include <assert.h>\n"
         "\n"
         "void* lib = nullptr;\n"
-        "VkInstance instance = nullptr;\n"
         "FuncTable funcs;\n"
         "static VkExtensionProperties * extensions = nullptr;\n"
         "static const char** extensions_names = nullptr;\n"
@@ -996,6 +995,13 @@ void vkg_gen::Generator::Generator::parse_commands(vkg_gen::xml::Dom& dom) {
     }
 }
 
+bool vkg_gen::Generator::Generator::is_handle(sv type) {
+    auto it = types.find(type);
+    if (it == types.end())
+        return false;
+    return it->second.category == Type::Category::Handle;
+}
+
 constexpr std::string_view bitwidth_to_str_type(TypeEnum::Bitwidth w) {
     switch (w) {
     case TypeEnum::Bitwidth::None:
@@ -1075,15 +1081,15 @@ void Generator::generate_enum(TypeEnum& e, std::ofstream& file) {
         file << '\n';
         return;
     }
-    // FIXME: this should be congigurable by config file, TASK: 100126_01
-    file << "enum" << (0 ? " class" : "") << Deprecate{ e.deprecated } << e.name << " " << bitwidth_to_str_type(e.bitwidth) << " {\n";
+
+    file << "enum" << (config.generate_enums_classes ? " class" : "") << Deprecate{ e.deprecated } << e.name << " " << bitwidth_to_str_type(e.bitwidth) << " {\n";
 
     // TASK: 030226_01 Enum member dependencies
     sort_enum_items(e.items);
 
     for (TypeEnum::EnumItem& item : e.items) {
         if (item.is_standalone_comment) {
-            file << "/* " << item.comment << " */\n";
+            file << StandaloneComment{ item.comment, config.generate_comments };
             continue;
         }
 
@@ -1115,7 +1121,7 @@ void Generator::generate_enum(TypeEnum& e, std::ofstream& file) {
             assert(false);
         }
 
-        file << "," << LineComment{ item.comment, false } << '\n';
+        file << "," << LineComment{ item.comment, false, config.generate_comments } << '\n';
     }
     file << "};\n\n";
 }
@@ -1125,7 +1131,7 @@ void Generator::generate_struct(Type& s, std::ofstream& file) {
 
     std::cout << "Generating struct: " << s.name << std::endl;
 
-    file << LineComment{ s.comment };
+    file << LineComment{ s.comment, true, config.generate_comments };
 
     if (!s.alias.empty()) {
         file << "using " << s.name << Deprecate{ s.deprecated } << "= " << s.alias << ";\n";
@@ -1141,7 +1147,7 @@ void Generator::generate_struct(Type& s, std::ofstream& file) {
             continue;
         }
 
-        file << "    " << member.stringify << LineComment{ member.comment, false } << '\n';
+        file << "    " << member.stringify << LineComment{ member.comment, false, config.generate_comments } << '\n';
     }
     file << "};\n\n";
 }
@@ -1151,7 +1157,7 @@ void Generator::generate_union(Type& s, std::ofstream& file) {
 
     std::cout << "Generating union: " << s.name << std::endl;
 
-    file << LineComment{ s.comment };
+    file << LineComment{ s.comment, true, config.generate_comments };
 
     if (!s.alias.empty()) {
         file << "using " << s.name << Deprecate{ s.deprecated } << "= " << s.alias << ";\n";
@@ -1167,13 +1173,13 @@ void Generator::generate_union(Type& s, std::ofstream& file) {
             continue;
         }
 
-        file << "    " << member.stringify << LineComment{ member.comment, false } << '\n';
+        file << "    " << member.stringify << LineComment{ member.comment, false, config.generate_comments } << '\n';
     }
     file << "};\n\n";
 }
 
 void Generator::generate_bitmask(Type& bitmask, std::ofstream& file) {
-    file << LineComment{ bitmask.comment };
+    file << LineComment{ bitmask.comment, true, config.generate_comments };
 
     file << "using " << bitmask.name << Deprecate{ bitmask.deprecated } << "= ";
     if (!bitmask.alias.empty()) {
@@ -1201,12 +1207,13 @@ void Generator::generate_handle(Type& h, std::ofstream& file, TypeEnum& obj_enum
         std::cout << "FIXME: Handle '" << h.name << "' did not found matching objtypeenum '" << h.handle->objtypeenum << "' in enum '" << obj_enum.name << "'" << std::endl;
     //throw my_error{ std::format("Handle '{}' did not found matching objtypeenum '{}' in enum '{}'", h.name, h.handle->objtypeenum, obj_enum.name) };
 
-    if (true /*FIXME: OLD C HANDLES*/)
+    if (!config.generate_handle_class)
         file << "VK_DEFINE_HANDLE(" << h.name << ")\n";
     else
         file << "using " << h.name << Deprecate{ h.deprecated } << "= "
-        << "Handle<struct " << obj_enum.name << "_T*>" << ";" << LineComment{ h.comment, false } << '\n';
+        << "Handle<struct " << obj_enum.name << "_T*>" << ";" << LineComment{ h.comment, false, config.generate_comments } << '\n';
 }
+
 
 std::ofstream& vkg_gen::Generator::Generator::generate_command_params(Command& cmd, std::ofstream& file, bool is_end_of_line) {
     file << "(";
@@ -1221,8 +1228,13 @@ std::ofstream& vkg_gen::Generator::Generator::generate_command_params(Command& c
             first = false;
         else
             file << ", ";
-
-        file << param.stringify;
+        if (config.generate_handle_class && is_handle(param.type)) {
+            std::string new_type = param.stringify;
+            new_type.insert(new_type.find(param.type, 0) + param.type.size(), "::HandleType");
+            file << new_type;
+        } else {
+            file << param.stringify;
+        }
     }
 
     file << ")";
@@ -1646,7 +1658,8 @@ void Generator::add_extension_prototype(sv number, xml::Dom& dom) {
 
 
 void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& source, Config& config) {
-
+    // TASK: 250226_01 Handle config in generator properly
+    this->config = config;
 
 #if 1
     header << "#pragma once\n";
@@ -1674,7 +1687,6 @@ void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& so
 
     add_extension_prototype("1", dom);
 
-    // Currently generating all enums
     for (TypeEnum* enum_ : required_enums.get()) {
         if (enum_ != nullptr)
             generate_enum(*enum_, header);
@@ -1778,6 +1790,7 @@ void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& so
 
     source << "#include \"" << config.header_path << "\"\n";
     source << boilerplate::CPP_IMPL;
+    source << "VkInstance" << (config.generate_handle_class ? "::HandleType" : "") << " instance = nullptr;\n";
     source << "// static const char* extensions[] = {";
     bool first = true;
     for (const Element& extension : included_extensions) {
