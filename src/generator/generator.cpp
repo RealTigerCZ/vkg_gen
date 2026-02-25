@@ -3,7 +3,7 @@
  * @author Jaroslav Hucel (xhucel00@vutbr.cz)
  * @brief
  * @date Created: 12. 11. 2025
- * @date Modified: 04. 02. 2026
+ * @date Modified: 24. 02. 2026
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -60,8 +60,72 @@ namespace boilerplate {
         "#include \"vk_video/vulkan_video_codec_vp9std_decode.h\"\n"
         "#include \"vk_video/vulkan_video_codec_h264std.h\"\n"
         "#include \"vk_video/vulkan_video_codec_vp9std.h\"\n";
-}
 
+    // FIXME:
+    static const char* HEADER_EXTERNS = ""
+        "extern void load_lib(const char* path);\n"
+        "extern void unload_lib();\n"
+        "extern void init_vk_functions();\n";
+
+    static const char* CPP_IMPL = ""
+        "#include <dlfcn.h>\n"
+        "#include <assert.h>\n"
+        "\n"
+        "void* lib = nullptr;\n"
+        "VkInstance instance = nullptr;\n"
+        "FuncTable funcs;\n"
+        "static VkExtensionProperties * extensions = nullptr;\n"
+        "static const char** extensions_names = nullptr;\n"
+        "static uint32_t extensions_count = 0;\n";
+
+    static const char* LOAD_UNLOAD_LIB_IMPL = ""
+        "void load_lib(const char* path) {\n"
+        "    lib = dlopen(path, RTLD_NOW);\n"
+        "    assert(lib);\n"
+        "    funcs.vkGetInstanceProcAddr = PFN_vkGetInstanceProcAddr(dlsym(lib, \"vkGetInstanceProcAddr\"));\n"
+        "    assert(funcs.vkGetInstanceProcAddr);\n"
+        "    funcs.vkCreateInstance = PFN_vkCreateInstance(funcs.vkGetInstanceProcAddr(nullptr, \"vkCreateInstance\"));\n"
+        "    assert(funcs.vkCreateInstance);\n"
+        "    funcs.vkEnumerateInstanceExtensionProperties = PFN_vkEnumerateInstanceExtensionProperties(funcs.vkGetInstanceProcAddr(nullptr, \"vkEnumerateInstanceExtensionProperties\"));\n"
+        "    assert(funcs.vkEnumerateInstanceExtensionProperties);\n"
+        "\n"
+        "    funcs.vkEnumerateInstanceExtensionProperties(nullptr, &extensions_count, nullptr);\n"
+        "    extensions = new VkExtensionProperties[extensions_count];\n"
+        "    extensions_names = new const char* [extensions_count];\n"
+        "    funcs.vkEnumerateInstanceExtensionProperties(nullptr, &extensions_count, extensions);\n"
+        "\n"
+        "    for (uint32_t i = 0; i < extensions_count; i++) {\n"
+        "        extensions_names[i] = extensions[i].extensionName;\n"
+        "    }\n"
+        "\n"
+        "    VkApplicationInfo app_info = {\n"
+        "                .pApplicationName = \"test\",\n"
+        "                .applicationVersion = 0,\n"
+        "                .pEngineName = nullptr,\n"
+        "                .engineVersion = 0,\n"
+        "                .apiVersion = 1 << 22 };\n"
+        "\n"
+        "    VkInstanceCreateInfo info = {\n"
+        "                .flags = {},\n"
+        "                .pApplicationInfo = &app_info,\n"
+        "                .enabledLayerCount = 0,\n"
+        "                .ppEnabledLayerNames = nullptr,\n"
+        "                .enabledExtensionCount = extensions_count,\n"
+        "                .ppEnabledExtensionNames = extensions_names };\n"
+        "\n"
+        "    funcs.vkCreateInstance(&info, nullptr, &instance);\n"
+        "    assert(instance);\n"
+        "}\n"
+        "\n"
+        "void unload_lib() {\n"
+        "    if (!lib) return;\n"
+        "    if (instance)\n"
+        "       funcs.vkDestroyInstance(instance, nullptr);\n"
+        "    dlclose(lib);\n"
+        "    lib = nullptr;\n"
+        "    instance = nullptr;\n"
+        "}\n";
+}
 
 //FIXME:
 using namespace vkg_gen::xml;
@@ -1144,7 +1208,7 @@ void Generator::generate_handle(Type& h, std::ofstream& file, TypeEnum& obj_enum
         << "Handle<struct " << obj_enum.name << "_T*>" << ";" << LineComment{ h.comment, false } << '\n';
 }
 
-std::ofstream& vkg_gen::Generator::Generator::generate_command_params(Command& cmd, std::ofstream& file) {
+std::ofstream& vkg_gen::Generator::Generator::generate_command_params(Command& cmd, std::ofstream& file, bool is_end_of_line) {
     file << "(";
     bool first = true;
     for (auto& param : cmd.parameters) {
@@ -1161,7 +1225,9 @@ std::ofstream& vkg_gen::Generator::Generator::generate_command_params(Command& c
         file << param.stringify;
     }
 
-    file << ");\n";
+    file << ")";
+    if (is_end_of_line)
+        file << ";\n";
     return file;
 }
 
@@ -1177,6 +1243,29 @@ void vkg_gen::Generator::Generator::generate_command_PFN(Command& cmd, std::ofst
     // FIXME: cmd can have any arbitraty C code
     file << "typedef " << cmd.type << " (VKAPI_PTR* PFN_" << cmd.name << ")";
     generate_command_params(cmd, file);
+}
+
+void vkg_gen::Generator::Generator::generate_command_wrapper(Command& cmd, std::ofstream& file) {
+    file << "inline " << cmd.type << " " << cmd.name; // TODO: proper name mangling
+    generate_command_params(cmd, file, false);
+    file << "{ return funcs." << cmd.name << "(";
+
+    bool first = true;
+    for (auto& param : cmd.parameters) {
+        if (!param.api.empty() && !std::ranges::contains(std::views::split(param.api, ','), "vulkan", [](auto&& rng) { return sv(rng); })) {
+            std::cout << " TODO: Skipping parameter '" << param.stringify << "' of command '" << cmd.name << "', because it does not contain 'vulkan' api.\n";
+            continue;
+        }
+
+        if (first)
+            first = false;
+        else
+            file << ", ";
+
+        file << param.name;
+    };
+    file << "); }\n";
+
 }
 
 void Generator::add_required_type(sv name) {
@@ -1491,6 +1580,8 @@ void Generator::add_extension_prototype(sv number, xml::Dom& dom) {
         if (!ext.get_attr_value("platform").empty())
             continue;
 
+        included_extensions.push_back(ext);
+
         for (Node* node : ext.children) {
             if (node->isText()) {
                 std::cout << "- Skipping: " << node->asText() << std::endl;
@@ -1554,24 +1645,24 @@ void Generator::add_extension_prototype(sv number, xml::Dom& dom) {
 }
 
 
-void Generator::generate(xml::Dom& dom, std::ofstream& file, void* config) {
+void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& source, void* config) {
 
 
 
 #if 1
-    file << "#pragma once\n";
-    file << boilerplate::VIDEO_INCLUDES << "\n";
+    header << "#pragma once\n";
+    header << boilerplate::VIDEO_INCLUDES << "\n";
 
-    file << "#define VKAPI_PTR\n";
+    header << "#define VKAPI_PTR\n";
 
-    file << "typedef uint32_t VkFlags;\n";
-    file << "typedef uint64_t VkFlags64;\n";
+    header << "typedef uint32_t VkFlags;\n";
+    header << "typedef uint64_t VkFlags64;\n";
 
-    file << boilerplate::HANDLE_DEFINITION << "\n";
+    header << boilerplate::HANDLE_DEFINITION << "\n";
 
-    file << "#define VKAPI_CALL\n";
-    file << "#define VKAPI_ATTR\n";
-    file << "#define VK_DEFINE_HANDLE(object) typedef struct object##_T* object;\n";
+    header << "#define VKAPI_CALL\n";
+    header << "#define VKAPI_ATTR\n";
+    header << "#define VK_DEFINE_HANDLE(object) typedef struct object##_T* object;\n";
 
     //generate_API_constants(dom, file);
     //generate_types(dom, file);
@@ -1587,12 +1678,12 @@ void Generator::generate(xml::Dom& dom, std::ofstream& file, void* config) {
     // Currently generating all enums
     for (TypeEnum* enum_ : required_enums.get()) {
         if (enum_ != nullptr)
-            generate_enum(*enum_, file);
+            generate_enum(*enum_, header);
     }
 
     // TASK: 100126_01
     for (auto& define : required_defines) {
-        file << "#define " << define.name << " " << define.value << "\n";
+        header << "#define " << define.name << " " << define.value << "\n";
     }
 
     for (Type* p : required_types.get()) {
@@ -1608,57 +1699,133 @@ void Generator::generate(xml::Dom& dom, std::ofstream& file, void* config) {
 
         switch (type.category) {
         case Type::Category::Struct:
-            generate_struct(type, file);
+            generate_struct(type, header);
             break;
         case Type::Category::Union:
-            generate_union(type, file);
+            generate_union(type, header);
             break;
         case Type::Category::Enum:
             // TODO: this should not be needed and should not even happen
-            generate_enum_alias(type, file);
+            generate_enum_alias(type, header);
             break;
 
         case Type::Category::Bitmask:
-            generate_bitmask(type, file);
+            generate_bitmask(type, header);
             break;
 
             // TODO: temporary solution
         case Type::Category::Basetype:
             //case Type::Category::Define:
         case Type::Category::Funcpointer:
-            _gen_arbitrary_C_code_in_type(type.elem, file);
+            _gen_arbitrary_C_code_in_type(type.elem, header);
             break;
         case Type::Category::Handle:
-            generate_handle(type, file, enums.at(TypeHandle::obj_enum_name));
+            generate_handle(type, header, enums.at(TypeHandle::obj_enum_name));
             break;
         default:
             break;
         }
     }
 
-    file << "extern \"C\" {\n";
-    for (Command* cmd : required_commands.get()) {
-        if (cmd == nullptr)
-            continue;
-        generate_command(*cmd, file);
-    }
-    file << "}\n\n";
+    //header << "extern \"C\" {\n";
+    //for (Command* cmd : required_commands.get()) {
+    //    if (cmd == nullptr)
+    //        continue;
+    //    generate_command(*cmd, header);
+    //}
+    //header << "}\n\n";
 
     for (Command* cmd : required_commands.get()) {
         if (cmd == nullptr)
             continue;
-        generate_command_PFN(*cmd, file);
+        generate_command_PFN(*cmd, header);
     }
 
-    file << "\n";
+    header << "\n";
+    header << "struct FuncTable {\n";
+
+    for (Command* cmd : required_commands.get()) {
+        if (cmd == nullptr)
+            continue;
+
+        header << "    PFN_" << cmd->name << " " << cmd->name << " = nullptr;\n";
+    }
+    header << "};\nextern FuncTable funcs;\n";
+
 
     for (CommandAlias* ca : required_commands_aliases.get()) {
         if (ca == nullptr)
             continue;
-        file << "using " << "PFN_" << ca->name << " = PFN_" << ca->alias << ";\n";
-        file << "auto " << ca->name << " = " << ca->alias << ";\n";
+        header << "using " << "PFN_" << ca->name << " = PFN_" << ca->alias << ";\n";
+        // FIXME: because of removing the static linking, the ca->alias is not defined
+        // header << "auto " << ca->name << " = " << ca->alias << ";\n";
     }
 
+    for (Command* cmd : required_commands.get()) {
+        if (cmd == nullptr)
+            continue;
+
+        generate_command_wrapper(*cmd, header);
+    }
+
+    // FIXME: causes redefinition
+    //for (CommandAlias* ca : required_commands_aliases.get()) {
+    //    if (ca == nullptr)
+    //        continue;
+    //    header << "auto " << ca->name << " = " << ca->alias << ";\n"; // TODO: proper name mangling
+    //}
+
+    header << "\n" << boilerplate::HEADER_EXTERNS;
+
+    // FIXME: config.header_file
+    source << "#include \"" << "out.hpp" << "\"\n";
+    source << boilerplate::CPP_IMPL;
+    source << "// static const char* extensions[] = {";
+    bool first = true;
+    for (const Element& extension : included_extensions) {
+        sv name = extension.get_attr_value("name");
+        //if (exclude_platforms(name))
+        //    continue;
+        if (extension.get_attr_value("type") != "instance")
+            continue;
+
+        if (first)
+            first = false;
+        else
+            source << ", ";
+
+        source << "\"" << name << "\"";
+    }
+    source << "};\n\n";
+
+    source << boilerplate::LOAD_UNLOAD_LIB_IMPL << "\n";
+
+    static const std::unordered_set<std::string_view> ignore = {
+        "vkGetInstanceProcAddr",
+        "vkCreateInstance",
+        "vkEnumerateInstanceExtensionProperties",
+        "vkEnumerateInstanceLayerProperties",
+
+        "vkGetPhysicalDeviceExternalImageFormatPropertiesNV", // TODO: this crashes the program
+    };
+
+    source << "void init_vk_functions() {\n";
+    for (Command* cmd : required_commands.get()) {
+
+        if (cmd == nullptr || ignore.contains(cmd->name))
+            continue;
+
+        source << "    funcs." << cmd->name << " = (PFN_" << cmd->name << ")funcs.vkGetInstanceProcAddr(instance, \"" << cmd->name << "\");\n";
+    }
+
+    for (Command* cmd : required_commands.get()) {
+
+        if (cmd == nullptr || ignore.contains(cmd->name))
+            continue;
+
+        source << "    assert(funcs." << cmd->name << ");\n";
+    }
+    source << "}\n";
 
 #else
     //auto unions_filter = has_tag("type") && has_attr("category", "union");

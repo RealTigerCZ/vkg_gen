@@ -3,7 +3,7 @@
  * @author Jaroslav Hucel (xhucel00@vutbr.cz)
  * @brief
  * @date Created: 02. 11. 2025
- * @date Modified: 04. 02. 2026
+ * @date Modified: 24. 02. 2026
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -428,7 +428,7 @@ namespace vkg_gen::Generator {
 
         std::unordered_set<sv> included_platforms;
         std::unordered_set<sv> included_features;
-
+        std::vector<std::reference_wrapper<xml::Element>> included_extensions;
 
         // TASK: 100126_01
         std::vector<DefineExt> required_defines;
@@ -444,9 +444,10 @@ namespace vkg_gen::Generator {
         void generate_bitmask(Type& bitmask, std::ofstream& file);
         void generate_handle(Type& handle, std::ofstream& file, TypeEnum& obj_enum);
 
-        std::ofstream& generate_command_params(Command& cmd, std::ofstream& file);
+        std::ofstream& generate_command_params(Command& cmd, std::ofstream& file, bool is_end_of_line = true);
         void generate_command(Command& cmd, std::ofstream& file);
         void generate_command_PFN(Command& cmd, std::ofstream& file);
+        void generate_command_wrapper(Command& cmd, std::ofstream& file);
 
         // Wrapper around add_required_type
         void add_required_type(sv name);
@@ -462,7 +463,7 @@ namespace vkg_gen::Generator {
 
     public:
         Generator() {}
-        void generate(vkg_gen::xml::Dom& dom, std::ofstream& file, void* config = nullptr);
+        void generate(vkg_gen::xml::Dom& dom, std::ofstream& header, std::ofstream& source, void* config = nullptr);
 
         // TODO:
         xml::Node* Types;

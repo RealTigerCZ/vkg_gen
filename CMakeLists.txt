@@ -35,7 +35,8 @@ target_link_libraries(vkg_gen
 
 # Debug target to check if out.hpp is compilable
 add_custom_target(out_comp
-    COMMAND g++ -c ${CMAKE_BINARY_DIR}/out.hpp -o ${CMAKE_BINARY_DIR}/vk.o -std=c++20 -Wall -Wextra -g -pedantic -fdiagnostics-color=always
-    COMMAND echo "" && echo "Successfully compiled out.hpp!"
+    COMMAND g++ -c ${CMAKE_BINARY_DIR}/out.cpp -o ${CMAKE_BINARY_DIR}/vk.o -std=c++20 -Wall -Wextra -g -pedantic -fdiagnostics-color=always
+    COMMAND g++ ${CMAKE_BINARY_DIR}/out_comp.cpp ${CMAKE_BINARY_DIR}/vk.o -o ${CMAKE_BINARY_DIR}/out
+    COMMAND echo "" && echo "Successfully compiled test file (out_comp.cpp)!"
     COMMENT "Compiling out.hpp manually with g++ to check if it compiles"
 )

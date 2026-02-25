@@ -1,9 +1,9 @@
 /**
- *@file main.cpp
+ * @file main.cpp
  * @author Jaroslav Hucel (xhucel00@vutbr.cz)
  * @brief TODO:
  * @date Created: 30. 07. 2025
- * @date Modified: 15. 12. 2025
+ * @date Modified: 24. 02. 2026
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -18,7 +18,8 @@
 #include <unordered_map>
 
 static const char* FILE_PATH = "vk.xml";
-static const char* OUT_PATH = "out.hpp";
+static const char* OUT_PATH_HPP = "out.hpp";
+static const char* OUT_PATH_CPP = "out.cpp";
 
 #if 0
 void debug_print_node(const vkg_gen::xml::Node& node, int indent = 0, int max_indent = 0) {
@@ -121,26 +122,28 @@ void debug_print(const vkg_gen::xml::Dom& dom) {
 void test(vkg_gen::xml::Dom& dom) {
     using namespace vkg_gen::xml;
 
-    std::ofstream file{ OUT_PATH, std::ios::out };
-    if (!file.is_open()) {
-        throw std::runtime_error{ "Failed to open file: '" + std::string(OUT_PATH) + "' because: '" + std::strerror(errno) + "'" };
-    }
+    std::ofstream header{ OUT_PATH_HPP, std::ios::out };
+    if (!header.is_open())
+        throw std::runtime_error{ "Failed to open file: '" + std::string(OUT_PATH_HPP) + "' because: '" + std::strerror(errno) + "'" };
 
-    file << "#pragma once\n";
-    file << "#include <cstdint>\n";
-    file << "#include <cstddef>\n";
-    file << "\n";
+    std::ofstream source{ OUT_PATH_CPP, std::ios::out };
+    if (!source.is_open())
+        throw std::runtime_error{ "Failed to open file: '" + std::string(OUT_PATH_CPP) + "' because: '" + std::strerror(errno) + "'" };
 
-    //generate_base_types(dom, file);
-    //generate_API_constants(dom, file);
-    //generate_enums(dom, file);
+
+    header << "#pragma once\n";
+    header << "#include <cstdint>\n";
+    header << "#include <cstddef>\n";
+    header << "\n";
+
+    //generate_base_types(dom, header);
+    //generate_API_constants(dom, header);
+    //generate_enums(dom, header);
 
     vkg_gen::Generator::Generator generator;
-    generator.generate(dom, file);
+    generator.generate(dom, header, source);
 
 }
-
-
 
 
 int main() {
