@@ -3,7 +3,7 @@
  * @author Jaroslav Hucel (xhucel00@vutbr.cz)
  * @brief
  * @date Created: 02. 11. 2025
- * @date Modified: 24. 02. 2026
+ * @date Modified: 25. 02. 2026
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -11,7 +11,7 @@
 #pragma once
 
 #include "../debug_macros.h"
-
+#include "../config.hpp"
 #include "../xml/xml.hpp"
 #include <map>
 #include <stack>
@@ -463,7 +463,7 @@ namespace vkg_gen::Generator {
 
     public:
         Generator() {}
-        void generate(vkg_gen::xml::Dom& dom, std::ofstream& header, std::ofstream& source, void* config = nullptr);
+        void generate(vkg_gen::xml::Dom& dom, std::ofstream& header, std::ofstream& source, Config& config);
 
         // TODO:
         xml::Node* Types;

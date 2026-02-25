@@ -3,7 +3,7 @@
  * @author Jaroslav Hucel (xhucel00@vutbr.cz)
  * @brief TODO:
  * @date Created: 30. 07. 2025
- * @date Modified: 24. 02. 2026
+ * @date Modified: 25. 02. 2026
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -12,14 +12,11 @@
 #include "xml/parser.hpp"
 #include "xml/lexer.hpp"
 #include "generator/generator.hpp"
+#include "config.hpp"
 #include <set>
 #include <fstream>
 #include <cstring>
 #include <unordered_map>
-
-static const char* FILE_PATH = "vk.xml";
-static const char* OUT_PATH_HPP = "out.hpp";
-static const char* OUT_PATH_CPP = "out.cpp";
 
 #if 0
 void debug_print_node(const vkg_gen::xml::Node& node, int indent = 0, int max_indent = 0) {
@@ -118,17 +115,18 @@ void debug_print(const vkg_gen::xml::Dom& dom) {
 }
 #endif
 
+inline std::ofstream open_or_throw(const std::string& path, std::ios::openmode mode) {
+    std::ofstream file{ path, mode };
+    if (!file.is_open())
+        throw std::runtime_error{ "Failed to open file: '" + path + "' because: '" + std::strerror(errno) + "'" };
+    return file;
+}
 
-void test(vkg_gen::xml::Dom& dom) {
+void test(Config& config, vkg_gen::xml::Dom& dom) {
     using namespace vkg_gen::xml;
 
-    std::ofstream header{ OUT_PATH_HPP, std::ios::out };
-    if (!header.is_open())
-        throw std::runtime_error{ "Failed to open file: '" + std::string(OUT_PATH_HPP) + "' because: '" + std::strerror(errno) + "'" };
-
-    std::ofstream source{ OUT_PATH_CPP, std::ios::out };
-    if (!source.is_open())
-        throw std::runtime_error{ "Failed to open file: '" + std::string(OUT_PATH_CPP) + "' because: '" + std::strerror(errno) + "'" };
+    std::ofstream header = open_or_throw(config.header_path, std::ios::out);
+    std::ofstream source = open_or_throw(config.source_path, std::ios::out);
 
 
     header << "#pragma once\n";
@@ -141,18 +139,19 @@ void test(vkg_gen::xml::Dom& dom) {
     //generate_enums(dom, header);
 
     vkg_gen::Generator::Generator generator;
-    generator.generate(dom, header, source);
+    generator.generate(dom, header, source, config);
 
 }
 
 
 int main() {
     namespace xml = vkg_gen::xml;
+    Config config;
 
     xml::Parser parser;
     try {
-        auto dom = parser.parse(FILE_PATH);
-        test(dom);
+        auto dom = parser.parse(config.xml_path);
+        test(config, dom);
     }
     catch (const xml::Error& e) {
         std::cerr << e.what() << std::endl;

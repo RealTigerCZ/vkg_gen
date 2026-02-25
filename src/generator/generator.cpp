@@ -3,7 +3,7 @@
  * @author Jaroslav Hucel (xhucel00@vutbr.cz)
  * @brief
  * @date Created: 12. 11. 2025
- * @date Modified: 24. 02. 2026
+ * @date Modified: 25. 02. 2026
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -1645,8 +1645,7 @@ void Generator::add_extension_prototype(sv number, xml::Dom& dom) {
 }
 
 
-void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& source, void* config) {
-
+void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& source, Config& config) {
 
 
 #if 1
@@ -1777,8 +1776,7 @@ void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& so
 
     header << "\n" << boilerplate::HEADER_EXTERNS;
 
-    // FIXME: config.header_file
-    source << "#include \"" << "out.hpp" << "\"\n";
+    source << "#include \"" << config.header_path << "\"\n";
     source << boilerplate::CPP_IMPL;
     source << "// static const char* extensions[] = {";
     bool first = true;
