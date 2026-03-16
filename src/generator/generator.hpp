@@ -3,7 +3,7 @@
  * @author Jaroslav Hucel (xhucel00@vutbr.cz)
  * @brief
  * @date Created: 02. 11. 2025
- * @date Modified: 25. 02. 2026
+ * @date Modified: 15. 03. 2026
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -148,8 +148,6 @@ namespace vkg_gen::Generator {
         // Typically for features in extensions that were later promoted but
         // with changes.
         sv featurelink;
-
-        const vkg_gen::xml::Element& element;
 
         sv comment;
         bool is_standalone_comment = false;
@@ -387,6 +385,68 @@ namespace vkg_gen::Generator {
         xml::Element& elem;
     };
 
+    enum class Extension {
+        None,
+        Img,
+        Amd,
+        Amdx,
+        Arm,
+        Fsl,
+        Brcm,
+        Nxp,
+        Nv,
+        Nvx,
+        Viv,
+        Vsi,
+        Kdab,
+        Android,
+        Chromium,
+        Fuchsia,
+        Ggp,
+        Google,
+        Qcom,
+        Lunarg,
+        Nzxt,
+        Samsung,
+        Sec,
+        Tizen,
+        Renderdoc,
+        Nn,
+        Mvk,
+        Khr,
+        Khx,
+        Ext,
+        Mesa,
+        Intel,
+        Huawei,
+        Ohos,
+        Valve,
+        Qnx,
+        Juice,
+        Fb,
+        Rastergrid,
+        Msft,
+        Shady,
+        Fredemmott,
+        Mtk,
+    };
+
+
+    struct NameTranslator {
+        std::string new_name;
+
+        NameTranslator(std::string&& new_name) : new_name(std::move(new_name)) {}
+
+        static std::string transform_enum_name(sv name, bool is_bitmask);
+        static NameTranslator from_enum_value(sv value, sv enum_class_transformed, bool is_bitmask);
+        static NameTranslator from_type_name(sv name); // enums, structs, unions
+        static NameTranslator from_constexpr_value(sv value_name);
+
+    protected:
+        static void transform_from_upper_constant(std::string& name, size_t start_pos, bool first_is_upper);
+        static Extension get_and_remove_extension_constant(sv& name);
+        static Extension get_and_remove_extension_name(sv& name);
+    };
 
     template <typename Type>
     concept NameIndexable = requires (Type t) { { t.name } -> std::convertible_to<std::string_view>; };
@@ -447,10 +507,13 @@ namespace vkg_gen::Generator {
         void generate_bitmask(Type& bitmask, std::ofstream& file);
         void generate_handle(Type& handle, std::ofstream& file, TypeEnum& obj_enum);
 
+
         std::ofstream& generate_command_params(Command& cmd, std::ofstream& file, bool is_end_of_line = true);
         void generate_command(Command& cmd, std::ofstream& file);
         void generate_command_PFN(Command& cmd, std::ofstream& file);
         void generate_command_wrapper(Command& cmd, std::ofstream& file);
+
+        NameTranslator get_translated_type_name(sv name);
 
         // Wrapper around add_required_type
         void add_required_type(sv name);
@@ -495,6 +558,10 @@ namespace vkg_gen::Generator {
         sv comment;
         bool generate = true;
     };
+
+    inline std::ostream& operator<<(std::ostream& os, const NameTranslator& translator) {
+        return os << translator.new_name;
+    }
 
     inline std::ostream& operator<<(std::ostream& os, Deprecate d) {
         if (d.generate && !d.msg.empty()) {

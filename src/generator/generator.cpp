@@ -3,7 +3,7 @@
  * @author Jaroslav Hucel (xhucel00@vutbr.cz)
  * @brief
  * @date Created: 12. 11. 2025
- * @date Modified: 25. 02. 2026
+ * @date Modified: 16. 03. 2026
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -73,7 +73,7 @@ namespace boilerplate {
         "\n"
         "void* lib = nullptr;\n"
         "FuncTable funcs;\n"
-        "static VkExtensionProperties * extensions = nullptr;\n"
+        "static ExtensionProperties * extensions = nullptr;\n"
         "static const char** extensions_names = nullptr;\n"
         "static uint32_t extensions_count = 0;\n";
 
@@ -89,7 +89,7 @@ namespace boilerplate {
         "    assert(funcs.vkEnumerateInstanceExtensionProperties);\n"
         "\n"
         "    funcs.vkEnumerateInstanceExtensionProperties(nullptr, &extensions_count, nullptr);\n"
-        "    extensions = new VkExtensionProperties[extensions_count];\n"
+        "    extensions = new ExtensionProperties[extensions_count];\n"
         "    extensions_names = new const char* [extensions_count];\n"
         "    funcs.vkEnumerateInstanceExtensionProperties(nullptr, &extensions_count, extensions);\n"
         "\n"
@@ -97,14 +97,14 @@ namespace boilerplate {
         "        extensions_names[i] = extensions[i].extensionName;\n"
         "    }\n"
         "\n"
-        "    VkApplicationInfo app_info = {\n"
+        "    ApplicationInfo app_info = {\n"
         "                .pApplicationName = \"test\",\n"
         "                .applicationVersion = 0,\n"
         "                .pEngineName = nullptr,\n"
         "                .engineVersion = 0,\n"
         "                .apiVersion = 1 << 22 };\n"
         "\n"
-        "    VkInstanceCreateInfo info = {\n"
+        "    InstanceCreateInfo info = {\n"
         "                .flags = {},\n"
         "                .pApplicationInfo = &app_info,\n"
         "                .enabledLayerCount = 0,\n"
@@ -255,6 +255,55 @@ std::ostream& helper_test(std::ostream& os, const vkg_gen::xml::Node* node) {
         return os << "(TEXT: " << node->asText() << ")";
 
     return os << node->asElement();
+}
+
+char* to_string(Extension ext) {
+    switch (ext) {
+    case Extension::Img: return "IMG";
+    case Extension::Amd: return "AMD";
+    case Extension::Amdx: return "AMDX";
+    case Extension::Arm: return "ARM";
+    case Extension::Fsl: return "FSL";
+    case Extension::Brcm: return "BRCM";
+    case Extension::Nxp: return "NXP";
+    case Extension::Nv: return "NV";
+    case Extension::Nvx: return "NVX";
+    case Extension::Viv: return "VIV";
+    case Extension::Vsi: return "VSI";
+    case Extension::Kdab: return "KDAB";
+    case Extension::Android: return "ANDROID";
+    case Extension::Chromium: return "CHROMIUM";
+    case Extension::Fuchsia: return "FUCHSIA";
+    case Extension::Ggp: return "GGP";
+    case Extension::Google: return "GOOGLE";
+    case Extension::Qcom: return "QCOM";
+    case Extension::Lunarg: return "LUNARG";
+    case Extension::Nzxt: return "NZXT";
+    case Extension::Samsung: return "SAMSUNG";
+    case Extension::Sec: return "SEC";
+    case Extension::Tizen: return "TIZEN";
+    case Extension::Renderdoc: return "RENDERDOC";
+    case Extension::Nn: return "NN";
+    case Extension::Mvk: return "MVK";
+    case Extension::Khr: return "KHR";
+    case Extension::Khx: return "KHX";
+    case Extension::Ext: return "EXT";
+    case Extension::Mesa: return "MESA";
+    case Extension::Intel: return "INTEL";
+    case Extension::Huawei: return "HUAWEI";
+    case Extension::Ohos: return "OHOS";
+    case Extension::Valve: return "VALVE";
+    case Extension::Qnx: return "QNX";
+    case Extension::Juice: return "JUICE";
+    case Extension::Fb: return "FB";
+    case Extension::Rastergrid: return "RASTERGRID";
+    case Extension::Msft: return "MSFT";
+    case Extension::Shady: return "SHADY";
+    case Extension::Fredemmott: return "FREDEMMOTT";
+    case Extension::Mtk: return "MTK";
+    }
+
+    throw my_error("Invalid extension");
 }
 
 bool vkg_gen::Generator::bool_from_string(std::string_view s) {
@@ -505,10 +554,17 @@ void _gen_arbitrary_C_code_in_type(const vkg_gen::xml::Element& elem, std::ofstr
             file << "/*" << ch.children[0]->asText() << "*/"; // TODO: check_comment
         } else if (ch.tag == "name") {
             // TODO: register it
-            file << ch.children[0]->asText(); // TODO: check_name
+            sv name = ch.children[0]->asText();
+            if (name.starts_with("PFN_vk"))
+                file << name;
+            else
+                file << NameTranslator::from_type_name(name); // TODO: check_name
         } else if (ch.tag == "type") {
-            // TODO: find if defined or at least declared;
-            file << ch.children[0]->asText(); // TODO: check_type
+            // TODO: find if defined or at least declared; use NameTranslator
+            sv type_name = ch.children[0]->asText();
+            if (type_name.starts_with("Vk"))
+                type_name = type_name.substr(2);
+            file << type_name; // TODO: check_type
         }
 
 
@@ -699,7 +755,7 @@ Member::LimitType Member::limit_type_from_string(std::string_view s) {
 }
 
 Member::Member(const vkg_gen::xml::Element& e, vkg_gen::Arena& arena, ParentType parent_type, bool is_standalone_comment) :
-    element(e), is_standalone_comment(is_standalone_comment), stringify("") {
+    is_standalone_comment(is_standalone_comment), stringify("") {
     if (is_standalone_comment) {
         assert(e.tag == "comment");
         comment = e.children[0]->asText();
@@ -758,15 +814,21 @@ Member::Member(const vkg_gen::xml::Element& e, vkg_gen::Arena& arena, ParentType
             name = ch.children[0]->asText(); // TODO: check_name
             stringify += " ";
             stringify += name;
-        } else if (ch.tag == "type" || ch.tag == "enum") {
+        } else if (ch.tag == "type") {
             if (type.empty()) {
                 type = ch.children[0]->asText();
-                stringify += type;
+                // FIXME: this is a hack, we need to find the type in generator and also bind it as an requirement for this
+                if (type.starts_with("Vk"))
+                    stringify += NameTranslator::from_type_name(type).new_name;
+                else {
+                    stringify += type;
+                }
             } else {
-                // TASK: 090126_08 - THIS CAN HAPPEN
-                std::cout << "FIXME: Duplicate type in member: " << std::string(name) << std::endl;
-                stringify += ch.children[0]->asText();
+                throw my_error{ "Duplicate type in member: " + std::string(type) };
             }
+        } else if (ch.tag == "enum") {
+            // TODO: check dependencies, and also it could be something else than the constexpr values
+            stringify += NameTranslator::from_constexpr_value(ch.children[0]->asText()).new_name;
 
         } else if (ch.tag == "comment") {
             if (!comment.empty())
@@ -1024,7 +1086,8 @@ void Generator::generate_enum_alias(Type& e, std::ofstream& file) {
         return;
 
     file << LineComment{ e.comment };
-    file << "using " << e.name << Deprecate{ e.deprecated } << "= " << e.alias << ";\n\n";
+    file << "using " << NameTranslator::from_type_name(e.name) << Deprecate{ e.deprecated } << "= "
+        << NameTranslator::from_type_name(e.alias) << ";\n\n";
 }
 
 // TASK: 030226_01, Also AI function
@@ -1075,17 +1138,42 @@ void Generator::generate_enum(TypeEnum& e, std::ofstream& file) {
 
     if (e.type == TypeEnum::Type::Constants) {
         for (auto& item : e.items) {
-            file << "constexpr " << item.constant.type << " " << item.name << " = " << item.constant.value << ";"
+            file << "constexpr " << get_translated_type_name(item.constant.type) << " "
+                << NameTranslator::from_constexpr_value(item.name) << " = " << item.constant.value << ";"
                 << LineComment{ item.comment, false } << '\n';
         }
         file << '\n';
         return;
     }
 
-    file << "enum" << (config.generate_enums_classes ? " class" : "") << Deprecate{ e.deprecated } << e.name << " " << bitwidth_to_str_type(e.bitwidth) << " {\n";
+    file << "enum" << (config.generate_enums_classes ? " class" : "") << Deprecate{ e.deprecated } << NameTranslator::from_type_name(e.name) <<
+        " " << bitwidth_to_str_type(e.bitwidth) << " {\n";
 
     // TASK: 030226_01 Enum member dependencies
     sort_enum_items(e.items);
+
+    std::string enum_name_transformed = NameTranslator::transform_enum_name(e.name, e.type == TypeEnum::Type::Bitmask);
+
+    static const std::unordered_set<sv> skip_enum_items = {
+        "VK_COLORSPACE_SRGB_NONLINEAR_KHR", // Skippible because COLORSPACE should be COLOR_SPACE, and it also shadows the correct value
+        "VK_STENCIL_FRONT_AND_BACK", // Skippible because its missing "_FACE_" and it also shadows the correct value
+        "VK_STRUCTURE_TYPE_SURFACE_CAPABILITIES2_EXT", // Skippable because its aliased with "VK_STRUCTURE_TYPE_SURFACE_CAPABILITIES_2_EXT", and after translation it will be the same value
+
+        // These values are skippable because they are missing "_BIT" and also they are aliases to the corrected values
+        "VK_PIPELINE_CREATE_DISPATCH_BASE",
+        "VK_HOST_IMAGE_COPY_MEMCPY",
+        "VK_SURFACE_COUNTER_VBLANK",
+        "VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_DATA_ACCESS",
+        "VK_PERFORMANCE_COUNTER_DESCRIPTION_PERFORMANCE_IMPACTING",
+        "VK_PERFORMANCE_COUNTER_DESCRIPTION_CONCURRENTLY_IMPACTED",
+        "VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_OPACITY_MICROMAP_UPDATE",
+        "VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_DISABLE_OPACITY_MICROMAPS",
+        "VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_OPACITY_MICROMAP_DATA_UPDATE",
+        "VK_GEOMETRY_INSTANCE_FORCE_OPACITY_MICROMAP_2_STATE",
+        "VK_GEOMETRY_INSTANCE_DISABLE_OPACITY_MICROMAPS",
+    };
+
+
 
     for (TypeEnum::EnumItem& item : e.items) {
         if (item.is_standalone_comment) {
@@ -1093,13 +1181,23 @@ void Generator::generate_enum(TypeEnum& e, std::ofstream& file) {
             continue;
         }
 
+        if (skip_enum_items.contains(item.name)) {
+            continue;
+        }
+
         if (!item.api.empty() && !std::ranges::contains(std::views::split(item.api, ','), "vulkan", [](auto&& rng) { return sv(rng); }))
             continue;
 
-        file << "    " << item.name << Deprecate{ item.deprecated } << "= ";
+        bool is_bitfield_value = false;
+        if (item.is_alias)
+            is_bitfield_value = e.type == TypeEnum::Type::Bitmask && std::ranges::find(e.items, item.alias, &TypeEnum::EnumItem::name)->bitmask.is_bitfield;
+        else
+            is_bitfield_value = e.type == TypeEnum::Type::Bitmask && item.bitmask.is_bitfield;
+
+        file << "    " << NameTranslator::from_enum_value(item.name, enum_name_transformed, is_bitfield_value) << Deprecate{ item.deprecated } << "= ";
 
         if (item.is_alias) {
-            file << item.alias;
+            file << NameTranslator::from_enum_value(item.alias, enum_name_transformed, is_bitfield_value);
         } else if (e.type == TypeEnum::Type::Normal) {
             file << item.normal.value;
         } else if (e.type == TypeEnum::Type::Bitmask) {
@@ -1134,11 +1232,12 @@ void Generator::generate_struct(Type& s, std::ofstream& file) {
     file << LineComment{ s.comment, true, config.generate_comments };
 
     if (!s.alias.empty()) {
-        file << "using " << s.name << Deprecate{ s.deprecated } << "= " << s.alias << ";\n";
+        file << "using " << NameTranslator::from_type_name(s.name) << Deprecate{ s.deprecated } << "= "
+            << NameTranslator::from_type_name(s.alias) << ";\n";
         return;
     }
 
-    file << "struct" << Deprecate{ s.deprecated } << s.name << " {\n";
+    file << "struct" << Deprecate{ s.deprecated } << NameTranslator::from_type_name(s.name) << " {\n";
 
     for (auto& member : s.struct_->members) {
         // TODO: custom split
@@ -1160,11 +1259,12 @@ void Generator::generate_union(Type& s, std::ofstream& file) {
     file << LineComment{ s.comment, true, config.generate_comments };
 
     if (!s.alias.empty()) {
-        file << "using " << s.name << Deprecate{ s.deprecated } << "= " << s.alias << ";\n";
+        file << "using " << NameTranslator::from_type_name(s.name) << Deprecate{ s.deprecated } << "= "
+            << NameTranslator::from_type_name(s.alias) << ";\n";
         return;
     }
 
-    file << "union" << Deprecate{ s.deprecated } << s.name << " {\n";
+    file << "union" << Deprecate{ s.deprecated } << NameTranslator::from_type_name(s.name) << " {\n";
 
     for (auto& member : s.union_->members) {
         // TODO: custom split
@@ -1181,9 +1281,9 @@ void Generator::generate_union(Type& s, std::ofstream& file) {
 void Generator::generate_bitmask(Type& bitmask, std::ofstream& file) {
     file << LineComment{ bitmask.comment, true, config.generate_comments };
 
-    file << "using " << bitmask.name << Deprecate{ bitmask.deprecated } << "= ";
+    file << "using " << NameTranslator::from_type_name(bitmask.name) << Deprecate{ bitmask.deprecated } << "= ";
     if (!bitmask.alias.empty()) {
-        file << bitmask.alias << ";\n";
+        file << NameTranslator::from_type_name(bitmask.alias) << ";\n";
 
     } else {
         // CHECK: revisit this
@@ -1191,7 +1291,7 @@ void Generator::generate_bitmask(Type& bitmask, std::ofstream& file) {
         if (it == bitmask.elem.children.end())
             throw my_error{ "bitmask type not found" };
 
-        file << (*it)->asElement().children[0]->asText() << ";\n"; // TODO: check children
+        file << NameTranslator::from_type_name((*it)->asElement().children[0]->asText()) << ";\n"; // TODO: check children
         std::cout << "bitmask: " << bitmask.name << " = " << (*it)->asElement().children[0]->asText() << std::endl;
     }
 
@@ -1202,16 +1302,46 @@ void Generator::generate_bitmask(Type& bitmask, std::ofstream& file) {
 void Generator::generate_handle(Type& h, std::ofstream& file, TypeEnum& obj_enum) {
     assert(h.category == Type::Category::Handle);
 
+    if (!h.alias.empty()) {
+        file << "using " << NameTranslator::from_type_name(h.name) << Deprecate{ h.deprecated } << "= "
+            << NameTranslator::from_type_name(h.alias) << ";\n";
+        return;
+    };
+
     auto it = std::ranges::find(obj_enum.items, h.handle->objtypeenum, &TypeEnum::EnumItem::name);
     if (it == obj_enum.items.end())
-        std::cout << "FIXME: Handle '" << h.name << "' did not found matching objtypeenum '" << h.handle->objtypeenum << "' in enum '" << obj_enum.name << "'" << std::endl;
-    //throw my_error{ std::format("Handle '{}' did not found matching objtypeenum '{}' in enum '{}'", h.name, h.handle->objtypeenum, obj_enum.name) };
+        throw my_error{ std::format("Handle '{}' did not found matching objtypeenum '{}' in enum '{}'", h.name, h.handle->objtypeenum, obj_enum.name) };
+    std::string enum_transformed = NameTranslator::transform_enum_name(obj_enum.name, false);
 
     if (!config.generate_handle_class)
         file << "VK_DEFINE_HANDLE(" << h.name << ")\n";
     else
-        file << "using " << h.name << Deprecate{ h.deprecated } << "= "
-        << "Handle<struct " << obj_enum.name << "_T*>" << ";" << LineComment{ h.comment, false, config.generate_comments } << '\n';
+        file << "using " << NameTranslator::from_type_name(h.name) << Deprecate{ h.deprecated } << "= "
+        << "Handle<struct " << NameTranslator::from_enum_value(h.handle->objtypeenum, enum_transformed, false) << "_T*>" << ";" << LineComment{ h.comment, false, config.generate_comments } << '\n';
+}
+
+NameTranslator vkg_gen::Generator::Generator::get_translated_type_name(sv name) {
+    Type& t = types.at(name);
+    switch (t.category) {
+    case Type::Category::Struct:
+    case Type::Category::Union:
+    case Type::Category::Enum:
+        return NameTranslator::from_type_name(t.name);
+    case Type::Category::Basetype:
+        return NameTranslator(std::string(t.name));
+    case Type::Category::Bitmask:
+    case Type::Category::Handle:
+    case Type::Category::Funcpointer:
+    case Type::Category::Define:
+    case Type::Category::Include:
+        // FIXME:
+        return NameTranslator(std::string(t.name));
+    case Type::Category::None:
+        // FIXME:
+        return NameTranslator(std::string(t.name));
+    }
+
+    UNREACHABLE();
 }
 
 
@@ -1230,7 +1360,11 @@ std::ofstream& vkg_gen::Generator::Generator::generate_command_params(Command& c
             file << ", ";
         if (config.generate_handle_class && is_handle(param.type)) {
             std::string new_type = param.stringify;
-            new_type.insert(new_type.find(param.type, 0) + param.type.size(), "::HandleType");
+            sv type = param.type; // TODO: name translator
+            if (type.starts_with("Vk")) {
+                type.remove_prefix(2);
+            }
+            new_type.insert(new_type.find(type, 0) + type.size(), "::HandleType");
             file << new_type;
         } else {
             file << param.stringify;
@@ -1246,19 +1380,31 @@ std::ofstream& vkg_gen::Generator::Generator::generate_command_params(Command& c
 void Generator::generate_command(Command& cmd, std::ofstream& file) {
     file << LineComment{ cmd.comment };
     // FIXME: cmd can have any arbitraty C code
-    file << "VKAPI_ATTR " << cmd.type << " VKAPI_CALL " << cmd.name;
+    sv type = cmd.type;
+    if (type.starts_with("Vk")) {
+        type.remove_prefix(2);
+    }
+    file << "VKAPI_ATTR " << type << " VKAPI_CALL " << cmd.name;
     generate_command_params(cmd, file);
 
 }
 
 void vkg_gen::Generator::Generator::generate_command_PFN(Command& cmd, std::ofstream& file) {
     // FIXME: cmd can have any arbitraty C code
-    file << "typedef " << cmd.type << " (VKAPI_PTR* PFN_" << cmd.name << ")";
+    sv type = cmd.type;
+    if (type.starts_with("Vk")) {
+        type.remove_prefix(2);
+    }
+    file << "typedef " << type << " (VKAPI_PTR* PFN_" << cmd.name << ")";
     generate_command_params(cmd, file);
 }
 
 void vkg_gen::Generator::Generator::generate_command_wrapper(Command& cmd, std::ofstream& file) {
-    file << "inline " << cmd.type << " " << cmd.name; // TODO: proper name mangling
+    sv type = cmd.type;
+    if (type.starts_with("Vk")) {
+        type.remove_prefix(2);
+    }
+    file << "inline " << type << " " << cmd.name; // TODO: proper name mangling
     generate_command_params(cmd, file, false);
     file << "{ return funcs." << cmd.name << "(";
 
@@ -1667,14 +1813,13 @@ void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& so
 
     header << "#define VKAPI_PTR\n";
 
-    header << "typedef uint32_t VkFlags;\n";
-    header << "typedef uint64_t VkFlags64;\n";
-
     header << boilerplate::HANDLE_DEFINITION << "\n";
 
     header << "#define VKAPI_CALL\n";
     header << "#define VKAPI_ATTR\n";
     header << "#define VK_DEFINE_HANDLE(object) typedef struct object##_T* object;\n";
+    // TODO: remove the funcpointer dependency on this.
+    header << "using VkBool32 = uint32_t;\n";
 
     //generate_API_constants(dom, file);
     //generate_types(dom, file);
@@ -1790,7 +1935,7 @@ void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& so
 
     source << "#include \"" << config.header_path << "\"\n";
     source << boilerplate::CPP_IMPL;
-    source << "VkInstance" << (config.generate_handle_class ? "::HandleType" : "") << " instance = nullptr;\n";
+    source << "Instance" << (config.generate_handle_class ? "::HandleType" : "") << " instance = nullptr;\n";
     source << "// static const char* extensions[] = {";
     bool first = true;
     for (const Element& extension : included_extensions) {
@@ -1943,12 +2088,18 @@ CommandParameter CommandParameter::from_xml(const xml::Element& elem, vkg_gen::A
 
         } else if (ch.tag == "type") {
             if (param.type.empty()) {
+                // TODO: search for type
                 param.type = ch.children[0]->asText();
+
             } else {
                 // TASK: 090126_08 - THIS CAN HAPPEN
                 std::cout << "TODO: Duplicate type in member: " << std::string(param.name) << std::endl;
             }
-            param.stringify += ch.children[0]->asText();
+            // TODO: NameTranslator
+            sv type = ch.children[0]->asText();
+            if (type.starts_with("Vk"))
+                type = type.substr(2);
+            param.stringify += type;
         } else {
             throw my_error{ "Unknown child element for command parameter: " + std::string(ch.tag) };
         }
@@ -2090,3 +2241,251 @@ CommandAlias vkg_gen::Generator::CommandAlias::from_xml(const xml::Element& elem
     return ca;
 }
 
+
+std::string vkg_gen::Generator::NameTranslator::transform_enum_name(sv name, bool is_bitmask) {
+    assert(!name.empty());
+    assert(name.starts_with("Vk"));
+
+    Extension ext = get_and_remove_extension_name(name);
+
+    int digit = -1;
+    if (is_bitmask && std::isdigit(name.back())) {
+        digit = name.back() - '0';
+        name.remove_suffix(1);
+    }
+
+    assert(!is_bitmask || name.ends_with("FlagBits"));
+    if (is_bitmask)
+        name.remove_suffix(sizeof("FlagBits") - 1);
+
+    std::string transformed;
+    bool first = true;
+    for (char c : name) {
+        if (!first && (std::isupper(c)))
+            transformed.push_back('_');
+        transformed.push_back(std::toupper(c));
+        first = false;
+    }
+    if (digit != -1) {
+        transformed.push_back('_');
+        transformed.push_back(digit + '0');
+    }
+
+    size_t idx = transformed.find("_A_V1_");
+    if (idx != std::string::npos) { // TODO: how to convert StrABCStr? it should propably be STR_ABC_STR, but it breakes the rules
+        transformed.replace(idx, sizeof("_A_V1_") - 1, "_AV1_");
+    }
+
+    return transformed;
+}
+
+NameTranslator vkg_gen::Generator::NameTranslator::from_enum_value(sv value, sv enum_class_transformed, bool is_bitfield) {
+    assert(!enum_class_transformed.empty());
+    assert(!value.empty());
+
+    // These values do not obey the api rules
+    const static std::unordered_map<sv, sv> exception_values = {
+        {"VK_COLORSPACE_SRGB_NONLINEAR_KHR", "eSrgbNonlinearKHR2"}, // COLORSPACE should be COLOR_SPACE, and it also shadows the correct value, so we should not generate it at all
+        {"VK_STENCIL_FRONT_AND_BACK", "eFrontAndBack2"}, // missing "_FACE_" and it also shadows the correct value, so whe should not generate it at all
+        {"VK_QUERY_SCOPE_COMMAND_BUFFER_KHR", "queryScopeCommandBufferKHR"}, // aliased value for "VkPerformanceCounterScopeKHR" enum
+        {"VK_QUERY_SCOPE_RENDER_PASS_KHR", "queryScopeRenderPassKHR"}, // aliased value for "VkPerformanceCounterScopeKHR" enum
+        {"VK_QUERY_SCOPE_COMMAND_KHR", "queryScopeCommandKHR"}, // aliased value for "VkPerformanceCounterScopeKHR" enum
+        {"VK_CLUSTER_ACCELERATION_STRUCTURE_INDEX_FORMAT_8BIT_NV", "e8Bit"},  // its missing "_BIT" but it also propably should contain it anyway
+        {"VK_CLUSTER_ACCELERATION_STRUCTURE_INDEX_FORMAT_16BIT_NV", "e16Bit"}, // its missing "_BIT" but it also propably should contain it anyway
+        {"VK_CLUSTER_ACCELERATION_STRUCTURE_INDEX_FORMAT_32BIT_NV", "e32Bit"}, // its missing "_BIT" but it also propably should contain it anyway
+        {"VK_STRUCTURE_TYPE_SURFACE_CAPABILITIES2_EXT", "eSurfaceCapabilities2EXT2"}, // 2 aliased values will be translated as the same value, so we should not generate the other one
+        {"VK_PIPELINE_RASTERIZATION_STATE_CREATE_FRAGMENT_DENSITY_MAP_ATTACHMENT_BIT_EXT", "eCreateFragmentDensityMapAttachmenEXT"}, // aliased value for "VK_PIPELINE_CREATE_RENDERING_FRAGMENT_DENSITY_MAP_ATTACHMENT_BIT_EXT", but it is named differently and does not start with the class name
+        {"VK_PIPELINE_RASTERIZATION_STATE_CREATE_FRAGMENT_SHADING_RATE_ATTACHMENT_BIT_KHR", "eCreateFragmentShadingRateAttachmenKHR"}, // aliased value for "VK_PIPELINE_CREATE_RENDERING_FRAGMENT_SHADING_RATE_ATTACHMENT_BIT_KHR", but it is named differently and does not start with the class name
+    };
+
+    // These values are aliased bitfields, that are missing "_BIT" and also they are shadowning the correct value, we should propably not generate them.
+    const static std::unordered_set<sv> missing_bit_with_shadowed_values = {
+        "VK_PIPELINE_CREATE_DISPATCH_BASE",
+        "VK_HOST_IMAGE_COPY_MEMCPY",
+        "VK_SURFACE_COUNTER_VBLANK",
+        "VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_DATA_ACCESS",
+        "VK_PERFORMANCE_COUNTER_DESCRIPTION_PERFORMANCE_IMPACTING",
+        "VK_PERFORMANCE_COUNTER_DESCRIPTION_CONCURRENTLY_IMPACTED",
+        "VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_OPACITY_MICROMAP_UPDATE",
+        "VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_DISABLE_OPACITY_MICROMAPS",
+        "VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_OPACITY_MICROMAP_DATA_UPDATE",
+        "VK_GEOMETRY_INSTANCE_FORCE_OPACITY_MICROMAP_2_STATE",
+        "VK_GEOMETRY_INSTANCE_DISABLE_OPACITY_MICROMAPS",
+    };
+
+    // These values are just missing "_BIT" (not obeying the api rules) but should be generated
+    const static std::unordered_set<sv> missing_bit_value = {
+        "VK_PHYSICAL_DEVICE_SCHEDULING_CONTROLS_SHADER_CORE_COUNT",
+        "VK_CLUSTER_ACCELERATION_STRUCTURE_CLUSTER_ALLOW_DISABLE_OPACITY_MICROMAPS",
+        "VK_PARTITIONED_ACCELERATION_STRUCTURE_INSTANCE_FLAG_ENABLE_EXPLICIT_BOUNDING_BOX",
+        "VK_INDIRECT_COMMANDS_INPUT_MODE_VULKAN_INDEX_BUFFER", // These 2 values also seem like they should not be bitfields, but they are in the XML
+        "VK_INDIRECT_COMMANDS_INPUT_MODE_DXGI_INDEX_BUFFER",
+    };
+
+    auto it = exception_values.find(value);
+    if (it != exception_values.end())
+        return NameTranslator(std::string(it->second));
+
+    assert(value.starts_with(enum_class_transformed) || enum_class_transformed == "VK_RESULT"); // VK_RESULT values do not contain "VK_RESULT_" but only "VK_"
+    Extension ext = enum_class_transformed == "VK_VENDOR_ID" ? Extension::None : get_and_remove_extension_constant(value);
+    assert(is_bitfield || !value.ends_with("_BIT"));
+
+    size_t prefix = enum_class_transformed == "VK_RESULT" ? 2 : enum_class_transformed.size(); // leaving space for "e"
+    std::string new_name(value.substr(prefix));
+    new_name[0] = 'e';
+
+    if (is_bitfield) {
+        if (new_name == "eNONE")
+            return NameTranslator(std::string("eNone"));
+        if (new_name == "eALL")
+            return NameTranslator(std::string("eAll"));
+
+        bool add_2_for_shadowed_value = missing_bit_with_shadowed_values.contains(value) || enum_class_transformed == "VK_IMAGE_COMPRESSION"; // All values in "VkImageCompressionFlagBitsEXT" are missing "_BIT"
+        bool skip_bit = add_2_for_shadowed_value || missing_bit_value.contains(value);
+
+        if (!skip_bit) {
+            assert(new_name.ends_with("_BIT"));
+            new_name.resize(new_name.size() - sizeof("_BIT") + 1);
+        }
+        if (add_2_for_shadowed_value)
+            new_name.append("2");
+
+    }
+
+    transform_from_upper_constant(new_name, 1, true);
+    if (ext != Extension::None)
+        new_name.append(to_string(ext));
+    return NameTranslator(std::move(new_name));
+}
+
+NameTranslator vkg_gen::Generator::NameTranslator::from_type_name(sv name) {
+    assert(!name.empty());
+    assert(name.starts_with("Vk"));
+
+    return NameTranslator(std::string(name.substr(2)));
+}
+
+NameTranslator vkg_gen::Generator::NameTranslator::from_constexpr_value(sv value_name) {
+    assert(!value_name.empty());
+    assert(value_name.starts_with("VK_"));
+
+    std::string new_name(value_name.substr(3));
+    transform_from_upper_constant(new_name, 0, true);
+
+
+    return NameTranslator(std::move(new_name));
+
+}
+
+void vkg_gen::Generator::NameTranslator::transform_from_upper_constant(std::string& name, size_t start_pos, bool first_is_upper) {
+    size_t j = start_pos;
+    bool next_is_upper = first_is_upper;
+    for (size_t i = j; i < name.size(); ++i) {
+        if (name[i] == '_') {
+            next_is_upper = true;
+            continue;
+        }
+
+        if (next_is_upper) {
+            name[j] = std::toupper(name[i]);
+            next_is_upper = false;
+        } else {
+            name[j] = std::tolower(name[i]);
+        }
+
+        ++j;
+    }
+    name.resize(j);
+}
+
+Extension vkg_gen::Generator::NameTranslator::get_and_remove_extension_constant(sv& name) {
+    if (name.ends_with("_IMG")) { name.remove_suffix(sizeof("IMG")); return Extension::Img; }
+    if (name.ends_with("_AMD")) { name.remove_suffix(sizeof("AMD")); return Extension::Amd; }
+    if (name.ends_with("_AMDX")) { name.remove_suffix(sizeof("AMDX")); return Extension::Amdx; }
+    if (name.ends_with("_ARM")) { name.remove_suffix(sizeof("ARM")); return Extension::Arm; }
+    if (name.ends_with("_FSL")) { name.remove_suffix(sizeof("FSL")); return Extension::Fsl; }
+    if (name.ends_with("_BRCM")) { name.remove_suffix(sizeof("BRCM")); return Extension::Brcm; }
+    if (name.ends_with("_NXP")) { name.remove_suffix(sizeof("NXP")); return Extension::Nxp; }
+    if (name.ends_with("_NV")) { name.remove_suffix(sizeof("NV")); return Extension::Nv; }
+    if (name.ends_with("_NVX")) { name.remove_suffix(sizeof("NVX")); return Extension::Nvx; }
+    if (name.ends_with("_VIV")) { name.remove_suffix(sizeof("VIV")); return Extension::Viv; }
+    if (name.ends_with("_VSI")) { name.remove_suffix(sizeof("VSI")); return Extension::Vsi; }
+    if (name.ends_with("_KDAB")) { name.remove_suffix(sizeof("KDAB")); return Extension::Kdab; }
+    if (name.ends_with("_ANDROID")) { name.remove_suffix(sizeof("ANDROID")); return Extension::Android; }
+    if (name.ends_with("_CHROMIUM")) { name.remove_suffix(sizeof("CHROMIUM")); return Extension::Chromium; }
+    if (name.ends_with("_FUCHSIA")) { name.remove_suffix(sizeof("FUCHSIA")); return Extension::Fuchsia; }
+    if (name.ends_with("_GGP")) { name.remove_suffix(sizeof("GGP")); return Extension::Ggp; }
+    if (name.ends_with("_GOOGLE")) { name.remove_suffix(sizeof("GOOGLE")); return Extension::Google; }
+    if (name.ends_with("_QCOM")) { name.remove_suffix(sizeof("QCOM")); return Extension::Qcom; }
+    if (name.ends_with("_LUNARG")) { name.remove_suffix(sizeof("LUNARG")); return Extension::Lunarg; }
+    if (name.ends_with("_NZXT")) { name.remove_suffix(sizeof("NZXT")); return Extension::Nzxt; }
+    if (name.ends_with("_SAMSUNG")) { name.remove_suffix(sizeof("SAMSUNG")); return Extension::Samsung; }
+    if (name.ends_with("_SEC")) { name.remove_suffix(sizeof("SEC")); return Extension::Sec; }
+    if (name.ends_with("_TIZEN")) { name.remove_suffix(sizeof("TIZEN")); return Extension::Tizen; }
+    if (name.ends_with("_RENDERDOC")) { name.remove_suffix(sizeof("RENDERDOC")); return Extension::Renderdoc; }
+    if (name.ends_with("_NN")) { name.remove_suffix(sizeof("NN")); return Extension::Nn; }
+    if (name.ends_with("_MVK")) { name.remove_suffix(sizeof("MVK")); return Extension::Mvk; }
+    if (name.ends_with("_KHR")) { name.remove_suffix(sizeof("KHR")); return Extension::Khr; }
+    if (name.ends_with("_KHX")) { name.remove_suffix(sizeof("KHX")); return Extension::Khx; }
+    if (name.ends_with("_EXT")) { name.remove_suffix(sizeof("EXT")); return Extension::Ext; }
+    if (name.ends_with("_MESA")) { name.remove_suffix(sizeof("MESA")); return Extension::Mesa; }
+    if (name.ends_with("_INTEL")) { name.remove_suffix(sizeof("INTEL")); return Extension::Intel; }
+    if (name.ends_with("_HUAWEI")) { name.remove_suffix(sizeof("HUAWEI")); return Extension::Huawei; }
+    if (name.ends_with("_OHOS")) { name.remove_suffix(sizeof("OHOS")); return Extension::Ohos; }
+    if (name.ends_with("_VALVE")) { name.remove_suffix(sizeof("VALVE")); return Extension::Valve; }
+    if (name.ends_with("_QNX")) { name.remove_suffix(sizeof("QNX")); return Extension::Qnx; }
+    if (name.ends_with("_JUICE")) { name.remove_suffix(sizeof("JUICE")); return Extension::Juice; }
+    if (name.ends_with("_FB")) { name.remove_suffix(sizeof("FB")); return Extension::Fb; }
+    if (name.ends_with("_RASTERGRID")) { name.remove_suffix(sizeof("RASTERGRID")); return Extension::Rastergrid; }
+    if (name.ends_with("_MSFT")) { name.remove_suffix(sizeof("MSFT")); return Extension::Msft; }
+    if (name.ends_with("_SHADY")) { name.remove_suffix(sizeof("SHADY")); return Extension::Shady; }
+    if (name.ends_with("_FREDEMMOTT")) { name.remove_suffix(sizeof("FREDEMMOTT")); return Extension::Fredemmott; }
+    if (name.ends_with("_MTK")) { name.remove_suffix(sizeof("MTK")); return Extension::Mtk; }
+    return Extension::None;
+}
+
+Extension vkg_gen::Generator::NameTranslator::get_and_remove_extension_name(sv& name) {
+    if (name.ends_with("IMG")) { name.remove_suffix(sizeof("IMG") - 1); return Extension::Img; }
+    if (name.ends_with("AMD")) { name.remove_suffix(sizeof("AMD") - 1); return Extension::Amd; }
+    if (name.ends_with("AMDX")) { name.remove_suffix(sizeof("AMDX") - 1); return Extension::Amdx; }
+    if (name.ends_with("ARM")) { name.remove_suffix(sizeof("ARM") - 1); return Extension::Arm; }
+    if (name.ends_with("FSL")) { name.remove_suffix(sizeof("FSL") - 1); return Extension::Fsl; }
+    if (name.ends_with("BRCM")) { name.remove_suffix(sizeof("BRCM") - 1); return Extension::Brcm; }
+    if (name.ends_with("NXP")) { name.remove_suffix(sizeof("NXP") - 1); return Extension::Nxp; }
+    if (name.ends_with("NV")) { name.remove_suffix(sizeof("NV") - 1); return Extension::Nv; }
+    if (name.ends_with("NVX")) { name.remove_suffix(sizeof("NVX") - 1); return Extension::Nvx; }
+    if (name.ends_with("VIV")) { name.remove_suffix(sizeof("VIV") - 1); return Extension::Viv; }
+    if (name.ends_with("VSI")) { name.remove_suffix(sizeof("VSI") - 1); return Extension::Vsi; }
+    if (name.ends_with("KDAB")) { name.remove_suffix(sizeof("KDAB") - 1); return Extension::Kdab; }
+    if (name.ends_with("ANDROID")) { name.remove_suffix(sizeof("ANDROID") - 1); return Extension::Android; }
+    if (name.ends_with("CHROMIUM")) { name.remove_suffix(sizeof("CHROMIUM") - 1); return Extension::Chromium; }
+    if (name.ends_with("FUCHSIA")) { name.remove_suffix(sizeof("FUCHSIA") - 1); return Extension::Fuchsia; }
+    if (name.ends_with("GGP")) { name.remove_suffix(sizeof("GGP") - 1); return Extension::Ggp; }
+    if (name.ends_with("GOOGLE")) { name.remove_suffix(sizeof("GOOGLE") - 1); return Extension::Google; }
+    if (name.ends_with("QCOM")) { name.remove_suffix(sizeof("QCOM") - 1); return Extension::Qcom; }
+    if (name.ends_with("LUNARG")) { name.remove_suffix(sizeof("LUNARG") - 1); return Extension::Lunarg; }
+    if (name.ends_with("NZXT")) { name.remove_suffix(sizeof("NZXT") - 1); return Extension::Nzxt; }
+    if (name.ends_with("SAMSUNG")) { name.remove_suffix(sizeof("SAMSUNG") - 1); return Extension::Samsung; }
+    if (name.ends_with("SEC")) { name.remove_suffix(sizeof("SEC") - 1); return Extension::Sec; }
+    if (name.ends_with("TIZEN")) { name.remove_suffix(sizeof("TIZEN") - 1); return Extension::Tizen; }
+    if (name.ends_with("RENDERDOC")) { name.remove_suffix(sizeof("RENDERDOC") - 1); return Extension::Renderdoc; }
+    if (name.ends_with("NN")) { name.remove_suffix(sizeof("NN") - 1); return Extension::Nn; }
+    if (name.ends_with("MVK")) { name.remove_suffix(sizeof("MVK") - 1); return Extension::Mvk; }
+    if (name.ends_with("KHR")) { name.remove_suffix(sizeof("KHR") - 1); return Extension::Khr; }
+    if (name.ends_with("KHX")) { name.remove_suffix(sizeof("KHX") - 1); return Extension::Khx; }
+    if (name.ends_with("EXT")) { name.remove_suffix(sizeof("EXT") - 1); return Extension::Ext; }
+    if (name.ends_with("MESA")) { name.remove_suffix(sizeof("MESA") - 1); return Extension::Mesa; }
+    if (name.ends_with("INTEL")) { name.remove_suffix(sizeof("INTEL") - 1); return Extension::Intel; }
+    if (name.ends_with("HUAWEI")) { name.remove_suffix(sizeof("HUAWEI") - 1); return Extension::Huawei; }
+    if (name.ends_with("OHOS")) { name.remove_suffix(sizeof("OHOS") - 1); return Extension::Ohos; }
+    if (name.ends_with("VALVE")) { name.remove_suffix(sizeof("VALVE") - 1); return Extension::Valve; }
+    if (name.ends_with("QNX")) { name.remove_suffix(sizeof("QNX") - 1); return Extension::Qnx; }
+    if (name.ends_with("JUICE")) { name.remove_suffix(sizeof("JUICE") - 1); return Extension::Juice; }
+    if (name.ends_with("FB")) { name.remove_suffix(sizeof("FB") - 1); return Extension::Fb; }
+    if (name.ends_with("RASTERGRID")) { name.remove_suffix(sizeof("RASTERGRID") - 1); return Extension::Rastergrid; }
+    if (name.ends_with("MSFT")) { name.remove_suffix(sizeof("MSFT") - 1); return Extension::Msft; }
+    if (name.ends_with("SHADY")) { name.remove_suffix(sizeof("SHADY") - 1); return Extension::Shady; }
+    if (name.ends_with("FREDEMMOTT")) { name.remove_suffix(sizeof("FREDEMMOTT") - 1); return Extension::Fredemmott; }
+    if (name.ends_with("MTK")) { name.remove_suffix(sizeof("MTK") - 1); return Extension::Mtk; }
+    return Extension::None;
+}
