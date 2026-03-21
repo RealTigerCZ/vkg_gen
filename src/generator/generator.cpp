@@ -3,7 +3,7 @@
  * @author Jaroslav Hucel (xhucel00@vutbr.cz)
  * @brief
  * @date Created: 12. 11. 2025
- * @date Modified: 16. 03. 2026
+ * @date Modified: 22. 03. 2026
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -74,7 +74,6 @@ namespace boilerplate {
         "void* lib = nullptr;\n"
         "FuncTable funcs;\n"
         "static ExtensionProperties * extensions = nullptr;\n"
-        "static const char** extensions_names = nullptr;\n"
         "static uint32_t extensions_count = 0;\n";
 
     static const char* LOAD_UNLOAD_LIB_IMPL = ""
@@ -90,7 +89,7 @@ namespace boilerplate {
         "\n"
         "    funcs.vkEnumerateInstanceExtensionProperties(nullptr, &extensions_count, nullptr);\n"
         "    extensions = new ExtensionProperties[extensions_count];\n"
-        "    extensions_names = new const char* [extensions_count];\n"
+        "    char** extensions_names = new char* [extensions_count];\n"
         "    funcs.vkEnumerateInstanceExtensionProperties(nullptr, &extensions_count, extensions);\n"
         "\n"
         "    for (uint32_t i = 0; i < extensions_count; i++) {\n"
@@ -420,6 +419,12 @@ Type::Type(const vkg_gen::xml::Element& elem, vkg_gen::Arena& arena) : elem(elem
                 case Category::Union:
                     union_ = arena.make<TypeUnion>();
                     break;
+                case Category::Funcpointer:
+                    funcptr = arena.make<TypeFuncpointer>();
+                    // Safe here: funcpointer has no attributes parsed later that affect parsing,
+                    // and it sets Type::name from <name> child (must run before the name fallback below).
+                    parse_funcpointer(elem, arena);
+                    break;
                 default:
                     break;
                 }
@@ -516,13 +521,15 @@ Type::Type(const vkg_gen::xml::Element& elem, vkg_gen::Arena& arena) : elem(elem
         throw my_error("objtypeenum attribute is required on <type category=\"handle\"> if alias attribute is not present");
 
 
+    // Struct/union parsing runs after the attribute loop because attributes like
+    // returnedonly, structextends, allowduplicate may appear before category in the XML.
     if (specific_attr == Category::Struct)
         parse_struct(elem, arena);
 
-    if (specific_attr == Category::Union)
+    else if (specific_attr == Category::Union)
         parse_union(elem, arena);
 
-    // TODO: check which types can have arbutrary C code
+    // TODO: check which types can have arbitrary C code
     if (name.empty()) {
         auto it = std::ranges::find_if(elem.children, has_tag("name"));
         if (it != elem.children.end()) {
@@ -755,7 +762,7 @@ Member::LimitType Member::limit_type_from_string(std::string_view s) {
 }
 
 Member::Member(const vkg_gen::xml::Element& e, vkg_gen::Arena& arena, ParentType parent_type, bool is_standalone_comment) :
-    is_standalone_comment(is_standalone_comment), stringify("") {
+    is_standalone_comment(is_standalone_comment) {
     if (is_standalone_comment) {
         assert(e.tag == "comment");
         comment = e.children[0]->asText();
@@ -765,9 +772,7 @@ Member::Member(const vkg_gen::xml::Element& e, vkg_gen::Arena& arena, ParentType
     assert(e.tag == "member");
 
     for (auto& attr : e.attrs) {
-        if (attr.name == "name") {
-            name = attr.value;
-        } else if (attr.name == "api") {
+        if (attr.name == "api") {
             api = attr.value;
         } else if (attr.name == "comment") {
             comment = attr.value;
@@ -802,43 +807,18 @@ Member::Member(const vkg_gen::xml::Element& e, vkg_gen::Arena& arena, ParentType
         }
     }
 
-    for (Node* child : e.children) {
-        if (child->isText()) {
-            stringify += child->asText();
-            continue;
-        }
-        auto& ch = child->asElement();
-        if (ch.tag == "name") {
-            if (!name.empty())
-                throw my_error{ "Duplicate name in member: " + std::string(name) };
-            name = ch.children[0]->asText(); // TODO: check_name
-            stringify += " ";
-            stringify += name;
-        } else if (ch.tag == "type") {
-            if (type.empty()) {
-                type = ch.children[0]->asText();
-                // FIXME: this is a hack, we need to find the type in generator and also bind it as an requirement for this
-                if (type.starts_with("Vk"))
-                    stringify += NameTranslator::from_type_name(type).new_name;
-                else {
-                    stringify += type;
-                }
-            } else {
-                throw my_error{ "Duplicate type in member: " + std::string(type) };
-            }
-        } else if (ch.tag == "enum") {
-            // TODO: check dependencies, and also it could be something else than the constexpr values
-            stringify += NameTranslator::from_constexpr_value(ch.children[0]->asText()).new_name;
+    if (e.children.empty())
+        throw my_error{ "Member must have a type and name specified!" };
 
-        } else if (ch.tag == "comment") {
-            if (!comment.empty())
-                throw my_error{ "Duplicate comment in member: " + std::string(comment) };
-            comment = ch.children[0]->asText();
-        } else {
-            throw my_error{ "Unknown child: " + std::string(ch.tag) };
-        }
-    }
-    stringify += ";";
+    type_param = TypeParam::from_xml(e, arena);
+
+    if (type_param.name.empty())
+        throw my_error{ "Member must have a name!" };
+
+    // CHECK: in vulkan spec it's said to be optional
+    if (type_param.type.empty())
+        throw my_error{ "Member must have a type!" };
+
 }
 
 TypeEnum::EnumItem TypeEnum::EnumItem::from_xml(const vkg_gen::xml::Element& elem, vkg_gen::Arena& arena, TypeEnum* parent, bool is_standalone_comment, bool extend_parent, sv block_ext_number) {
@@ -1240,13 +1220,17 @@ void Generator::generate_struct(Type& s, std::ofstream& file) {
     file << "struct" << Deprecate{ s.deprecated } << NameTranslator::from_type_name(s.name) << " {\n";
 
     for (auto& member : s.struct_->members) {
+        if (member.is_standalone_comment) {
+            file << StandaloneComment{ member.comment, config.generate_comments };
+            continue;
+        }
         // TODO: custom split
         if (!member.api.empty() && !std::ranges::contains(std::views::split(member.api, ','), "vulkan", [](auto&& rng) { return sv(rng); })) {
-            std::cout << " TODO: Skipping member '" << member.stringify << "' of struct '" << s.name << "', because it does not contain 'vulkan' api.\n";
+            std::cout << " TODO: Skipping member '" << member.type_param.stringify() << "' of struct '" << s.name << "', because it does not contain 'vulkan' api.\n";
             continue;
         }
 
-        file << "    " << member.stringify << LineComment{ member.comment, false, config.generate_comments } << '\n';
+        file << "    " << member.type_param.stringify() << ';' << LineComment{ member.type_param.comment, false, config.generate_comments } << '\n';
     }
     file << "};\n\n";
 }
@@ -1269,11 +1253,11 @@ void Generator::generate_union(Type& s, std::ofstream& file) {
     for (auto& member : s.union_->members) {
         // TODO: custom split
         if (!member.api.empty() && !std::ranges::contains(std::views::split(member.api, ','), "vulkan", [](auto&& rng) { return sv(rng); })) {
-            std::cout << " TODO: Skipping member '" << member.stringify << "' of union '" << s.name << "', because it does not contain 'vulkan' api.\n";
+            std::cout << " TODO: Skipping member '" << member.type_param.stringify() << "' of union '" << s.name << "', because it does not contain 'vulkan' api.\n";
             continue;
         }
 
-        file << "    " << member.stringify << LineComment{ member.comment, false, config.generate_comments } << '\n';
+        file << "    " << member.type_param.stringify() << ';' << LineComment{ member.comment, false, config.generate_comments } << '\n';
     }
     file << "};\n\n";
 }
@@ -1350,7 +1334,7 @@ std::ofstream& vkg_gen::Generator::Generator::generate_command_params(Command& c
     bool first = true;
     for (auto& param : cmd.parameters) {
         if (!param.api.empty() && !std::ranges::contains(std::views::split(param.api, ','), "vulkan", [](auto&& rng) { return sv(rng); })) {
-            std::cout << " TODO: Skipping parameter '" << param.stringify << "' of command '" << cmd.name << "', because it does not contain 'vulkan' api.\n";
+            std::cout << " TODO: Skipping parameter '" << param.type_param.stringify() << "' of command '" << cmd.name << "', because it does not contain 'vulkan' api.\n";
             continue;
         }
 
@@ -1358,16 +1342,16 @@ std::ofstream& vkg_gen::Generator::Generator::generate_command_params(Command& c
             first = false;
         else
             file << ", ";
-        if (config.generate_handle_class && is_handle(param.type)) {
-            std::string new_type = param.stringify;
-            sv type = param.type; // TODO: name translator
+        if (config.generate_handle_class && is_handle(param.type_param.type)) {
+            std::string new_type = param.type_param.stringify();
+            sv type = param.type_param.type; // TODO: name translator
             if (type.starts_with("Vk")) {
                 type.remove_prefix(2);
             }
             new_type.insert(new_type.find(type, 0) + type.size(), "::HandleType");
             file << new_type;
         } else {
-            file << param.stringify;
+            file << param.type_param.stringify();
         }
     }
 
@@ -1399,6 +1383,34 @@ void vkg_gen::Generator::Generator::generate_command_PFN(Command& cmd, std::ofst
     generate_command_params(cmd, file);
 }
 
+void vkg_gen::Generator::Generator::generate_funcpointer(Type& type, std::ofstream& file) {
+    auto& fp = *type.funcptr;
+    file << "typedef " << fp.return_type.stringify();
+    file << " (VKAPI_PTR* " << type.name << ")(";
+
+    bool first = true;
+    for (auto& param : fp.parameters) {
+        if (first)
+            first = false;
+        else
+            file << ", ";
+        // FIXME: hotfix — stringify + string insert for handles is fragile,
+        // and duplicates logic from generate_command_params. Unify later.
+        if (config.generate_handle_class && is_handle(param.type)) {
+            std::string new_type = param.stringify();
+            sv param_type = param.type;
+            if (param_type.starts_with("Vk"))
+                param_type.remove_prefix(2);
+            new_type.insert(new_type.find(param_type, 0) + param_type.size(), "::HandleType");
+            file << new_type;
+        } else {
+            file << param.stringify();
+        }
+    }
+
+    file << ");\n";
+}
+
 void vkg_gen::Generator::Generator::generate_command_wrapper(Command& cmd, std::ofstream& file) {
     sv type = cmd.type;
     if (type.starts_with("Vk")) {
@@ -1411,7 +1423,7 @@ void vkg_gen::Generator::Generator::generate_command_wrapper(Command& cmd, std::
     bool first = true;
     for (auto& param : cmd.parameters) {
         if (!param.api.empty() && !std::ranges::contains(std::views::split(param.api, ','), "vulkan", [](auto&& rng) { return sv(rng); })) {
-            std::cout << " TODO: Skipping parameter '" << param.stringify << "' of command '" << cmd.name << "', because it does not contain 'vulkan' api.\n";
+            std::cout << " TODO: Skipping parameter '" << param.type_param.stringify() << "' of command '" << cmd.name << "', because it does not contain 'vulkan' api.\n";
             continue;
         }
 
@@ -1419,8 +1431,8 @@ void vkg_gen::Generator::Generator::generate_command_wrapper(Command& cmd, std::
             first = false;
         else
             file << ", ";
-
-        file << param.name;
+        // TODO: nameTranslator
+        file << param.type_param.name;
     };
     file << "); }\n";
 
@@ -1489,18 +1501,16 @@ void Generator::add_required_type(sv name, std::vector<Type*>& types_stack) {
                 if (member.is_standalone_comment)
                     continue;
 
-                add_required_type(member.type, types_stack);
+                add_required_type(member.type_param.type, types_stack);
+                // TASK: 210326_02 — also track enum dependencies from array_extensions
             }
             break;
 
         case Type::Category::Funcpointer:
-            constexpr auto asElementGetFirstChildAsTextTransform = std::views::transform([](Node* n) -> Node::Text& { return n->asElement().children[0]->asText(); });
-            for (sv& param_type : type->elem.children | std::views::filter(has_tag("type")) | asElementGetFirstChildAsTextTransform)
-                add_required_type(param_type, types_stack);
-
-            for (sv& param_enum : type->elem.children | std::views::filter(has_tag("enum")) | asElementGetFirstChildAsTextTransform)
-                add_required_type(param_enum, types_stack);
-
+            add_required_type(type->funcptr->return_type.type, types_stack);
+            for (auto& param : type->funcptr->parameters)
+                add_required_type(param.type, types_stack);
+            // TASK: 210326_02 — also track enum dependencies from array_extensions
             break;
 
         }
@@ -1559,7 +1569,8 @@ void Generator::add_required_command(sv name) {
         add_required_type(cmd->type);
 
         for (auto& param : cmd->parameters)
-            add_required_type(param.type);
+            add_required_type(param.type_param.type);
+        // TASK: 210326_02 — also track enum dependencies from array_extensions
 
     } else {
         CommandAlias* ca = &command_aliases.find(name)->second;
@@ -1813,13 +1824,13 @@ void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& so
 
     header << "#define VKAPI_PTR\n";
 
-    header << boilerplate::HANDLE_DEFINITION << "\n";
+    if (config.generate_handle_class)
+        header << boilerplate::HANDLE_DEFINITION << "\n";
+    else
+        header << "#define VK_DEFINE_HANDLE(object) typedef struct object##_T* object;\n";
 
     header << "#define VKAPI_CALL\n";
     header << "#define VKAPI_ATTR\n";
-    header << "#define VK_DEFINE_HANDLE(object) typedef struct object##_T* object;\n";
-    // TODO: remove the funcpointer dependency on this.
-    header << "using VkBool32 = uint32_t;\n";
 
     //generate_API_constants(dom, file);
     //generate_types(dom, file);
@@ -1872,8 +1883,10 @@ void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& so
             // TODO: temporary solution
         case Type::Category::Basetype:
             //case Type::Category::Define:
-        case Type::Category::Funcpointer:
             _gen_arbitrary_C_code_in_type(type.elem, header);
+            break;
+        case Type::Category::Funcpointer:
+            generate_funcpointer(type, header);
             break;
         case Type::Category::Handle:
             generate_handle(type, header, enums.at(TypeHandle::obj_enum_name));
@@ -2046,9 +2059,7 @@ CommandParameter CommandParameter::from_xml(const xml::Element& elem, vkg_gen::A
     CommandParameter param;
 
     for (const Attribute& attr : elem.attrs) {
-        if (attr.name == "type")
-            param.type = attr.value;
-        else if (attr.name == "api")
+        if (attr.name == "api")
             param.api = attr.value;
         else if (attr.name == "len")
             param.len = attr.value;
@@ -2071,44 +2082,17 @@ CommandParameter CommandParameter::from_xml(const xml::Element& elem, vkg_gen::A
         else
             throw my_error{ "Unknown attribute for command parameter: " + std::string(attr.name) };
     };
-    for (Node* child : elem.children) {
-        if (child->isText()) {
-            param.stringify += child->asText();
-            continue;
-        }
 
-        auto& ch = child->asElement();
-        if (ch.tag == "name") {
+    if (elem.children.empty())
+        throw my_error{ "Command parameter must have a type and name specified!" };
 
-            if (!param.name.empty())
-                throw my_error{ "Command parameter can only have one name!" };
-            param.name = ch.children[0]->asText();
-            param.stringify += " ";
-            param.stringify += param.name;
+    param.type_param = TypeParam::from_xml(elem, arena);
 
-        } else if (ch.tag == "type") {
-            if (param.type.empty()) {
-                // TODO: search for type
-                param.type = ch.children[0]->asText();
-
-            } else {
-                // TASK: 090126_08 - THIS CAN HAPPEN
-                std::cout << "TODO: Duplicate type in member: " << std::string(param.name) << std::endl;
-            }
-            // TODO: NameTranslator
-            sv type = ch.children[0]->asText();
-            if (type.starts_with("Vk"))
-                type = type.substr(2);
-            param.stringify += type;
-        } else {
-            throw my_error{ "Unknown child element for command parameter: " + std::string(ch.tag) };
-        }
-    }
-    if (param.name.empty())
+    if (param.type_param.name.empty())
         throw my_error{ "Command parameter must have a name!" };
 
     // CHECK: in vulkan spec it's said to be optional
-    if (param.type.empty())
+    if (param.type_param.type.empty())
         throw my_error{ "Command parameter must have a type!" };
     return param;
 }
@@ -2290,9 +2274,9 @@ NameTranslator vkg_gen::Generator::NameTranslator::from_enum_value(sv value, sv 
         {"VK_QUERY_SCOPE_COMMAND_BUFFER_KHR", "queryScopeCommandBufferKHR"}, // aliased value for "VkPerformanceCounterScopeKHR" enum
         {"VK_QUERY_SCOPE_RENDER_PASS_KHR", "queryScopeRenderPassKHR"}, // aliased value for "VkPerformanceCounterScopeKHR" enum
         {"VK_QUERY_SCOPE_COMMAND_KHR", "queryScopeCommandKHR"}, // aliased value for "VkPerformanceCounterScopeKHR" enum
-        {"VK_CLUSTER_ACCELERATION_STRUCTURE_INDEX_FORMAT_8BIT_NV", "e8Bit"},  // its missing "_BIT" but it also propably should contain it anyway
-        {"VK_CLUSTER_ACCELERATION_STRUCTURE_INDEX_FORMAT_16BIT_NV", "e16Bit"}, // its missing "_BIT" but it also propably should contain it anyway
-        {"VK_CLUSTER_ACCELERATION_STRUCTURE_INDEX_FORMAT_32BIT_NV", "e32Bit"}, // its missing "_BIT" but it also propably should contain it anyway
+        {"VK_CLUSTER_ACCELERATION_STRUCTURE_INDEX_FORMAT_8BIT_NV", "e8BitNV"},  // its missing "_BIT" but it also propably should contain it anyway
+        {"VK_CLUSTER_ACCELERATION_STRUCTURE_INDEX_FORMAT_16BIT_NV", "e16BitNV"}, // its missing "_BIT" but it also propably should contain it anyway
+        {"VK_CLUSTER_ACCELERATION_STRUCTURE_INDEX_FORMAT_32BIT_NV", "e32BitNV"}, // its missing "_BIT" but it also propably should contain it anyway
         {"VK_STRUCTURE_TYPE_SURFACE_CAPABILITIES2_EXT", "eSurfaceCapabilities2EXT2"}, // 2 aliased values will be translated as the same value, so we should not generate the other one
         {"VK_PIPELINE_RASTERIZATION_STATE_CREATE_FRAGMENT_DENSITY_MAP_ATTACHMENT_BIT_EXT", "eCreateFragmentDensityMapAttachmenEXT"}, // aliased value for "VK_PIPELINE_CREATE_RENDERING_FRAGMENT_DENSITY_MAP_ATTACHMENT_BIT_EXT", but it is named differently and does not start with the class name
         {"VK_PIPELINE_RASTERIZATION_STATE_CREATE_FRAGMENT_SHADING_RATE_ATTACHMENT_BIT_KHR", "eCreateFragmentShadingRateAttachmenKHR"}, // aliased value for "VK_PIPELINE_CREATE_RENDERING_FRAGMENT_SHADING_RATE_ATTACHMENT_BIT_KHR", but it is named differently and does not start with the class name
@@ -2488,4 +2472,461 @@ Extension vkg_gen::Generator::NameTranslator::get_and_remove_extension_name(sv& 
     if (name.ends_with("FREDEMMOTT")) { name.remove_suffix(sizeof("FREDEMMOTT") - 1); return Extension::Fredemmott; }
     if (name.ends_with("MTK")) { name.remove_suffix(sizeof("MTK") - 1); return Extension::Mtk; }
     return Extension::None;
+}
+
+
+TypeParam vkg_gen::Generator::TypeParam::from_xml(const xml::Element& elem, vkg_gen::Arena& arena) {
+    State state = State::AtStart;
+    TypeParam param;
+
+    for (Node* child : elem.children) {
+        if (child->isText()) {
+            state = param.parse_string(child->asText(), state);
+            continue;
+        }
+
+        auto& ch = child->asElement();
+        if (ch.tag == "name") {
+            switch (state) {
+            case State::AtStart:
+            case State::BeforeType:
+                throw my_error{ "Command parameter is missing a type!" };
+            case State::BeforeName:
+                state = TypeParam::State::AfterName;
+                param.name = ch.children[0]->asText();
+                break;
+            case State::AfterName:
+            case State::AfterBitSelect:
+                throw my_error{ "Command parameter can only have one name!" };
+            case State::InsideArray:
+                throw my_error{ "Excepted <enum> inside [] as an array parameter but found <name>!" };
+            }
+
+        } else if (ch.tag == "type") {
+
+            switch (state) {
+            case State::AtStart: // qualifiers before type could be empty
+            case State::BeforeType:
+                state = TypeParam::State::BeforeName;
+                // TODO: search for the type
+                param.type = ch.children[0]->asText();
+                break;
+            case State::BeforeName:
+            case State::AfterName:
+            case State::AfterBitSelect:
+                throw my_error{ "Command parameter can only have one type!" };
+            case State::InsideArray:
+                throw my_error{ "Excepted <enum> inside [] as an array parameter but found <type>!" };
+            }
+
+        } else if (ch.tag == "enum") {
+            if (state != State::InsideArray)
+                throw my_error{ "Enum tag can only be inside [] as an array size parameter!" };
+
+            // FIXME: search for the type, this is real hack
+            TypeEnum::EnumItem enum_item;
+            enum_item.name = ch.children[0]->asText();
+            param.array_extensions.emplace_back(arena.make<TypeEnum::EnumItem>(std::move(enum_item)));
+
+        } else if (ch.tag == "comment") {
+            if (!param.comment.empty())
+                throw my_error{ "Command parameter can only have one comment!" };
+            param.comment = ch.children[0]->asText();
+        } else {
+            throw my_error{ "Unknown tag <" + std::string(ch.tag) + "> in command parameter! Expected <name>, <type> or <enum>" };
+        }
+    }
+
+
+    return param;
+}
+
+void Type::parse_funcpointer(const xml::Element& elem, vkg_gen::Arena& arena) {
+    UNUSED(arena);
+
+    // The expected format:
+    // typedef <return_type> (VKAPI_PTR* <name>func_name</name>)(<params>)
+
+    if (elem.children.empty())
+        throw my_error{ "Type Funcpointer: expected at least one child! (Expected format: typedef <return_type> (VKAPI_PTR* <name>func_name</name>)(<params>)" };
+
+    auto it = elem.children.begin();
+
+    if (!(*it)->isText())
+        throw my_error{ "Type Funcpointer: expected first child to be text! (Expected format: typedef <return_type> (VKAPI_PTR* <name>func_name</name>)(<params>)" };
+    sv first_text = (*it)->asText();
+    trim_leading_ws(first_text);
+
+    if (!first_text.starts_with("typedef"))
+        throw my_error{ "Type Funcpointer: expected to start with 'typedef'! (Expected format: typedef <return_type> (VKAPI_PTR* <name>func_name</name>)(<params>)" };
+    first_text.remove_prefix(7);
+    trim_leading_ws(first_text);
+
+    // Find "VKAPI_PTR" — everything before '(' VKAPI_PTR is the return type
+    auto vkapi_pos = first_text.find("VKAPI_PTR");
+    if (vkapi_pos == sv::npos)
+        throw my_error{ "Type Funcpointer: did not find VKAPI_PTR! (Expected format: typedef <return_type> (VKAPI_PTR* <name>func_name</name>)(<params>)" };
+
+    sv return_text = first_text.substr(0, vkapi_pos);
+    trim_ws(return_text);
+    if (return_text.empty() || return_text.back() != '(')
+        throw my_error{ "Funcpointer: missing '(' before VKAPI_PTR! (Expected format: typedef <return_type> (VKAPI_PTR* <name>func_name</name>)(<params>)" };
+    return_text.remove_suffix(1);
+    trim_ws(return_text);
+
+    funcptr->return_type = TypeRef::from_string(return_text);
+
+    ++it;
+
+    // Second child: <name> — set Type::name directly
+    if (it == elem.children.end() || !(*it)->isElement() || (*it)->asElement().tag != "name")
+        throw my_error{ "Funcpointer: expected <name> element as second child" };
+    name = (*it)->asElement().children[0]->asText();
+    ++it;
+
+    // --- Phase 2: Parse parameters ---
+    // Third child text: ")(\n    " or ")(void);"
+    if (it == elem.children.end() || !(*it)->isText())
+        throw my_error{ "Funcpointer: expected text node after <name>" };
+    sv after_name = (*it)->asText();
+
+    auto paren_pos = after_name.find(")(");
+    if (paren_pos == sv::npos)
+        throw my_error{ "Funcpointer: missing ')(' parameter list separator" };
+    sv param_start_text = after_name.substr(paren_pos + 2);
+    trim_leading_ws(param_start_text);
+
+    // Check for "(void);" — no parameters
+    if (param_start_text.starts_with("void")) {
+        sv after_void = param_start_text.substr(4);
+        trim_leading_ws(after_void);
+        if (after_void.starts_with(");"))
+            return;
+    }
+
+    ++it;
+
+    // Iterate remaining children to build parameters
+    sv pending_pre_text = param_start_text;
+
+    while (it != elem.children.end()) {
+        if ((*it)->isElement() && (*it)->asElement().tag == "type") {
+            TypeParam param;
+
+            // Check pending text for "const" qualifier
+            sv pre = pending_pre_text;
+            while (!pre.empty() && (std::isspace(pre[0]) || pre.front() == ','))
+                pre.remove_prefix(1);
+
+            if (pre.starts_with("const")) {
+                sv after_const = pre.substr(5);
+                if (after_const.empty() || std::isspace(static_cast<unsigned char>(after_const.front()))) {
+                    param.pre_qual = TypeParam::PreQualifier::Const;
+                }
+            }
+
+            param.type = (*it)->asElement().children[0]->asText();
+            ++it;
+
+            // Next: text with optional pointer, name, separator
+            if (it != elem.children.end() && (*it)->isText()) {
+                sv post = (*it)->asText();
+                trim_leading_ws(post);
+
+                // Parse post-qualifiers: *, const*, * const, etc.
+                while (!post.empty() && (post.front() == '*' || (post.starts_with("const") &&
+                    (post.size() == 5 || std::isspace(static_cast<unsigned char>(post[5])) || post[5] == '*')))) {
+                    if (post.front() == '*') {
+                        param.post_quals.push_back(TypeParam::PostQualifier::Pointer);
+                        post.remove_prefix(1);
+                        trim_leading_ws(post);
+                    } else {
+                        post.remove_prefix(5);
+                        trim_leading_ws(post);
+                        if (!post.empty() && post.front() == '*') {
+                            param.post_quals.push_back(TypeParam::PostQualifier::ConstPointer);
+                            post.remove_prefix(1);
+                            trim_leading_ws(post);
+                        } else {
+                            param.post_quals.push_back(TypeParam::PostQualifier::Const);
+                        }
+                    }
+                }
+
+                // Extract parameter name
+                size_t name_end = 0;
+                while (name_end < post.size() &&
+                    !std::isspace(static_cast<unsigned char>(post[name_end])) &&
+                    post[name_end] != ',' &&
+                    post[name_end] != ')' &&
+                    post[name_end] != ';') {
+                    name_end++;
+                }
+                param.name = post.substr(0, name_end);
+                pending_pre_text = post.substr(name_end);
+                ++it;
+            }
+
+            funcptr->parameters.push_back(std::move(param));
+
+        } else if ((*it)->isText()) {
+            pending_pre_text = (*it)->asText();
+            ++it;
+        } else {
+            throw my_error{ "Funcpointer: unexpected element <" + std::string((*it)->asElement().tag) + "> in parameter list" };
+        }
+    }
+}
+
+std::string vkg_gen::Generator::TypeParam::stringify() {
+    std::stringstream ss;
+    if (is_const())
+        ss << "const ";
+
+    // TODO: assert that if pre_qual is struct|union|enum, the type category is correct
+
+    // TASK: 210326_01 add config for generating c keywords
+    // if (config.generate_c_type_keywords)
+
+    // TODO: name translator
+    if (type.starts_with("Vk"))
+        ss << type.substr(2);
+    else
+        ss << type;
+
+    for (const auto& qualifier : post_quals) {
+        if (bool(qualifier & PostQualifier::Const))
+            ss << " const";
+        if (bool(qualifier & PostQualifier::Pointer))
+            ss << "*";
+    }
+
+    ss << ' ' << name;
+
+    for (const auto& extension : array_extensions) {
+        switch (extension.type) {
+        case ArrayExtension::Type::PlainSize:
+            ss << '[' << extension.size << ']';
+            break;
+        case ArrayExtension::Type::EnumItem:
+            ss << '[' << NameTranslator::from_constexpr_value(extension.enum_item->name) << ']';
+            break;
+        case ArrayExtension::Type::BitSelect:
+            ss << ':' << (int)extension.bitpos;
+            break;
+        }
+    }
+    return ss.str();
+}
+
+TypeRef vkg_gen::Generator::TypeRef::from_string(sv text) {
+    TypeRef ref;
+    trim_ws(text);
+
+    if (text.starts_with("const") && (text.size() == 5 || std::isspace(text[5]))) {
+        ref.is_const = true;
+        text.remove_prefix(5);
+        trim_leading_ws(text);
+    }
+
+    // Extract type name (up to first '*' or whitespace)
+    size_t type_end = 0;
+    while (type_end < text.size() && text[type_end] != '*' && !std::isspace(text[type_end])) {
+        type_end++;
+    }
+    if (type_end == 0)
+        throw my_error{ "TypeRef::from_string: empty type in '" + std::string(text) + "'" };
+
+    ref.type = text.substr(0, type_end);
+    sv quals = text.substr(type_end);
+    trim_leading_ws(quals);
+
+    while (!quals.empty()) {
+        if (quals.front() == '*') {
+            ref.post_quals.push_back(TypeParam::PostQualifier::Pointer);
+            quals.remove_prefix(1);
+            trim_leading_ws(quals);
+
+        } else if (quals.starts_with("const") && (quals.size() == 5 || std::isspace(quals[5]) || quals[5] == '*')) {
+            quals.remove_prefix(5);
+            trim_leading_ws(quals);
+            if (!quals.empty() && quals.front() == '*') {
+                ref.post_quals.push_back(TypeParam::PostQualifier::ConstPointer);
+                quals.remove_prefix(1);
+                trim_leading_ws(quals);
+            } else {
+                ref.post_quals.push_back(TypeParam::PostQualifier::Const);
+            }
+        } else {
+            throw my_error{ "TypeRef::from_string: unexpected token '" + std::string(quals) + "'" };
+        }
+    }
+    return ref;
+}
+
+std::string vkg_gen::Generator::TypeRef::stringify() const {
+    std::stringstream ss;
+    if (is_const)
+        ss << "const ";
+
+    // TODO: name translator
+    if (type.starts_with("Vk"))
+        ss << type.substr(2);
+    else
+        ss << type;
+
+    for (const auto& qualifier : post_quals) {
+        if (bool(qualifier & TypeParam::PostQualifier::Const))
+            ss << " const";
+        if (bool(qualifier & TypeParam::PostQualifier::Pointer))
+            ss << '*';
+    }
+    return ss.str();
+}
+
+void vkg_gen::Generator::trim_leading_ws(sv& s) {
+    auto it = std::find_if_not(s.begin(), s.end(), [](unsigned char c) { return std::isspace(c); });
+    s.remove_prefix(it - s.begin());
+}
+
+void vkg_gen::Generator::trim_trailing_ws(sv& s) {
+    auto it = std::find_if_not(s.rbegin(), s.rend(), [](unsigned char c) { return std::isspace(c); });
+    s.remove_suffix(it - s.rbegin());
+}
+
+void vkg_gen::Generator::trim_ws(sv& s) {
+    trim_leading_ws(s);
+    trim_trailing_ws(s);
+}
+
+uint64_t vkg_gen::Generator::TypeParam::get_size(sv str) {
+    uint64_t size = 0;
+    for (char c : str) {
+        if (c < '0' || c > '9')
+            throw my_error{ "Invalid size of array: " + std::string(str) };
+        size *= 10, size += c - '0';
+    }
+    return size;
+}
+
+TypeParam::State vkg_gen::Generator::TypeParam::parse_string(sv text, State state) {
+    sv original = text;
+    const auto check_pre_qual = [&](sv keyword, PreQualifier flag) -> bool {
+        // TODO: checking like this can be unsafe (does not check if the word ends - "const" in "constexpr")
+        if (!text.starts_with(keyword)) return false;
+
+        if (bool(pre_qual & flag)) {
+            throw my_error{ "Found " + std::string(keyword) + " qualifier twice! '" + std::string(original) + "'" };
+        }
+
+        pre_qual |= flag;
+        text.remove_prefix(keyword.length());
+        return true;
+        };
+
+    switch (state) {
+    case State::AtStart:
+        while (true) {
+            trim_leading_ws(text);
+            if (text.empty())
+                return is_const() ? State::BeforeType : State::AtStart;
+
+            if (check_pre_qual("const", PreQualifier::Const)) continue;
+            if (check_pre_qual("struct", PreQualifier::Struct)) continue;
+            if (check_pre_qual("union", PreQualifier::Union)) continue;
+            if (check_pre_qual("enum", PreQualifier::Enum)) continue;
+
+            throw my_error{ "Unknown qualifier before type! '" + std::string(original) + "' Expected struct, union or enum!" };
+        }
+
+    case State::BeforeType:
+        assert(is_const());
+        while (true) {
+            trim_leading_ws(text);
+            if (text.empty())
+                return State::BeforeName;
+            if (text.starts_with("const"))
+                throw my_error{ "Found const qualifier twice before type! '" + std::string(original) + "'" };
+
+            if (check_pre_qual("struct", PreQualifier::Struct)) continue;
+            if (check_pre_qual("union", PreQualifier::Union)) continue;
+            if (check_pre_qual("enum", PreQualifier::Enum)) continue;
+
+            throw my_error{ "Unknown qualifier before type! '" + std::string(original) + "' Expected struct, union or enum!" };
+        }
+
+    case State::BeforeName:
+        while (true) {
+            trim_leading_ws(text);
+            if (text.empty())
+                return State::BeforeName;
+            if (text[0] == '*') {
+                post_quals.push_back(PostQualifier::Pointer);
+                text.remove_prefix(1);
+            } else if (text.starts_with("const") &&
+                (text.size() == 5 || std::isspace(text[5]) || text[5] == '*')) {
+                text.remove_prefix(5);
+                trim_leading_ws(text);
+                if (!text.empty() && text[0] == '*') {
+                    post_quals.push_back(PostQualifier::ConstPointer);
+                    text.remove_prefix(1);
+                } else {
+                    post_quals.push_back(PostQualifier::Const);
+                }
+            } else {
+                throw my_error{ "Unknown qualifier after type! '" + std::string(original) + "'" };
+            }
+        }
+        return State::BeforeName;
+
+    case State::AfterName:
+        trim_ws(text);
+        if (text.empty())
+            return State::AfterName;
+        if (text[0] != '[' && text[0] != ':')
+            throw my_error{ "Excepted '[' or ':' after name but found '" + std::string(original) + "'" };
+        if (text[0] == ':') {
+            if (!array_extensions.empty())
+                throw my_error{ "Can't combine bitselect (:<num>) and array extensions!" };
+            uint64_t size = get_size(text.substr(1));
+            if (size > 64)
+                throw my_error{ "Bitselect can't be bigger than 64 bits! '" + std::string(original) + "'" };
+            array_extensions.emplace_back((uint8_t)size);
+            return State::AfterBitSelect;
+        }
+        // "[<size>]"
+        text.remove_prefix(1);
+        trim_leading_ws(text);
+        if (text.empty())
+            return State::InsideArray; // this text ends so some other element is coming
+
+        if (!std::isdigit(text[0]))
+            throw my_error{ "Excepted array size or <enum> after '[' but found '" + std::string(original) + "'" };
+
+        {
+            int i;
+            for (i = 1; std::isdigit(text[i]); ++i);
+            uint64_t size = get_size(text.substr(0, i));
+            text.remove_prefix(i);
+            trim_leading_ws(text);
+            if (text.empty() || text[0] != ']')
+                throw my_error{ "Excepted ']' after array size but found '" + std::string(original) + "'" };
+            array_extensions.emplace_back(size);
+        }
+        return State::AfterName;
+
+    case State::InsideArray:
+        trim_leading_ws(text);
+        if (text[0] != ']')
+            throw my_error{ "Excepted ']' after array size but found '" + std::string(original) + "'" };
+        if (text.size() > 1)
+            return parse_string(text.substr(1), State::AfterName);
+        return State::AfterName;
+
+    case State::AfterBitSelect:
+        trim_leading_ws(text);
+        if (text.empty())
+            return State::AfterBitSelect;
+        throw my_error{ "Can't have anything after bitselect (:<num>)!" };
+    }
 }

@@ -1,46 +1,70 @@
 // TASK: 090126_01
- - Decide if we will be using filtering nodes by the new concept and lamda like structures.
- - if not, remove it
+
+- Decide if we will be using filtering nodes by the new concept and lamda like structures.
+- if not, remove it
 
 // TASK: 090126_02
- - Decide if we will be using "using sv = std::string_view;" in header files."
- - if not, remove it
- - if yes, make it global for a given namespace
+
+- Decide if we will be using "using sv = std::string_view;" in header files."
+- if not, remove it
+- if yes, make it global for a given namespace
 
 // TASK: 090126_03
- - Temporary helper functions
+
+- Temporary helper functions
 
 // TASK: 090126_04
- - Text nodes in places where we expect element nodes - need to be handled
+
+- Text nodes in places where we expect element nodes - need to be handled
 
 // TASK: 090126_05
- - exclude_platforms helper function is a hack to filter unhandled problems with platforms
+
+- exclude_platforms helper function is a hack to filter unhandled problems with platforms
 
 // TASK: 090126_06
- - Decide what to do with attributes of Command class, how to handle if, if we will be parsing them and so on
+
+- Decide what to do with attributes of Command class, how to handle if, if we will be parsing them and so on
 
 // TASK: 090126_07
- - Decide what to do with attributes of CommandAlias class, how to handle if, if we will be parsing them and so on
+
+- Decide what to do with attributes of CommandAlias class, how to handle if, if we will be parsing them and so on
 
 // TASK: 090126_08
- - Handle mere than one type in one parameter/member.
- - It can happen for example with "VkPipelineCacheHeaderVersionOne", <member><type>uint8_t</type><name>pipelineCacheUUID</name>[<enum>VK_UUID_SIZE</enum>]</member>
+
+- Handle mere than one type in one parameter/member.
+- It can happen for example with "VkPipelineCacheHeaderVersionOne", <member><type>uint8_t</type><name>pipelineCacheUUID</name>[<enum>VK_UUID_SIZE</enum>]</member>
 
 // TASK: 100126_01
- - Remove the "add_extension_prototype" function and implement handling extensions into the generator
- - Handle "defines" in extensions defined as <enum value="" name=".."></enum>
+
+- Remove the "add_extension_prototype" function and implement handling extensions into the generator
+- Handle "defines" in extensions defined as <enum value="" name=".."></enum>
 
 // TASK: 030226_01
- - Extending enum can create duplicities and also dependecies.
- - Refactor current temporary solution
+
+- Extending enum can create duplicities and also dependecies.
+- Refactor current temporary solution
 
 // TASK: 040226_01
- - Commands are generated to directly link with vulkan, but some of them are only acessible in runtime.
- - Also there is still the trampoline thingy, so it would be advisable, to
+
+- Commands are generated to directly link with vulkan, but some of them are only acessible in runtime.
+- Also there is still the trampoline thingy, so it would be advisable, to
 
 // TASK: 040226_02
- - When extending enum, wee need to know ext-number, if it is not specified. Currently passing 0.
+
+- When extending enum, wee need to know ext-number, if it is not specified. Currently passing 0.
 
 // TASK: 250226_01
- - Handle config in generator properly
- - Currently just copying what was passed to latest generate.
+
+- Handle config in generator properly
+- Currently just copying what was passed to latest generate.
+
+// TASK: 210326_01
+
+- add config for generating c keywords
+- implement it
+
+// TASK: 210326_02
+
+- add_required_type does not track enum dependencies from TypeParam::array_extensions
+- struct/union members, command params, funcpointer params do not track dependencies of the <enum> tags
+- but will likely always be the special "API Constants" enum that is not handled

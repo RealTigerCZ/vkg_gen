@@ -3,7 +3,7 @@
  * @author Jaroslav Hucel (xhucel00@vutbr.cz)
  * @brief
  * @date Created: 02. 11. 2025
- * @date Modified: 15. 03. 2026
+ * @date Modified: 21. 03. 2026
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -72,6 +72,147 @@ namespace vkg_gen::Generator {
         // corresponds to this type. Should be present
     };
 
+    struct TypeEnum {
+
+        struct ValueNormal {
+            sv value;
+        };
+
+        struct ValueBitmask {
+            bool is_bitfield = false;
+            union {
+                uint8_t bitpos = 0;
+                sv value;
+            };
+        };
+
+        struct ValueConstant {
+            sv value;
+            sv type;
+        };
+
+        struct EnumItem {
+            sv name;
+            sv comment;
+
+            union {
+                ValueNormal normal = {};
+                ValueBitmask bitmask;
+                ValueConstant constant;
+                sv alias;
+            };
+
+            sv protect;
+            sv deprecated;
+            sv api;
+            bool is_alias = false;
+            bool is_standalone_comment = false; //TODO:
+
+            static EnumItem from_xml(const vkg_gen::xml::Element& elem, vkg_gen::Arena& arena, TypeEnum* parent, bool is_standalone_comment = false, bool extend_parent = false, sv block_ext_number = "");
+        };
+
+
+        enum class Type : uint8_t {
+            None,
+            Bitmask,
+            Normal,
+            Constants
+        };
+
+        enum class Bitwidth : uint8_t {
+            None,
+            _8,
+            _16,
+            _32,
+            _64
+        };
+
+        sv name;
+        sv comment;
+        sv deprecated;
+        Type type = Type::None;
+        Bitwidth bitwidth = Bitwidth::None;
+        // TODO: what about <unused>?
+        std::vector<EnumItem> items;
+
+        // TODO: change to static from_xml(...)
+        TypeEnum(const vkg_gen::xml::Element& elem, vkg_gen::Arena& arena);
+
+    private:
+        Type type_from_string(sv s);
+        Bitwidth bitwidth_from_string(sv s);
+    };
+
+
+    class TypeParam {
+    public:
+        enum class PreQualifier : uint8_t {
+            None = 0,
+            Const = 1 << 0,
+            Struct = 1 << 1,
+            Union = 1 << 2,
+            Enum = 1 << 3,
+            ConstStruct = Const | Struct,
+            ConstUnion = Const | Union,
+            ConstEnum = Const | Enum
+        };
+
+        enum class PostQualifier : uint8_t {
+            None = 0,
+            Const = 1 << 0,
+            Pointer = 1 << 1,
+            ConstPointer = Const | Pointer
+        };
+
+
+        struct ArrayExtension {
+            enum class Type : uint8_t {
+                PlainSize,
+                EnumItem,
+                BitSelect,
+            };
+            Type type;
+            union {
+                TypeEnum::EnumItem* enum_item;
+                uint64_t size;
+                uint8_t bitpos;
+            };
+            ArrayExtension(uint64_t s) : type(Type::PlainSize) { size = s; }
+            ArrayExtension(TypeEnum::EnumItem* e) : type(Type::EnumItem) { enum_item = e; }
+            ArrayExtension(uint8_t b) : type(Type::BitSelect) { bitpos = b; }
+        };
+
+        sv type;
+        sv name;
+        PreQualifier pre_qual = PreQualifier::None;
+        sv comment = {}; // TODO: this comment is in the moment not generated
+        std::vector<PostQualifier> post_quals;
+        std::vector<ArrayExtension> array_extensions;
+
+        enum class State : uint8_t {
+            AtStart,
+            BeforeType,
+            BeforeName,
+            AfterName,
+            InsideArray,
+            AfterBitSelect
+        };
+
+        static TypeParam from_xml(const xml::Element& elem, vkg_gen::Arena& arena);
+        // TODO: replace thos with operator<<
+        std::string stringify();
+        bool is_const() const;
+
+    private:
+        static uint64_t get_size(sv str);
+        State parse_string(sv text, State state);
+    };
+
+    void trim_leading_ws(sv& s);
+    void trim_trailing_ws(sv& s);
+    void trim_ws(sv& s);
+
+
     struct Member {
         enum class LimitType : uint16_t {
             None = 0,
@@ -94,8 +235,8 @@ namespace vkg_gen::Generator {
             Maybe
         };
 
-        sv name;
-        sv type;
+        TypeParam type_param;
+
         sv api;
 
         // if the member is an array, len may be one or more of the following
@@ -151,7 +292,6 @@ namespace vkg_gen::Generator {
 
         sv comment;
         bool is_standalone_comment = false;
-        std::string stringify;
 
         enum class ParentType : uint8_t {
             Struct,
@@ -185,78 +325,19 @@ namespace vkg_gen::Generator {
     // TODO: TypeUnion
     using TypeUnion = TypeStruct;
 
-    struct TypeEnum {
+    struct TypeRef {
+        bool is_const = false;
+        sv type;
+        std::vector<TypeParam::PostQualifier> post_quals;
 
-        struct ValueNormal {
-            sv value;
-        };
-
-        struct ValueBitmask {
-            bool is_bitfield = false;
-            union {
-                uint8_t bitpos = 0;
-                sv value;
-            };
-        };
-
-        struct ValueConstant {
-            sv value;
-            sv type;
-        };
-
-
-        struct EnumItem {
-            sv name;
-            sv comment;
-
-            union {
-                ValueNormal normal = {};
-                ValueBitmask bitmask;
-                ValueConstant constant;
-                sv alias;
-            };
-
-            sv protect;
-            sv deprecated;
-            sv api;
-            bool is_alias = false;
-            bool is_standalone_comment = false; //TODO:
-
-            static EnumItem from_xml(const vkg_gen::xml::Element& elem, vkg_gen::Arena& arena, TypeEnum* parent, bool is_standalone_comment = false, bool extend_parent = false, sv block_ext_number = "");
-        };
-
-
-        enum class Type : uint8_t {
-            None,
-            Bitmask,
-            Normal,
-            Constants
-        };
-
-        enum class Bitwidth : uint8_t {
-            None,
-            _8,
-            _16,
-            _32,
-            _64
-        };
-
-        sv name;
-        sv comment;
-        sv deprecated;
-        Type type = Type::None;
-        Bitwidth bitwidth = Bitwidth::None;
-        // TODO: what about <unused>?
-        std::vector<EnumItem> items;
-
-        // TODO: change to static from_xml(...)
-        TypeEnum(const vkg_gen::xml::Element& elem, vkg_gen::Arena& arena);
-
-    private:
-        Type type_from_string(sv s);
-        Bitwidth bitwidth_from_string(sv s);
+        static TypeRef from_string(sv text);
+        std::string stringify() const;
     };
 
+    struct TypeFuncpointer {
+        TypeRef return_type;
+        std::vector<TypeParam> parameters;
+    };
 
     class Type {
     public:
@@ -292,6 +373,7 @@ namespace vkg_gen::Generator {
             TypeHandle* handle;
             TypeStruct* struct_;
             TypeUnion* union_;
+            TypeFuncpointer* funcptr;
             sv bitvalues; // only for category Bitmask, name of an enum definition that defines the valid values for parameters of that type
         };
 
@@ -304,6 +386,7 @@ namespace vkg_gen::Generator {
         Category category_from_string(sv s) const;
         void parse_struct(const xml::Element& elem, Arena& arena);
         void parse_union(const xml::Element& elem, Arena& arena);
+        void parse_funcpointer(const xml::Element& elem, Arena& arena);
     };
 
     class CommandParameter {
@@ -320,12 +403,7 @@ namespace vkg_gen::Generator {
         sv objecttype = {}; // optional
         sv validstructs = {}; // optional
 
-        sv type;
-        sv name;
-
-
-        // TODO: the content of the tag should be a valid arbitrary C code after removing xml tags
-        std::string stringify;
+        TypeParam type_param;
 
         static CommandParameter from_xml(const xml::Element& elem, vkg_gen::Arena& arena);
 
@@ -512,6 +590,7 @@ namespace vkg_gen::Generator {
         void generate_command(Command& cmd, std::ofstream& file);
         void generate_command_PFN(Command& cmd, std::ofstream& file);
         void generate_command_wrapper(Command& cmd, std::ofstream& file);
+        void generate_funcpointer(Type& type, std::ofstream& file);
 
         NameTranslator get_translated_type_name(sv name);
 
@@ -559,6 +638,27 @@ namespace vkg_gen::Generator {
         bool generate = true;
     };
 
+    template <typename Qual>
+    concept IsTypeQualifier = std::same_as<Qual, TypeParam::PreQualifier> ||
+        std::same_as<Qual, TypeParam::PostQualifier>;
+
+    template <IsTypeQualifier Qual>
+    constexpr Qual operator|(Qual a, Qual b) {
+        return static_cast<Qual>(static_cast<uint8_t>(a) | static_cast<uint8_t>(b));
+    }
+
+    template <IsTypeQualifier Qual>
+    constexpr Qual operator&(Qual a, Qual b) {
+        return static_cast<Qual>(static_cast<uint8_t>(a) & static_cast<uint8_t>(b));
+    }
+
+    template <IsTypeQualifier Qual>
+    constexpr Qual& operator|=(Qual& a, Qual b) {
+        return a = a | b;
+    }
+
+    inline bool TypeParam::is_const() const { return bool(pre_qual & PreQualifier::Const); };
+
     inline std::ostream& operator<<(std::ostream& os, const NameTranslator& translator) {
         return os << translator.new_name;
     }
@@ -582,7 +682,7 @@ namespace vkg_gen::Generator {
 
     inline std::ostream& operator<<(std::ostream& os, StandaloneComment c) {
         if (c.generate && !c.comment.empty()) {
-            os << "/* " << c.comment << " */";
+            os << "/* " << c.comment << " */\n";
         }
         return os;
     };

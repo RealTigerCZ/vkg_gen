@@ -1,7 +1,7 @@
 build/
 .vscode/
 ref/
-
+.cache
 
 # Custom
 ignore_*
