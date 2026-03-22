@@ -582,58 +582,6 @@ void _gen_arbitrary_C_code_in_type(const vkg_gen::xml::Element& elem, std::ofstr
 }
 
 
-// TASK: 090126_05
-bool exclude_platforms(sv name) {
-    static sv platforms[] = {
-        "Xlib",
-        "Xcb",
-        "Wayland",
-        "DirectFB",
-        "Android",
-        "Win32",
-        "Vi",
-        "Ios",
-        "Macos",
-        "Metal",
-        "Fuchsia",
-        "Ggp",
-        "Sci",
-        "Provisional",
-        "Screen",
-        "Ohos"
-    };
-    static sv platforms_caps[] = {
-        "XLIB",
-        "XCB",
-        "WAYLAND",
-        "DIRECTFB",
-        "ANDROID",
-        "WIN32",
-        "VI",
-        "IOS",
-        "MACOS",
-        "METAL",
-        "FUCHSIA",
-        "GGP",
-        "SCI",
-        "PROVISIONAL",
-        "SCREEN",
-        "OHOS"
-    };
-
-    if (std::ranges::any_of(platforms_caps, [&name](sv& plat) { return name.ends_with(plat); })) return true;
-    if (std::ranges::any_of(platforms, [&name](sv& plat) {
-        auto pos = name.find(plat);
-        if (pos == std::string::npos)
-            return false;
-        auto next_index = pos + plat.size();
-        if (next_index >= name.size()) return false;
-        return (name[next_index] >= 'A' && name[next_index] <= 'Z');
-        })) return true;
-
-    return false;
-}
-
 TypeEnum::Type TypeEnum::type_from_string(std::string_view s) {
     if (s == "bitmask") return Type::Bitmask;
     if (s == "enum") return Type::Normal;
@@ -1749,6 +1697,7 @@ void Generator::add_extension_prototype(sv number, xml::Dom& dom) {
         if (supported == "disabled" || !std::ranges::contains(std::views::split(supported, ','), "vulkan", [](auto&& rng) { return sv(rng); }))
             continue;
 
+        // TODO: skipping all platforms
         if (!ext.get_attr_value("platform").empty())
             continue;
 
@@ -1862,11 +1811,6 @@ void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& so
             continue;
 
         auto& type = *p;
-        // TODO: this should not be needed
-        if (exclude_platforms(type.name)) {
-            std::cout << "Excluding: " << type.name << std::endl;
-            continue;
-        }
 
         switch (type.category) {
         case Type::Category::Struct:
@@ -1957,8 +1901,6 @@ void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& so
     bool first = true;
     for (const Element& extension : included_extensions) {
         sv name = extension.get_attr_value("name");
-        //if (exclude_platforms(name))
-        //    continue;
         if (extension.get_attr_value("type") != "instance")
             continue;
 
