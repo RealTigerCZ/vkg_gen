@@ -1633,7 +1633,7 @@ void Generator::add_required_version_feature(sv name, vkg_gen::xml::Dom& dom) {
                 } else if (elem.tag == "enum") {
                     auto it = std::ranges::find(elem.attrs, "extends", &Attribute::name);
                     if (it != elem.attrs.end()) {
-                        // TASK: 040226_02 Extension number
+                        // Feature-block enums always have explicit extnumber in vk.xml, no block_ext_number needed
                         extend_enum(it->value, elem, dom.arena);
                         add_required_enum(it->value);
                     } else {
@@ -1722,6 +1722,8 @@ void Generator::extend_enum(sv extends, Element& elem, vkg_gen::Arena& arena, sv
 }
 
 // TASK: 100126_01
+// TODO: Refactor - this function currently iterates all extensions and adds all of them.
+//       It should accept a parsed extension structure and add requirements for a single extension.
 void Generator::add_extension_prototype(sv number, xml::Dom& dom) {
     auto& registry = dom.root->asElement();
     assert(registry.tag == "registry");
@@ -1750,6 +1752,8 @@ void Generator::add_extension_prototype(sv number, xml::Dom& dom) {
         if (!ext.get_attr_value("platform").empty())
             continue;
 
+        sv ext_number = ext.get_attr_value("number");
+
         included_extensions.push_back(ext);
 
         for (Node* node : ext.children) {
@@ -1777,8 +1781,7 @@ void Generator::add_extension_prototype(sv number, xml::Dom& dom) {
                     } else if (elem.tag == "enum") {
                         auto it = std::ranges::find(elem.attrs, "extends", &Attribute::name);
                         if (it != elem.attrs.end()) {
-                            // TASK: 040226_02 Extension number
-                            extend_enum(it->value, elem, dom.arena, number);
+                            extend_enum(it->value, elem, dom.arena, ext_number);
                             add_required_enum(it->value);
                             continue;
                         }
