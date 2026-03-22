@@ -16,6 +16,7 @@
 #include <fstream>
 #include <iostream>
 #include <cassert>
+#include <cstring>
 
 #include "../xml/xml.hpp"
 #include "../arena.hpp"
@@ -1132,7 +1133,7 @@ void Generator::generate_enum(TypeEnum& e, std::ofstream& file) {
     // TASK: 030226_01 Enum member dependencies
     sort_enum_items(e.items);
 
-    std::string enum_name_transformed = NameTranslator::transform_enum_name(e.name, e.type == TypeEnum::Type::Bitmask);
+    auto enum_name_transformed = NameTranslator::transform_enum_name(e.name, e.type == TypeEnum::Type::Bitmask);
 
     static const std::unordered_set<sv> skip_enum_items = {
         "VK_COLORSPACE_SRGB_NONLINEAR_KHR", // Skippible because COLORSPACE should be COLOR_SPACE, and it also shadows the correct value
@@ -1295,7 +1296,7 @@ void Generator::generate_handle(Type& h, std::ofstream& file, TypeEnum& obj_enum
     auto it = std::ranges::find(obj_enum.items, h.handle->objtypeenum, &TypeEnum::EnumItem::name);
     if (it == obj_enum.items.end())
         throw my_error{ std::format("Handle '{}' did not found matching objtypeenum '{}' in enum '{}'", h.name, h.handle->objtypeenum, obj_enum.name) };
-    std::string enum_transformed = NameTranslator::transform_enum_name(obj_enum.name, false);
+    auto enum_transformed = NameTranslator::transform_enum_name(obj_enum.name, false);
 
     if (!config.generate_handle_class)
         file << "VK_DEFINE_HANDLE(" << h.name << ")\n";
@@ -2226,7 +2227,7 @@ CommandAlias vkg_gen::Generator::CommandAlias::from_xml(const xml::Element& elem
 }
 
 
-std::string vkg_gen::Generator::NameTranslator::transform_enum_name(sv name, bool is_bitmask) {
+vkg_gen::Generator::NameTranslator::TransformedEnumName vkg_gen::Generator::NameTranslator::transform_enum_name(sv name, bool is_bitmask) {
     assert(!name.empty());
     assert(name.starts_with("Vk"));
 
@@ -2260,11 +2261,11 @@ std::string vkg_gen::Generator::NameTranslator::transform_enum_name(sv name, boo
         transformed.replace(idx, sizeof("_A_V1_") - 1, "_AV1_");
     }
 
-    return transformed;
+    return { std::move(transformed), ext };
 }
 
-NameTranslator vkg_gen::Generator::NameTranslator::from_enum_value(sv value, sv enum_class_transformed, bool is_bitfield) {
-    assert(!enum_class_transformed.empty());
+NameTranslator vkg_gen::Generator::NameTranslator::from_enum_value(sv value, const TransformedEnumName& enum_, bool is_bitfield) {
+    assert(!enum_.name.empty());
     assert(!value.empty());
 
     // These values do not obey the api rules
@@ -2310,11 +2311,22 @@ NameTranslator vkg_gen::Generator::NameTranslator::from_enum_value(sv value, sv 
     if (it != exception_values.end())
         return NameTranslator(std::string(it->second));
 
-    assert(value.starts_with(enum_class_transformed) || enum_class_transformed == "VK_RESULT"); // VK_RESULT values do not contain "VK_RESULT_" but only "VK_"
-    Extension ext = enum_class_transformed == "VK_VENDOR_ID" ? Extension::None : get_and_remove_extension_constant(value);
+    assert(value.starts_with(enum_.name) || enum_.name == "VK_RESULT"); // VK_RESULT values do not contain "VK_RESULT_" but only "VK_"
+    Extension ext = enum_.name == "VK_VENDOR_ID" ? Extension::None : get_and_remove_extension_constant(value);
+    if (enum_.ext != Extension::None && ext == enum_.ext)
+        ext = Extension::None; // Discard the extension from enum_value if it is already in enum_name
+
+    // VkDebugReportObjectTypeEXT values can end with <EXT_SUFFIX>_EXT, e.g. SURFACE_KHR_EXT
+    if (enum_.name == "VK_DEBUG_REPORT_OBJECT_TYPE") {
+        Extension inner_ext = get_and_remove_extension_constant(value);
+        assert(inner_ext == Extension::None || ext == Extension::None);
+        if (inner_ext != Extension::None)
+            ext = inner_ext;
+    };
+
     assert(is_bitfield || !value.ends_with("_BIT"));
 
-    size_t prefix = enum_class_transformed == "VK_RESULT" ? 2 : enum_class_transformed.size(); // leaving space for "e"
+    size_t prefix = enum_.name == "VK_RESULT" ? 2 : enum_.name.size(); // leaving space for "e"
     std::string new_name(value.substr(prefix));
     new_name[0] = 'e';
 
@@ -2324,8 +2336,8 @@ NameTranslator vkg_gen::Generator::NameTranslator::from_enum_value(sv value, sv 
         if (new_name == "eALL")
             return NameTranslator(std::string("eAll"));
 
-        bool add_2_for_shadowed_value = missing_bit_with_shadowed_values.contains(value) || enum_class_transformed == "VK_IMAGE_COMPRESSION"; // All values in "VkImageCompressionFlagBitsEXT" are missing "_BIT"
-        bool skip_bit = add_2_for_shadowed_value || missing_bit_value.contains(value);
+        bool add_2_for_shadowed_value = missing_bit_with_shadowed_values.contains(value);
+        bool skip_bit = add_2_for_shadowed_value || missing_bit_value.contains(value) || enum_.name == "VK_IMAGE_COMPRESSION"; // All values in "VkImageCompressionFlagBitsEXT" are missing "_BIT"
 
         if (!skip_bit) {
             assert(new_name.ends_with("_BIT"));
@@ -2353,30 +2365,50 @@ NameTranslator vkg_gen::Generator::NameTranslator::from_constexpr_value(sv value
     assert(!value_name.empty());
     assert(value_name.starts_with("VK_"));
 
+    Extension ext = get_and_remove_extension_constant(value_name);
     std::string new_name(value_name.substr(3));
     transform_from_upper_constant(new_name, 0, true);
-
+    if (ext != Extension::None)
+        new_name.append(to_string(ext));
 
     return NameTranslator(std::move(new_name));
-
 }
 
 void vkg_gen::Generator::NameTranslator::transform_from_upper_constant(std::string& name, size_t start_pos, bool first_is_upper) {
     size_t j = start_pos;
     bool next_is_upper = first_is_upper;
+    bool prev_was_digit = false;
     for (size_t i = j; i < name.size(); ++i) {
         if (name[i] == '_') {
             next_is_upper = true;
+            prev_was_digit = false;
+            // Keep "AV1" and "VP9" as-is (would otherwise become "Av1" and "Vp9")
+            if ((i + 4 < name.size() && (std::memcmp(&name[i + 1], "AV1_", 4) == 0 || std::memcmp(&name[i + 1], "VP9_", 4) == 0))
+                || (i + 4 == name.size() && (std::memcmp(&name[i + 1], "AV1", 3) == 0 || std::memcmp(&name[i + 1], "VP9", 3) == 0))) {
+                name[j++] = name[i + 1];
+                name[j++] = name[i + 2];
+                name[j++] = name[i + 3];
+                i += 4;
+            }
             continue;
         }
 
-        if (next_is_upper) {
+        if (std::isdigit(name[i])) {
+            name[j++] = name[i];
+            prev_was_digit = true;
+            continue; // digits dont affect next_is_upper
+        }
+
+        if (prev_was_digit && i + 1 < name.size() && std::isdigit(name[i + 1])) {
+            name[j] = name[i] != 'X' ? name[i] : 'x'; // preserve original case between digits, except for X, which is inconsistent so we make it always lowercase
+        } else if (next_is_upper) {
             name[j] = std::toupper(name[i]);
-            next_is_upper = false;
         } else {
             name[j] = std::tolower(name[i]);
         }
 
+        next_is_upper = false;
+        prev_was_digit = false;
         ++j;
     }
     name.resize(j);
@@ -2473,7 +2505,6 @@ Extension vkg_gen::Generator::NameTranslator::get_and_remove_extension_name(sv& 
     if (name.ends_with("MTK")) { name.remove_suffix(sizeof("MTK") - 1); return Extension::Mtk; }
     return Extension::None;
 }
-
 
 TypeParam vkg_gen::Generator::TypeParam::from_xml(const xml::Element& elem, vkg_gen::Arena& arena) {
     State state = State::AtStart;

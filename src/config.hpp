@@ -710,13 +710,23 @@ enum class STLClassesInfo : uint8_t {
     DetectIfImplNeeded // Dont include <vector> but use it if its already included, also generate own implementation for fall back
 };
 
+enum class ExceptionBehavior : uint8_t {
+    ThrowOnly,
+    NoThrowOnly,
+    BothWithDefaultThrow,
+    BothWithDefaultNoThrow,
+    BothWithoutDefault
+};
+
 struct Config {
-    std::vector<bool> enabled_extensions = std::vector<bool>((size_t)ExtensionIDs::_COUNT, false);
+    std::vector<bool> enabled_extensions = std::vector<bool>((size_t)ExtensionIDs::_COUNT, false); // use bitset
 
     bool generate_comments = true;
     bool generate_enums_classes = true; // false means generate C enums
     bool generate_handle_class = true;  // false means generate C vulkan macros
     bool generate_enum_numbers = true;  // false tries to remove all unnecessary enum numbers
+    bool generate_c_type_keywords = true; // C requires (struct|union|enum) before type name, C++ doesn't
+    bool apply_av1_and_vp9_naming_exceptions = true; // AV1 and VP9 would be translated to "Av1" and "Vp9" in C++
 
     Compact compact = Compact::Normal;
     LogLevel log_level = LogLevel::Error;

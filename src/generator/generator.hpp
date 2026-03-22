@@ -199,7 +199,7 @@ namespace vkg_gen::Generator {
         };
 
         static TypeParam from_xml(const xml::Element& elem, vkg_gen::Arena& arena);
-        // TODO: replace thos with operator<<
+        // TODO: replace this with operator<<
         std::string stringify();
         bool is_const() const;
 
@@ -511,12 +511,17 @@ namespace vkg_gen::Generator {
 
 
     struct NameTranslator {
+        struct TransformedEnumName {
+            const std::string name;
+            const Extension ext = Extension::None;
+        };
+
         std::string new_name;
 
         NameTranslator(std::string&& new_name) : new_name(std::move(new_name)) {}
 
-        static std::string transform_enum_name(sv name, bool is_bitmask);
-        static NameTranslator from_enum_value(sv value, sv enum_class_transformed, bool is_bitmask);
+        static TransformedEnumName transform_enum_name(sv name, bool is_bitmask);
+        static NameTranslator from_enum_value(sv value, const TransformedEnumName& enum_class_transformed, bool is_bitmask);
         static NameTranslator from_type_name(sv name); // enums, structs, unions
         static NameTranslator from_constexpr_value(sv value_name);
 
