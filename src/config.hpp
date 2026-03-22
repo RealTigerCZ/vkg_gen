@@ -718,6 +718,12 @@ enum class ExceptionBehavior : uint8_t {
     BothWithoutDefault
 };
 
+enum class BetaExtensions : uint8_t {
+    DontGenerate,
+    GenerateWithProtectMacro,
+    Generate,
+};
+
 struct Config {
     std::vector<bool> enabled_extensions = std::vector<bool>((size_t)ExtensionIDs::_COUNT, false); // use bitset
 
@@ -731,6 +737,7 @@ struct Config {
     Compact compact = Compact::Normal;
     LogLevel log_level = LogLevel::Error;
     DeprecationBehavior deprecation_behavior = DeprecationBehavior::GenerateWithDeprecationWarning;
+    BetaExtensions beta_extensions = BetaExtensions::GenerateWithProtectMacro;
 
     // C++ features: namespacing?
     // C++ features: modules?

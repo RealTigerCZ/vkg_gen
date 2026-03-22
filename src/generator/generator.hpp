@@ -34,14 +34,14 @@ namespace vkg_gen::Generator {
         sv protect = {}; // C99 preprocessor token, starting with VK_USE_PLATFORM_
         sv comment = {};
 
-        static Platform from_xml(const xml::Element& elem) { UNUSED(elem); NOT_IMPLEMENTED(); };
+        static Platform from_xml(const xml::Element& elem);
     };
 
     struct Platforms {
         sv comment = {};
         std::vector<Platform> platforms = {};
 
-        static Platforms from_xml(const xml::Element& elem) { UNUSED(elem); NOT_IMPLEMENTED(); };
+        static Platforms from_xml(const xml::Element& elem);
     };
 
     struct Tag {
@@ -130,6 +130,7 @@ namespace vkg_gen::Generator {
         sv name;
         sv comment;
         sv deprecated;
+        sv protect; // platform protection macro (e.g., VK_USE_PLATFORM_WIN32_KHR)
         Type type = Type::None;
         Bitwidth bitwidth = Bitwidth::None;
         // TODO: what about <unused>?
@@ -367,6 +368,7 @@ namespace vkg_gen::Generator {
         sv requires_; // requires attribute, pointing to another type
         sv comment; // comment attribute
         sv deprecated; // reason for deprecation if present, can also have values "true" or "false"
+        sv protect; // platform protection macro, set internally (not from XML)
         Category category = Category::None;
         State state = State::NotUsed;
         union {
@@ -445,6 +447,7 @@ namespace vkg_gen::Generator {
         xml::Element* implicit_extern_sync_params = nullptr;
 
         sv comment = {};
+        sv protect; // platform protection macro, set internally (not from XML)
 
         sv name;
         sv type; // TODO: link with types? dependencies?
@@ -569,6 +572,7 @@ namespace vkg_gen::Generator {
         NameIndex<Command> required_commands;
         NameIndex<CommandAlias> required_commands_aliases;
 
+        std::unordered_map<sv, sv> platform_to_protect; // platform name → protect macro
         std::unordered_set<sv> included_platforms;
         std::unordered_set<sv> included_features;
         std::vector<std::reference_wrapper<xml::Element>> included_extensions;
@@ -578,6 +582,7 @@ namespace vkg_gen::Generator {
         // TASK: 100126_01
         std::vector<DefineExt> required_defines;
 
+        void parse_platforms(vkg_gen::xml::Dom& dom);
         void parse_types(vkg_gen::xml::Dom& dom);
         void parse_enums(vkg_gen::xml::Dom& dom);
         void parse_commands(vkg_gen::xml::Dom& dom);
@@ -607,7 +612,7 @@ namespace vkg_gen::Generator {
 
         void add_required_version_feature(sv name, vkg_gen::xml::Dom& dom);
 
-        void extend_enum(sv extends, vkg_gen::xml::Element& elem, vkg_gen::Arena& arena, sv block_ext_number = {});
+        void extend_enum(sv extends, vkg_gen::xml::Element& elem, vkg_gen::Arena& arena, sv block_ext_number = {}, sv protect = {});
 
         void add_extension_prototype(sv number, xml::Dom& dom);
 

@@ -257,6 +257,24 @@ std::ostream& helper_test(std::ostream& os, const vkg_gen::xml::Node* node) {
     return os << node->asElement();
 }
 
+// Helper for emitting grouped #if defined() / #endif guards during output
+struct ProtectGuard {
+    sv current;
+    std::ofstream& file;
+
+    void transition(sv protect) {
+        if (protect == current) return;
+        if (!current.empty()) file << "#endif // " << current << "\n";
+        if (!protect.empty()) file << "#if defined(" << protect << ")\n";
+        current = protect;
+    }
+
+    void close() {
+        if (!current.empty()) file << "#endif // " << current << "\n";
+        current = {};
+    }
+};
+
 char* to_string(Extension ext) {
     switch (ext) {
     case Extension::Img: return "IMG";
@@ -400,6 +418,39 @@ void Type::parse_union(const vkg_gen::xml::Element& elem, vkg_gen::Arena& arena)
         }
     }
 };
+
+Platform Platform::from_xml(const xml::Element& elem) {
+    Platform p;
+    for (auto& attr : elem.attrs) {
+        if (attr.name == "name")
+            p.name = attr.value;
+        else if (attr.name == "protect")
+            p.protect = attr.value;
+        else if (attr.name == "comment")
+            p.comment = attr.value;
+        else
+            throw my_error{ "Unknown attribute on <platform>: " + std::string(attr.name) };
+    }
+    if (p.name.empty())
+        throw my_error{ "Platform must have a name" };
+    if (p.protect.empty())
+        throw my_error{ "Platform must have a protect" };
+    return p;
+}
+
+Platforms Platforms::from_xml(const xml::Element& elem) {
+    Platforms p;
+    p.comment = elem.get_attr_value("comment");
+    for (Node* child : elem.children) {
+        if (child->isText()) continue;
+        auto& ch = child->asElement();
+        if (ch.tag == "platform")
+            p.platforms.emplace_back(Platform::from_xml(ch));
+        else
+            throw my_error{ "Unknown child of <platforms>: " + std::string(ch.tag) };
+    }
+    return p;
+}
 
 Type::Type(const vkg_gen::xml::Element& elem, vkg_gen::Arena& arena) : elem(elem) {
     Category specific_attr = Category::None;
@@ -566,7 +617,11 @@ void _gen_arbitrary_C_code_in_type(const vkg_gen::xml::Element& elem, std::ofstr
             if (name.starts_with("PFN_vk"))
                 file << name;
             else
-                file << NameTranslator::from_type_name(name); // TODO: check_name
+                // TODO: find if defined or at least declared; use NameTranslator
+                if (name.starts_with("Vk"))
+                    file << name.substr(2);
+                else
+                    file << name;
         } else if (ch.tag == "type") {
             // TODO: find if defined or at least declared; use NameTranslator
             sv type_name = ch.children[0]->asText();
@@ -909,11 +964,24 @@ TypeEnum::EnumItem TypeEnum::EnumItem::from_xml(const vkg_gen::xml::Element& ele
 
 
 
+void vkg_gen::Generator::Generator::parse_platforms(vkg_gen::xml::Dom& dom) {
+    auto& registry = dom.root->asElement();
+    assert(registry.tag == "registry");
+
+    // TODO: there should be only one
+    auto platforms_range = registry.children | std::views::filter(has_tag("platforms"));
+    for (Node* node : platforms_range) {
+        platforms = Platforms::from_xml(node->asElement());
+        for (auto& p : platforms.platforms) {
+            platform_to_protect[p.name] = p.protect;
+        }
+    }
+}
+
 void Generator::parse_types(vkg_gen::xml::Dom& dom) {
     auto& registry = dom.root->asElement();
     assert(registry.tag == "registry");
 
-    // TODO: platforms
     // TODO: tags
 
     // TODO: there should be only one
@@ -1020,14 +1088,39 @@ void Generator::generate_enum_alias(Type& e, std::ofstream& file) {
 }
 
 // TASK: 030226_01, Also AI function
-void sort_enum_items(std::vector<TypeEnum::EnumItem>& items) {
-    // STEP 1: Move all concrete definitions (non-aliases) to the front.
-    // std::stable_partition maintains the relative order of the concrete values
-    // (preserving your bit-order logic like 1<<25, 1<<26 etc.)
+void sort_enum_items(std::vector<TypeEnum::EnumItem>& items, TypeEnum::Type type) {
+    // STEP 1: Move all concrete definitions (non-aliases) to the front, sorted by value.
     auto alias_start = std::stable_partition(items.begin(), items.end(),
         [](const TypeEnum::EnumItem& item) {
             return !item.is_alias;
         });
+
+    // STEP 1.5: Sort concrete items by numeric value
+    if (type == TypeEnum::Type::Normal) {
+        std::stable_sort(items.begin(), alias_start,
+            [](const TypeEnum::EnumItem& a, const TypeEnum::EnumItem& b) {
+                if (a.is_standalone_comment || b.is_standalone_comment)
+                    return false;
+                long va = std::stol(std::string(a.normal.value), nullptr, 0);
+                long vb = std::stol(std::string(b.normal.value), nullptr, 0);
+                return va < vb;
+            });
+    } else if (type == TypeEnum::Type::Bitmask) {
+        std::stable_sort(items.begin(), alias_start,
+            [](const TypeEnum::EnumItem& a, const TypeEnum::EnumItem& b) {
+                if (a.is_standalone_comment || b.is_standalone_comment)
+                    return false;
+                // bitfield items (bitpos) come before value items, then sort by bitpos/value
+                if (a.bitmask.is_bitfield != b.bitmask.is_bitfield)
+                    return a.bitmask.is_bitfield;
+                if (a.bitmask.is_bitfield)
+                    return a.bitmask.bitpos < b.bitmask.bitpos;
+                // both are value items
+                long va = std::stol(std::string(a.bitmask.value), nullptr, 0);
+                long vb = std::stol(std::string(b.bitmask.value), nullptr, 0);
+                return va < vb;
+            });
+    }
 
     // STEP 2: Resolve alias chains (e.g., A = B, B = C).
     // We need 'C' then 'B' then 'A'.
@@ -1065,6 +1158,9 @@ void sort_enum_items(std::vector<TypeEnum::EnumItem>& items) {
 void Generator::generate_enum(TypeEnum& e, std::ofstream& file) {
     file << LineComment{ e.comment };
 
+    // TODO: if (config.verbose)
+    // std::cout << "Generating enum: " << e.name << std::endl;
+
     if (e.type == TypeEnum::Type::Constants) {
         for (auto& item : e.items) {
             file << "constexpr " << get_translated_type_name(item.constant.type) << " "
@@ -1079,7 +1175,11 @@ void Generator::generate_enum(TypeEnum& e, std::ofstream& file) {
         " " << bitwidth_to_str_type(e.bitwidth) << " {\n";
 
     // TASK: 030226_01 Enum member dependencies
-    sort_enum_items(e.items);
+    sort_enum_items(e.items, e.type);
+
+    // Move protected items to end, grouped by protect value
+    std::stable_partition(e.items.begin(), e.items.end(),
+        [](const TypeEnum::EnumItem& item) { return item.protect.empty(); });
 
     auto enum_name_transformed = NameTranslator::transform_enum_name(e.name, e.type == TypeEnum::Type::Bitmask);
 
@@ -1100,10 +1200,12 @@ void Generator::generate_enum(TypeEnum& e, std::ofstream& file) {
         "VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_OPACITY_MICROMAP_DATA_UPDATE",
         "VK_GEOMETRY_INSTANCE_FORCE_OPACITY_MICROMAP_2_STATE",
         "VK_GEOMETRY_INSTANCE_DISABLE_OPACITY_MICROMAPS",
+        "VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_DISPLACEMENT_MICROMAP_UPDATE",
+        "VK_RESOLVE_MODE_EXTERNAL_FORMAT_DOWNSAMPLE",
     };
 
 
-
+    ProtectGuard guard{ .file = file };
     for (TypeEnum::EnumItem& item : e.items) {
         if (item.is_standalone_comment) {
             file << StandaloneComment{ item.comment, config.generate_comments };
@@ -1116,6 +1218,8 @@ void Generator::generate_enum(TypeEnum& e, std::ofstream& file) {
 
         if (!item.api.empty() && !std::ranges::contains(std::views::split(item.api, ','), "vulkan", [](auto&& rng) { return sv(rng); }))
             continue;
+
+        guard.transition(item.protect);
 
         bool is_bitfield_value = false;
         if (item.is_alias)
@@ -1150,13 +1254,15 @@ void Generator::generate_enum(TypeEnum& e, std::ofstream& file) {
 
         file << "," << LineComment{ item.comment, false, config.generate_comments } << '\n';
     }
+    guard.close();
     file << "};\n\n";
 }
 
 void Generator::generate_struct(Type& s, std::ofstream& file) {
     assert(s.category == Type::Category::Struct);
 
-    std::cout << "Generating struct: " << s.name << std::endl;
+    // TODO: if (config.verbose)
+    // std::cout << "Generating struct: " << s.name << std::endl;
 
     file << LineComment{ s.comment, true, config.generate_comments };
 
@@ -1187,7 +1293,8 @@ void Generator::generate_struct(Type& s, std::ofstream& file) {
 void Generator::generate_union(Type& s, std::ofstream& file) {
     assert(s.category == Type::Category::Union);
 
-    std::cout << "Generating union: " << s.name << std::endl;
+    // TODO: if (config.verbose)
+    // std::cout << "Generating union: " << s.name << std::endl;
 
     file << LineComment{ s.comment, true, config.generate_comments };
 
@@ -1225,7 +1332,8 @@ void Generator::generate_bitmask(Type& bitmask, std::ofstream& file) {
             throw my_error{ "bitmask type not found" };
 
         file << NameTranslator::from_type_name((*it)->asElement().children[0]->asText()) << ";\n"; // TODO: check children
-        std::cout << "bitmask: " << bitmask.name << " = " << (*it)->asElement().children[0]->asText() << std::endl;
+        // TODO: if (config.verbose)
+        // std::cout << "Generating bitmask: " << bitmask.name << std::endl;
     }
 
 };
@@ -1591,7 +1699,8 @@ void Generator::add_required_version_feature(sv name, vkg_gen::xml::Dom& dom) {
 
                 } else if (elem.tag == "command") {
                     add_required_command(elem.get_attr_value("name"));
-
+                } else if (elem.tag == "feature") {
+                    // Do nothing. Feature tag are only purely for documentation
                 } else {
                     std::cout << "- FIXME: currently ignoring: ";
                     helper_test(std::cout, type) << std::endl;
@@ -1657,10 +1766,14 @@ void Generator::add_required_version_feature(sv name, vkg_gen::xml::Dom& dom) {
     }
 }
 
-void Generator::extend_enum(sv extends, Element& elem, vkg_gen::Arena& arena, sv block_ext_number) {
+void Generator::extend_enum(sv extends, Element& elem, vkg_gen::Arena& arena, sv block_ext_number, sv protect) {
 
     TypeEnum& enum_ = enums.find(extends)->second;
     auto item = TypeEnum::EnumItem::from_xml(elem, arena, &enum_, false, true, block_ext_number);
+
+    // Propagate platform protection from the parent extension
+    if (!protect.empty() && item.protect.empty())
+        item.protect = protect;
 
     // TASK: 030226_01: Enum member dependencies/redundancy
     if (std::ranges::find(enum_.items, item.name, &TypeEnum::EnumItem::name) != enum_.items.end())
@@ -1697,9 +1810,16 @@ void Generator::add_extension_prototype(sv number, xml::Dom& dom) {
         if (supported == "disabled" || !std::ranges::contains(std::views::split(supported, ','), "vulkan", [](auto&& rng) { return sv(rng); }))
             continue;
 
-        // TODO: skipping all platforms
-        if (!ext.get_attr_value("platform").empty())
-            continue;
+        // TODO: refactor - resolve platform protect from a parsed Extension class instead of raw XML
+        // Resolve platform protect macro
+        sv ext_platform = ext.get_attr_value("platform");
+        sv ext_protect;
+        if (!ext_platform.empty()) {
+            auto it = platform_to_protect.find(ext_platform);
+            if (it == platform_to_protect.end())
+                throw my_error{ "Unknown platform: " + std::string(ext_platform) };
+            ext_protect = it->second;
+        }
 
         sv ext_number = ext.get_attr_value("number");
 
@@ -1713,9 +1833,7 @@ void Generator::add_extension_prototype(sv number, xml::Dom& dom) {
 
             auto& elem = node->asElement();
             if (elem.tag == "require") {
-                // FIXME:
-                if (!elem.get_attr_value("platform").empty())
-                    continue;
+                sv protect = ext_protect;
 
                 for (Node* type : elem.children) {
                     if (type->isText()) {
@@ -1726,11 +1844,22 @@ void Generator::add_extension_prototype(sv number, xml::Dom& dom) {
                     Element& elem = type->asElement();
 
                     if (elem.tag == "type") {
-                        add_required_type(elem.get_attr_value("name"));
+                        sv type_name = elem.get_attr_value("name");
+                        add_required_type(type_name);
+                        if (!protect.empty()) {
+                            // Set protect on the type itself
+                            auto type_it = types.find(type_name);
+                            if (type_it != types.end() && type_it->second.protect.empty())
+                                type_it->second.protect = protect;
+                            // If this type is an enum, propagate protect to it too
+                            auto enum_it = enums.find(type_name);
+                            if (enum_it != enums.end() && enum_it->second.protect.empty())
+                                enum_it->second.protect = protect;
+                        }
                     } else if (elem.tag == "enum") {
                         auto it = std::ranges::find(elem.attrs, "extends", &Attribute::name);
                         if (it != elem.attrs.end()) {
-                            extend_enum(it->value, elem, dom.arena, ext_number);
+                            extend_enum(it->value, elem, dom.arena, ext_number, protect);
                             add_required_enum(it->value);
                             continue;
                         }
@@ -1749,13 +1878,26 @@ void Generator::add_extension_prototype(sv number, xml::Dom& dom) {
                             continue;
                         }
 
+                        if (!protect.empty()) {
+                            auto enum_it = enums.find(name);
+                            if (enum_it != enums.end() && enum_it->second.protect.empty())
+                                enum_it->second.protect = protect;
+                        }
                         add_required_enum(name);
 
-
                     } else if (elem.tag == "command") {
-                        add_required_command(elem.get_attr_value("name"));
+                        sv cmd_name = elem.get_attr_value("name");
+                        add_required_command(cmd_name);
+                        if (!protect.empty()) {
+                            auto cmd_it = commands.find(cmd_name);
+                            if (cmd_it != commands.end() && cmd_it->second.protect.empty())
+                                cmd_it->second.protect = protect;
+                        }
 
+                    } else if (elem.tag == "feature") {
+                        // Do nothing. Feature tag are only purely for documentation
                     } else {
+
                         std::cout << "- FIXME: currently ignoring: ";
                         helper_test(std::cout, type) << std::endl;
                         continue;
@@ -1787,7 +1929,7 @@ void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& so
 
     //generate_API_constants(dom, file);
     //generate_types(dom, file);
-
+    parse_platforms(dom);
     parse_types(dom);
     parse_enums(dom);
     parse_commands(dom);
@@ -1795,22 +1937,26 @@ void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& so
     add_required_version_feature("VK_VERSION_1_4", dom);
 
     add_extension_prototype("1", dom);
-
+    ProtectGuard header_guard{ .file = header };
     for (TypeEnum* enum_ : required_enums.get()) {
-        if (enum_ != nullptr)
-            generate_enum(*enum_, header);
+        if (enum_ == nullptr) continue;
+        header_guard.transition(enum_->protect);
+        generate_enum(*enum_, header);
     }
+    header_guard.close();
 
     // TASK: 100126_01
     for (auto& define : required_defines) {
         header << "#define " << define.name << " " << define.value << "\n";
     }
 
+
     for (Type* p : required_types.get()) {
         if (p == nullptr)
             continue;
 
         auto& type = *p;
+        header_guard.transition(type.protect);
 
         switch (type.category) {
         case Type::Category::Struct:
@@ -1828,7 +1974,7 @@ void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& so
             generate_bitmask(type, header);
             break;
 
-            // TODO: temporary solution
+            // TODO: temporary solution, TASK: 220326_01 basetype dependencies and imports
         case Type::Category::Basetype:
             //case Type::Category::Define:
             _gen_arbitrary_C_code_in_type(type.elem, header);
@@ -1843,6 +1989,7 @@ void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& so
             break;
         }
     }
+    header_guard.close();
 
     //header << "extern \"C\" {\n";
     //for (Command* cmd : required_commands.get()) {
@@ -1852,21 +1999,24 @@ void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& so
     //}
     //header << "}\n\n";
 
+
+
     for (Command* cmd : required_commands.get()) {
-        if (cmd == nullptr)
-            continue;
+        if (cmd == nullptr) continue;
+        header_guard.transition(cmd->protect);
         generate_command_PFN(*cmd, header);
     }
-
+    header_guard.close();
     header << "\n";
     header << "struct FuncTable {\n";
 
-    for (Command* cmd : required_commands.get()) {
-        if (cmd == nullptr)
-            continue;
 
+    for (Command* cmd : required_commands.get()) {
+        if (cmd == nullptr) continue;
+        header_guard.transition(cmd->protect);
         header << "    PFN_" << cmd->name << " " << cmd->name << " = nullptr;\n";
     }
+    header_guard.close();
     header << "};\nextern FuncTable funcs;\n";
 
 
@@ -1879,11 +2029,12 @@ void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& so
     }
 
     for (Command* cmd : required_commands.get()) {
-        if (cmd == nullptr)
-            continue;
-
+        if (cmd == nullptr) continue;
+        header_guard.transition(cmd->protect);
         generate_command_wrapper(*cmd, header);
     }
+    header_guard.close();
+
 
     // FIXME: causes redefinition
     //for (CommandAlias* ca : required_commands_aliases.get()) {
@@ -1920,26 +2071,24 @@ void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& so
         "vkCreateInstance",
         "vkEnumerateInstanceExtensionProperties",
         "vkEnumerateInstanceLayerProperties",
-
-        "vkGetPhysicalDeviceExternalImageFormatPropertiesNV", // TODO: this crashes the program
     };
 
+    ProtectGuard source_guard{ .file = source };
     source << "void init_vk_functions() {\n";
     for (Command* cmd : required_commands.get()) {
-
-        if (cmd == nullptr || ignore.contains(cmd->name))
-            continue;
-
+        if (cmd == nullptr || ignore.contains(cmd->name)) continue;
+        source_guard.transition(cmd->protect);
         source << "    funcs." << cmd->name << " = (PFN_" << cmd->name << ")funcs.vkGetInstanceProcAddr(instance, \"" << cmd->name << "\");\n";
     }
+    source_guard.close();
 
     for (Command* cmd : required_commands.get()) {
-
-        if (cmd == nullptr || ignore.contains(cmd->name))
-            continue;
-
+        if (cmd == nullptr || ignore.contains(cmd->name)) continue;
+        source_guard.transition(cmd->protect);
         source << "    assert(funcs." << cmd->name << ");\n";
     }
+    source_guard.close();
+
     source << "}\n";
 
 #else
@@ -2241,6 +2390,8 @@ NameTranslator vkg_gen::Generator::NameTranslator::from_enum_value(sv value, con
         "VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_OPACITY_MICROMAP_DATA_UPDATE",
         "VK_GEOMETRY_INSTANCE_FORCE_OPACITY_MICROMAP_2_STATE",
         "VK_GEOMETRY_INSTANCE_DISABLE_OPACITY_MICROMAPS",
+        "VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_DISPLACEMENT_MICROMAP_UPDATE",
+        "VK_RESOLVE_MODE_EXTERNAL_FORMAT_DOWNSAMPLE",
     };
 
     // These values are just missing "_BIT" (not obeying the api rules) but should be generated
@@ -2282,7 +2433,9 @@ NameTranslator vkg_gen::Generator::NameTranslator::from_enum_value(sv value, con
             return NameTranslator(std::string("eAll"));
 
         bool add_2_for_shadowed_value = missing_bit_with_shadowed_values.contains(value);
-        bool skip_bit = add_2_for_shadowed_value || missing_bit_value.contains(value) || enum_.name == "VK_IMAGE_COMPRESSION"; // All values in "VkImageCompressionFlagBitsEXT" are missing "_BIT"
+        // All values in these enums are missing "_BIT"
+        bool whole_enum_missing_bit = enum_.name == "VK_IMAGE_COMPRESSION" || enum_.name == "VK_IMAGE_CONSTRAINTS_INFO";
+        bool skip_bit = add_2_for_shadowed_value || missing_bit_value.contains(value) || whole_enum_missing_bit;
 
         if (!skip_bit) {
             assert(new_name.ends_with("_BIT"));

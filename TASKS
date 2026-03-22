@@ -60,3 +60,6 @@
 - add_required_type does not track enum dependencies from TypeParam::array_extensions
 - struct/union members, command params, funcpointer params do not track dependencies of the <enum> tags
 - but will likely always be the special "API Constants" enum that is not handled
+
+// TASK: 220326_01 basetype dependencies and imports
+ - handle depemdencies of basetypes and imports, so we guarantee that the basetypes are present even from platform specific headers
