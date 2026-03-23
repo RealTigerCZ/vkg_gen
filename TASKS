@@ -62,4 +62,10 @@
 - but will likely always be the special "API Constants" enum that is not handled
 
 // TASK: 220326_01 basetype dependencies and imports
- - handle depemdencies of basetypes and imports, so we guarantee that the basetypes are present even from platform specific headers
+
+- handle depemdencies of basetypes and imports, so we guarantee that the basetypes are present even from platform specific headers
+
+// TASK: 230326_02 empty bitmask
+
+- some bitmasks are empty and dont have alias or bitvalues but are still used, VkPipelineCoverageReductionStateCreateFlagsNV
+- they can also have different api, ex. VkPipelineDepthStencilStateCreateFlags

@@ -730,6 +730,7 @@ struct Config {
     bool generate_comments = true;
     bool generate_enums_classes = true; // false means generate C enums
     bool generate_handle_class = true;  // false means generate C vulkan macros
+    bool generate_flags_class = true;   // false means generate C VkFlags (uint32) and VkFlags64 (uint64)
     bool generate_enum_numbers = true;  // false tries to remove all unnecessary enum numbers
     bool generate_c_type_keywords = true; // C requires (struct|union|enum) before type name, C++ doesn't
     bool apply_av1_and_vp9_naming_exceptions = true; // AV1 and VP9 would be translated to "Av1" and "Vp9" in C++

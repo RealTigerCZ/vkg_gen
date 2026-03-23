@@ -3,7 +3,7 @@
  * @author Jaroslav Hucel (xhucel00@vutbr.cz)
  * @brief
  * @date Created: 02. 11. 2025
- * @date Modified: 21. 03. 2026
+ * @date Modified: 23. 03. 2026
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -365,7 +365,10 @@ namespace vkg_gen::Generator {
         sv name; // name attribute or present it <name>...</name>, always must be present
         sv api; // api attribute, matches a <feature> api attribute, if present
         sv alias; // alias attribute
-        sv requires_; // requires attribute, pointing to another type
+        union {
+            sv requires_ = {}; // requires attribute, pointing to another type
+            sv bitvalues; // Bitmask only: FlagBits enum name. Populated from XML `requires` (old-style) or `bitvalues` (new-style) attr.
+        };
         sv comment; // comment attribute
         sv deprecated; // reason for deprecation if present, can also have values "true" or "false"
         sv protect; // platform protection macro, set internally (not from XML)
@@ -376,7 +379,6 @@ namespace vkg_gen::Generator {
             TypeStruct* struct_;
             TypeUnion* union_;
             TypeFuncpointer* funcptr;
-            sv bitvalues; // only for category Bitmask, name of an enum definition that defines the valid values for parameters of that type
         };
 
         const xml::Element& elem;
@@ -590,8 +592,10 @@ namespace vkg_gen::Generator {
 
         void generate_enum(TypeEnum& enum_, std::ofstream& file);
         void generate_enum_alias(Type& enum_, std::ofstream& file);
+        void generate_member(Member& member, std::ofstream& file, sv struct_union, sv parent_name);
+        void generate_struct_union(Type& type, std::ofstream& file, sv struct_union);
         void generate_struct(Type& struct_, std::ofstream& file);
-        void generate_union(Type& struct_, std::ofstream& file);
+        void generate_union(Type& union_, std::ofstream& file);
         void generate_bitmask(Type& bitmask, std::ofstream& file);
         void generate_handle(Type& handle, std::ofstream& file, TypeEnum& obj_enum);
 

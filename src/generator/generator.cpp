@@ -3,7 +3,7 @@
  * @author Jaroslav Hucel (xhucel00@vutbr.cz)
  * @brief
  * @date Created: 12. 11. 2025
- * @date Modified: 22. 03. 2026
+ * @date Modified: 23. 03. 2026
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -20,113 +20,11 @@
 
 #include "../xml/xml.hpp"
 #include "../arena.hpp"
+#include "boilerplate.hpp"
 #include "generator.hpp"
 
-namespace boilerplate {
-    // author: PCJohn (peciva at fit.vut.cz)
-    static const char* HANDLE_DEFINITION = ""
-        "// FIXME: \n"
-        "template<typename Type> class UniqueHandle;\n"
-        "    template<typename T>\n"
-        "    class Handle {\n"
-        "    protected:\n"
-        "        T _handle;\n"
-        "    public:\n"
-        "        using HandleType = T;\n"
-        "\n"
-        "        Handle() noexcept {}\n"
-        "        Handle(std::nullptr_t) noexcept : _handle(nullptr) {}\n"
-        "        Handle(T nativeHandle) noexcept : _handle(nativeHandle) {}\n"
-        "        Handle(const Handle& h) noexcept : _handle(h._handle) {}\n"
-        "        Handle(const UniqueHandle<Handle<T>>& u) noexcept : _handle(u.get().handle()) {}\n"
-        "        Handle& operator=(const Handle rhs) noexcept { _handle = rhs._handle; return *this; }\n"
-        "        Handle& operator=(const UniqueHandle<T>& rhs) noexcept { _handle = rhs._handle; return *this; }\n"
-        "        T handle() const noexcept { return _handle; }\n"
-        "        explicit operator bool() const noexcept { return _handle != nullptr; }\n"
-        "        bool operator==(const Handle rhs) const noexcept { return _handle == rhs._handle; }\n"
-        "        bool operator!=(const Handle rhs) const noexcept { return _handle != rhs._handle; }\n"
-        "    };\n";
 
-    //FIXME:
-    static const char* VIDEO_INCLUDES = ""
-        "#include \"vk_video/vulkan_video_codec_av1std_decode.h\"\n"
-        "#include \"vk_video/vulkan_video_codec_h265std_decode.h\"\n"
-        "#include \"vk_video/vulkan_video_codec_av1std_encode.h\"\n"
-        "#include \"vk_video/vulkan_video_codec_h265std_encode.h\"\n"
-        "#include \"vk_video/vulkan_video_codec_av1std.h\"\n"
-        "#include \"vk_video/vulkan_video_codec_h265std.h\"\n"
-        "#include \"vk_video/vulkan_video_codec_h264std_decode.h\"\n"
-        "#include \"vk_video/vulkan_video_codecs_common.h\"\n"
-        "#include \"vk_video/vulkan_video_codec_h264std_encode.h\"\n"
-        "#include \"vk_video/vulkan_video_codec_vp9std_decode.h\"\n"
-        "#include \"vk_video/vulkan_video_codec_h264std.h\"\n"
-        "#include \"vk_video/vulkan_video_codec_vp9std.h\"\n";
-
-    // FIXME:
-    static const char* HEADER_EXTERNS = ""
-        "extern void load_lib(const char* path);\n"
-        "extern void unload_lib();\n"
-        "extern void init_vk_functions();\n";
-
-    static const char* CPP_IMPL = ""
-        "#include <dlfcn.h>\n"
-        "#include <assert.h>\n"
-        "\n"
-        "void* lib = nullptr;\n"
-        "FuncTable funcs;\n"
-        "static ExtensionProperties * extensions = nullptr;\n"
-        "static uint32_t extensions_count = 0;\n";
-
-    static const char* LOAD_UNLOAD_LIB_IMPL = ""
-        "void load_lib(const char* path) {\n"
-        "    lib = dlopen(path, RTLD_NOW);\n"
-        "    assert(lib);\n"
-        "    funcs.vkGetInstanceProcAddr = PFN_vkGetInstanceProcAddr(dlsym(lib, \"vkGetInstanceProcAddr\"));\n"
-        "    assert(funcs.vkGetInstanceProcAddr);\n"
-        "    funcs.vkCreateInstance = PFN_vkCreateInstance(funcs.vkGetInstanceProcAddr(nullptr, \"vkCreateInstance\"));\n"
-        "    assert(funcs.vkCreateInstance);\n"
-        "    funcs.vkEnumerateInstanceExtensionProperties = PFN_vkEnumerateInstanceExtensionProperties(funcs.vkGetInstanceProcAddr(nullptr, \"vkEnumerateInstanceExtensionProperties\"));\n"
-        "    assert(funcs.vkEnumerateInstanceExtensionProperties);\n"
-        "\n"
-        "    funcs.vkEnumerateInstanceExtensionProperties(nullptr, &extensions_count, nullptr);\n"
-        "    extensions = new ExtensionProperties[extensions_count];\n"
-        "    char** extensions_names = new char* [extensions_count];\n"
-        "    funcs.vkEnumerateInstanceExtensionProperties(nullptr, &extensions_count, extensions);\n"
-        "\n"
-        "    for (uint32_t i = 0; i < extensions_count; i++) {\n"
-        "        extensions_names[i] = extensions[i].extensionName;\n"
-        "    }\n"
-        "\n"
-        "    ApplicationInfo app_info = {\n"
-        "                .pApplicationName = \"test\",\n"
-        "                .applicationVersion = 0,\n"
-        "                .pEngineName = nullptr,\n"
-        "                .engineVersion = 0,\n"
-        "                .apiVersion = 1 << 22 };\n"
-        "\n"
-        "    InstanceCreateInfo info = {\n"
-        "                .flags = {},\n"
-        "                .pApplicationInfo = &app_info,\n"
-        "                .enabledLayerCount = 0,\n"
-        "                .ppEnabledLayerNames = nullptr,\n"
-        "                .enabledExtensionCount = extensions_count,\n"
-        "                .ppEnabledExtensionNames = extensions_names };\n"
-        "\n"
-        "    funcs.vkCreateInstance(&info, nullptr, &instance);\n"
-        "    assert(instance);\n"
-        "}\n"
-        "\n"
-        "void unload_lib() {\n"
-        "    if (!lib) return;\n"
-        "    if (instance)\n"
-        "       funcs.vkDestroyInstance(instance, nullptr);\n"
-        "    dlclose(lib);\n"
-        "    lib = nullptr;\n"
-        "    instance = nullptr;\n"
-        "}\n";
-}
-
-//FIXME:
+ //FIXME:
 using namespace vkg_gen::xml;
 
 using namespace vkg_gen::Generator;
@@ -275,7 +173,7 @@ struct ProtectGuard {
     }
 };
 
-char* to_string(Extension ext) {
+std::string_view to_string(Extension ext) {
     switch (ext) {
     case Extension::Img: return "IMG";
     case Extension::Amd: return "AMD";
@@ -492,10 +390,15 @@ Type::Type(const vkg_gen::xml::Element& elem, vkg_gen::Arena& arena) : elem(elem
         else if (attr.name == "alias")
             alias = attr.value;
 
-        else if (attr.name == "requires")
+        else if (attr.name == "requires") {
+            if (!requires_.empty()) {      // Set by bitvalues attribute
+                assert(specific_attr == Category::Bitmask);
+                throw my_error("Cannot have both requires and bitvalues attributes on <type>");
+            }
+
             requires_ = attr.value;
 
-        else if (attr.name == "comment")
+        } else if (attr.name == "comment")
             comment = attr.value;
 
         else if (attr.name == "deprecated")
@@ -557,9 +460,10 @@ Type::Type(const vkg_gen::xml::Element& elem, vkg_gen::Arena& arena) : elem(elem
             else
                 struct_->returned_only = bool_from_string(attr.value);
         } else if (attr.name == "bitvalues") {
-            if (specific_attr != Category::None && specific_attr != Category::Bitmask) {
-                throw my_error("unexpected attribute on <type>");
-            }
+            if (specific_attr != Category::None && specific_attr != Category::Bitmask)
+                throw my_error("unexpected attribute 'bitvalues' on non-bitmask <type>");
+            if (!requires_.empty())
+                throw my_error("bitvalues and requires cannot both be present on bitmask <type>");
 
             specific_attr = Category::Bitmask;
             bitvalues = attr.value;
@@ -569,9 +473,13 @@ Type::Type(const vkg_gen::xml::Element& elem, vkg_gen::Arena& arena) : elem(elem
 
     }
 
+
     if (specific_attr == Category::Handle && handle->objtypeenum.empty() && alias.empty())
         throw my_error("objtypeenum attribute is required on <type category=\"handle\"> if alias attribute is not present");
 
+    // Reserved bitmask types have no FlagBits enum — initialize to avoid uninitialized union read.
+    if (specific_attr == Category::Bitmask && bitvalues.empty() && alias.empty())
+        bitvalues = {};
 
     // Struct/union parsing runs after the attribute loop because attributes like
     // returnedonly, structextends, allowduplicate may appear before category in the XML.
@@ -667,6 +575,10 @@ TypeEnum::TypeEnum(const vkg_gen::xml::Element& e, vkg_gen::Arena& arena) {
         }
     };
 
+    if (type == Type::Bitmask && bitwidth == Bitwidth::None)
+        bitwidth = Bitwidth::_32;
+
+
     if (name.empty())
         throw my_error{ "Enum must have a name" };
 
@@ -702,7 +614,18 @@ TypeEnum::TypeEnum(const vkg_gen::xml::Element& e, vkg_gen::Arena& arena) {
     };
 };
 
-std::string to_string(TypeEnum::Bitwidth b) {
+std::string_view to_string_type(TypeEnum::Bitwidth b) {
+    switch (b) {
+    case TypeEnum::Bitwidth::_8: return "uint8_t";
+    case TypeEnum::Bitwidth::_16: return "uint16_t";
+    case TypeEnum::Bitwidth::_32: return "uint32_t";
+    case TypeEnum::Bitwidth::_64: return "uint64_t";
+    }
+    // TODO: UNREACHABLE
+    throw my_error{ "Unknown bitwidth" };
+}
+
+std::string_view to_string(TypeEnum::Bitwidth b) {
     switch (b) {
     case TypeEnum::Bitwidth::_8: return "8";
     case TypeEnum::Bitwidth::_16: return "16";
@@ -713,7 +636,7 @@ std::string to_string(TypeEnum::Bitwidth b) {
     // TODO: UNREACHABLE
     throw my_error{ "Unknown bitwidth" };
 }
-std::string to_string(TypeEnum::Type t) {
+std::string_view to_string(TypeEnum::Type t) {
     switch (t) {
     case TypeEnum::Type::None: return "None";
     case TypeEnum::Type::Normal: return "enum";
@@ -892,7 +815,7 @@ TypeEnum::EnumItem TypeEnum::EnumItem::from_xml(const vkg_gen::xml::Element& ele
                 throw my_error{ "Enum item cannot have both 'bitpos' and 'extnumber/dir/offset'" };
 
             if (parent->type != Type::Bitmask)
-                throw my_error{ "Invalid 'bitpos' attribute for enum type: " + to_string(parent->type) };
+                throw my_error{ "Invalid 'bitpos' attribute for enum type: " + std::string(to_string(parent->type)) };
             item.bitmask.bitpos = bitpos_from_string(attr.value);
             item.bitmask.is_bitfield = true;
             // TODO: check range with bitwidth
@@ -901,7 +824,7 @@ TypeEnum::EnumItem TypeEnum::EnumItem::from_xml(const vkg_gen::xml::Element& ele
 
         } else if (attr.name == "type") {
             if (parent->type != Type::Constants)
-                throw my_error{ "Invalid 'type' attribute for enum type: " + to_string(parent->type) };
+                throw my_error{ "Invalid 'type' attribute for enum type: " + std::string(to_string(parent->type)) };
             assert(parent->bitwidth == Bitwidth::None);
             item.constant.type = attr.value; // TODO: parse
         } else if (extend_parent && (attr.name == "extends" || attr.name == "extnumber" || attr.name == "dir" || attr.name == "offset")) {
@@ -1074,9 +997,7 @@ constexpr std::string_view bitwidth_to_str_type(TypeEnum::Bitwidth w) {
     case TypeEnum::Bitwidth::_64:
         return ": uint64_t ";
     }
-}
-
-
+};
 
 void Generator::generate_enum_alias(Type& e, std::ofstream& file) {
     if (e.alias.empty())
@@ -1257,84 +1178,97 @@ void Generator::generate_enum(TypeEnum& e, std::ofstream& file) {
     guard.close();
     file << "};\n\n";
 }
-
-void Generator::generate_struct(Type& s, std::ofstream& file) {
-    assert(s.category == Type::Category::Struct);
-
-    // TODO: if (config.verbose)
-    // std::cout << "Generating struct: " << s.name << std::endl;
-
-    file << LineComment{ s.comment, true, config.generate_comments };
-
-    if (!s.alias.empty()) {
-        file << "using " << NameTranslator::from_type_name(s.name) << Deprecate{ s.deprecated } << "= "
-            << NameTranslator::from_type_name(s.alias) << ";\n";
+void vkg_gen::Generator::Generator::generate_member(Member& member, std::ofstream& file, sv struct_union, sv parent_name) {
+    if (member.is_standalone_comment) {
+        file << StandaloneComment{ member.comment, config.generate_comments };
+        return;
+    }
+    // TODO: custom split
+    if (!member.api.empty() && !std::ranges::contains(std::views::split(member.api, ','), "vulkan", [](auto&& rng) { return sv(rng); })) {
+        std::cout << " TODO: Skipping member '" << member.type_param.stringify() << "' of " << struct_union << " '" << parent_name << "', because it does not contain 'vulkan' api.\n";
         return;
     }
 
-    file << "struct" << Deprecate{ s.deprecated } << NameTranslator::from_type_name(s.name) << " {\n";
-
-    for (auto& member : s.struct_->members) {
-        if (member.is_standalone_comment) {
-            file << StandaloneComment{ member.comment, config.generate_comments };
-            continue;
-        }
-        // TODO: custom split
-        if (!member.api.empty() && !std::ranges::contains(std::views::split(member.api, ','), "vulkan", [](auto&& rng) { return sv(rng); })) {
-            std::cout << " TODO: Skipping member '" << member.type_param.stringify() << "' of struct '" << s.name << "', because it does not contain 'vulkan' api.\n";
-            continue;
-        }
-
+    // TODO: this is a hack, because the flag class is cant be used with bitselect, C++ does not allow it
+    if (member.type_param.type.starts_with("Vk") && std::ranges::contains(member.type_param.array_extensions, TypeParam::ArrayExtension::Type::BitSelect, &TypeParam::ArrayExtension::type)) {
+        TypeEnum::Bitwidth width = enums.find(types.find(member.type_param.type)->second.bitvalues)->second.bitwidth;
+        sv old_type = member.type_param.type;
+        member.type_param.type = to_string_type(width);
+        file << "    " << member.type_param.stringify() << ';' << LineComment{ member.type_param.comment, false, config.generate_comments } << "// class Flags<> can't be subscribted with ':' \n";
+        member.type_param.type = old_type;
+    } else {
         file << "    " << member.type_param.stringify() << ';' << LineComment{ member.type_param.comment, false, config.generate_comments } << '\n';
     }
+
+}
+
+void Generator::generate_struct_union(Type& type, std::ofstream& file, sv struct_union) {
+    assert(struct_union == "struct" || struct_union == "union");
+    assert(type.category == (struct_union == "struct" ? Type::Category::Struct : Type::Category::Union));
+
+    // TODO: if (config.verbose)
+    // std::cout << "Generating " << struct_union << ": " << type.name << std::endl;
+
+    file << LineComment{ type.comment, true, config.generate_comments };
+
+    if (!type.alias.empty()) {
+        file << "using " << NameTranslator::from_type_name(type.name) << Deprecate{ type.deprecated } << "= "
+            << NameTranslator::from_type_name(type.alias) << ";\n";
+        return;
+    }
+
+    file << struct_union << Deprecate{ type.deprecated } << NameTranslator::from_type_name(type.name) << " {\n";
+
+    static_assert(std::is_same_v<decltype(type.struct_->members), decltype(type.union_->members)>);
+    for (auto& member : type.struct_->members) {
+        generate_member(member, file, struct_union, type.name);
+    }
     file << "};\n\n";
+}
+
+void Generator::generate_struct(Type& s, std::ofstream& file) {
+    generate_struct_union(s, file, "struct");
 }
 
 void Generator::generate_union(Type& s, std::ofstream& file) {
-    assert(s.category == Type::Category::Union);
-
-    // TODO: if (config.verbose)
-    // std::cout << "Generating union: " << s.name << std::endl;
-
-    file << LineComment{ s.comment, true, config.generate_comments };
-
-    if (!s.alias.empty()) {
-        file << "using " << NameTranslator::from_type_name(s.name) << Deprecate{ s.deprecated } << "= "
-            << NameTranslator::from_type_name(s.alias) << ";\n";
-        return;
-    }
-
-    file << "union" << Deprecate{ s.deprecated } << NameTranslator::from_type_name(s.name) << " {\n";
-
-    for (auto& member : s.union_->members) {
-        // TODO: custom split
-        if (!member.api.empty() && !std::ranges::contains(std::views::split(member.api, ','), "vulkan", [](auto&& rng) { return sv(rng); })) {
-            std::cout << " TODO: Skipping member '" << member.type_param.stringify() << "' of union '" << s.name << "', because it does not contain 'vulkan' api.\n";
-            continue;
-        }
-
-        file << "    " << member.type_param.stringify() << ';' << LineComment{ member.comment, false, config.generate_comments } << '\n';
-    }
-    file << "};\n\n";
+    generate_struct_union(s, file, "union");
 }
 
 void Generator::generate_bitmask(Type& bitmask, std::ofstream& file) {
+    assert(bitmask.category == Type::Category::Bitmask);
+
     file << LineComment{ bitmask.comment, true, config.generate_comments };
 
     file << "using " << NameTranslator::from_type_name(bitmask.name) << Deprecate{ bitmask.deprecated } << "= ";
     if (!bitmask.alias.empty()) {
         file << NameTranslator::from_type_name(bitmask.alias) << ";\n";
 
+    } else if (config.generate_flags_class) {
+        // TASK: 230326_02 empty bitmask
+        if (!bitmask.bitvalues.empty())
+            file << "Flags<" << NameTranslator::from_type_name(bitmask.bitvalues) << ">;\n";
+        else {
+            auto it = std::ranges::find_if(bitmask.elem.children, has_tag("type"));
+            if (it == bitmask.elem.children.end())
+                throw my_error{ "bitmask type not found" };
+            sv type = (*it)->asElement().children[0]->asText();
+
+            if (type != "VkFlags" && type != "VkFlags64")
+                throw my_error{ "bitmask type must be VkFlags or VkFlags64" };
+
+            file << "Flags<uint" << (type == "VkFlags" ? "32" : "64") << "_t>; //  Bitmask does have undefined bits\n";
+        }
+
     } else {
-        // CHECK: revisit this
         auto it = std::ranges::find_if(bitmask.elem.children, has_tag("type"));
         if (it == bitmask.elem.children.end())
             throw my_error{ "bitmask type not found" };
 
         file << NameTranslator::from_type_name((*it)->asElement().children[0]->asText()) << ";\n"; // TODO: check children
-        // TODO: if (config.verbose)
-        // std::cout << "Generating bitmask: " << bitmask.name << std::endl;
     }
+
+    // TODO: if (config.verbose)
+    // std::cout << "Generating bitmask: " << bitmask.name << std::endl;
 
 };
 
@@ -1920,9 +1854,12 @@ void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& so
     header << "#define VKAPI_PTR\n";
 
     if (config.generate_handle_class)
-        header << boilerplate::HANDLE_DEFINITION << "\n";
+        boilerplate::print(header, boilerplate::HANDLE_DEFINITION) << "\n";
     else
         header << "#define VK_DEFINE_HANDLE(object) typedef struct object##_T* object;\n";
+
+    if (config.generate_flags_class)
+        boilerplate::print(header, boilerplate::FLAGS_DEFINITION) << "\n";
 
     header << "#define VKAPI_CALL\n";
     header << "#define VKAPI_ATTR\n";
@@ -1935,8 +1872,13 @@ void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& so
     parse_commands(dom);
 
     add_required_version_feature("VK_VERSION_1_4", dom);
-
     add_extension_prototype("1", dom);
+
+    if (config.generate_flags_class) {
+        required_types.remove("VkFlags");
+        required_types.remove("VkFlags64");
+    }
+
     ProtectGuard header_guard{ .file = header };
     for (TypeEnum* enum_ : required_enums.get()) {
         if (enum_ == nullptr) continue;
