@@ -1846,6 +1846,7 @@ void Generator::add_extension_prototype(sv number, xml::Dom& dom) {
 void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& source, Config& config) {
     // TASK: 250226_01 Handle config in generator properly
     this->config = config;
+    Deprecate::enabled = config.generate_deprecations;
 
 #if 1
     header << "#pragma once\n";
@@ -2308,9 +2309,9 @@ NameTranslator vkg_gen::Generator::NameTranslator::from_enum_value(sv value, con
     const static std::unordered_map<sv, sv> exception_values = {
         {"VK_COLORSPACE_SRGB_NONLINEAR_KHR", "eSrgbNonlinearKHR2"}, // COLORSPACE should be COLOR_SPACE, and it also shadows the correct value, so we should not generate it at all
         {"VK_STENCIL_FRONT_AND_BACK", "eFrontAndBack2"}, // missing "_FACE_" and it also shadows the correct value, so whe should not generate it at all
-        {"VK_QUERY_SCOPE_COMMAND_BUFFER_KHR", "queryScopeCommandBufferKHR"}, // aliased value for "VkPerformanceCounterScopeKHR" enum
-        {"VK_QUERY_SCOPE_RENDER_PASS_KHR", "queryScopeRenderPassKHR"}, // aliased value for "VkPerformanceCounterScopeKHR" enum
-        {"VK_QUERY_SCOPE_COMMAND_KHR", "queryScopeCommandKHR"}, // aliased value for "VkPerformanceCounterScopeKHR" enum
+        {"VK_QUERY_SCOPE_COMMAND_BUFFER_KHR", "queryScopeCommandBuffer"}, // aliased value for "VkPerformanceCounterScopeKHR" enum
+        {"VK_QUERY_SCOPE_RENDER_PASS_KHR", "queryScopeRenderPass"}, // aliased value for "VkPerformanceCounterScopeKHR" enum
+        {"VK_QUERY_SCOPE_COMMAND_KHR", "queryScopeCommand"}, // aliased value for "VkPerformanceCounterScopeKHR" enum
         {"VK_CLUSTER_ACCELERATION_STRUCTURE_INDEX_FORMAT_8BIT_NV", "e8BitNV"},  // its missing "_BIT" but it also propably should contain it anyway
         {"VK_CLUSTER_ACCELERATION_STRUCTURE_INDEX_FORMAT_16BIT_NV", "e16BitNV"}, // its missing "_BIT" but it also propably should contain it anyway
         {"VK_CLUSTER_ACCELERATION_STRUCTURE_INDEX_FORMAT_32BIT_NV", "e32BitNV"}, // its missing "_BIT" but it also propably should contain it anyway

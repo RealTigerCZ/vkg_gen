@@ -728,6 +728,7 @@ struct Config {
     std::vector<bool> enabled_extensions = std::vector<bool>((size_t)ExtensionIDs::_COUNT, false); // use bitset
 
     bool generate_comments = true;
+    bool generate_deprecations = true;
     bool generate_enums_classes = true; // false means generate C enums
     bool generate_handle_class = true;  // false means generate C vulkan macros
     bool generate_flags_class = true;   // false means generate C VkFlags (uint32) and VkFlags64 (uint64)

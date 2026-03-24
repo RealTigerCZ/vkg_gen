@@ -638,6 +638,7 @@ namespace vkg_gen::Generator {
     };
 
     struct Deprecate {
+        static inline bool enabled;
         sv msg;
         bool generate = true;
     };
@@ -678,7 +679,7 @@ namespace vkg_gen::Generator {
     }
 
     inline std::ostream& operator<<(std::ostream& os, Deprecate d) {
-        if (d.generate && !d.msg.empty()) {
+        if (d.generate && d.enabled && !d.msg.empty()) {
             return os << " [[deprecated(\"" << d.msg << "\")]] ";
         }
         return os << ' ';
