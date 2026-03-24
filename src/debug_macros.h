@@ -3,18 +3,32 @@
 // THIS FILE WILL BE DELETED IN FUTURE
 // It is here only for debugging purposes
 
-#include <assert.h>
+#include <cassert>
 
 
 #if	defined(NDEBUG) || defined(IGNORE_NOT_IMPLEMENTED)
 #define NOT_IMPLEMENTED()
 #define UNUSED(x)
 #define my_error std::runtime_error
-#else
+#elif !defined(__GNUC__) || defined(__clang__)
+#include <stdexcept>
+#include <sstream>
+#include <string>
+#include <string_view>
 
+[[noreturn]] inline void NOT_IMPLEMENTED() { throw std::runtime_error("Called NOT_IMPLEMENTED"); }
+#define UNUSED(x) (void)(x)
+class fallback_runtime_error : public std::runtime_error {
+public:
+    fallback_runtime_error(std::string_view msg) : std::runtime_error(std::string(msg)) {}
+    fallback_runtime_error(const std::stringstream& msg) : std::runtime_error(msg.str()) {}
+};
+#define my_error fallback_runtime_error
+
+#else
 // Using gcc specific experimental library, but it should be part of C++23
 #include <stacktrace>
-
+#include <stdexcept>
 #include <source_location>
 #include <iostream>
 #include <sstream>
