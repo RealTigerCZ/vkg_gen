@@ -3,7 +3,7 @@
  * @author Jaroslav Hucel (xhucel00@vutbr.cz)
  * @brief Pregenerated boilerplate code for the generator.
  * @date Created: 23. 03. 2026
- * @date Modified: 23. 03. 2026
+ * @date Modified: 25. 03. 2026
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -132,7 +132,7 @@ namespace boilerplate {
         "#include <assert.h>\n"
         "\n"
         "void* lib = nullptr;\n"
-        "FuncTable funcs;\n"
+        "Funcs funcs;\n"
         "static ExtensionProperties * extensions = nullptr;\n"
         "static uint32_t extensions_count = 0;\n"sv;
 

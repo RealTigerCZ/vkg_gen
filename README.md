@@ -19,18 +19,47 @@ cp ../../vk.xml . # copy vk.xml to build directory
 
 To produce the `out.cpp` and `out.hpp` files.
 
-# Note:
+# Limitations:
 
 - Lexer is stateful (context-sensitive), because of the nature of XML.
 
-- How to handle spaces in text??
-
 - Only ASCII, UTF-8 is not supported.
 
-- TODO: lexer data handling needs to be refactored
+## Task List
 
-- Use "std::expected" instead of exceptions?
-  -> probably not necessary, because we expect the input to be valid and if it is not, the program will exit anyway
+### P0 — Must-Have
+
+- [x] P0-1: Namespace wrapping (`namespace vk { }`, rename FuncTable → Funcs)
+- [x] P0-2: Command name translation (`vkCreateBuffer` → `createBuffer`)
+- [ ] P0-3: Enum extension deduplication (TASK 030226_01)
+- [ ] P0-4: Command alias resolution (generate forwarding wrappers)
+- [ ] P0-5: Header boilerplate matching ref (UniqueHandle, detail namespace, error classes, init declarations)
+- [ ] P0-6: Throw/NoThrow command generation (full ref match: void/VkResult/enumerate patterns)
+- [ ] P0-7: Source file (.cpp) generation (loadLib, initInstance, initDevice, error handling)
+- [ ] P0-8: Config from file + CLI arguments
+
+### P1 — Important Quality
+
+- [ ] P1-1: Basetype dependencies (TASK 220326_01)
+- [ ] P1-2: Empty bitmasks (TASK 230326_02)
+- [ ] P1-3: Array enum dependencies (TASK 210326_02)
+- [ ] P1-4: TypeParam word boundary fix
+- [ ] P1-5: Dead code cleanup
+- [ ] P1-6: MSVC compatibility of generated code
+
+### P2 — After MVP
+
+- [ ] P2-1: Test on VulkanTutorial example
+- [ ] P2-2: Compilation speed benchmark vs vulkan-hpp
+- [ ] P2-3: CMake integration as dependency
+- [ ] P2-4: C++ module support research
+- [ ] P2-5: Generator code restructuring
+
+### P3 — Future / Optional
+
+- [ ] P3-1: Refactor lexers data handling
+- [ ] P3-2: Update parser to work more closely with generator
+- [ ] P3-3: Better error handling and reporting
 
 ## Known bugs
 

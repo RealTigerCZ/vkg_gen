@@ -3,7 +3,7 @@
  * @author Jaroslav Hucel (xhucel00@vutbr.cz)
  * @brief
  * @date Created: 12. 11. 2025
- * @date Modified: 23. 03. 2026
+ * @date Modified: 25. 03. 2026
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -1407,7 +1407,7 @@ void vkg_gen::Generator::Generator::generate_command_wrapper(Command& cmd, std::
     if (type.starts_with("Vk")) {
         type.remove_prefix(2);
     }
-    file << "inline " << type << " " << cmd.name; // TODO: proper name mangling
+    file << "inline " << type << " " << NameTranslator::from_command_name(cmd.name);
     generate_command_params(cmd, file, false);
     file << "{ return funcs." << cmd.name << "(";
 
@@ -1849,10 +1849,12 @@ void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& so
     Deprecate::enabled = config.generate_deprecations;
 
 #if 1
-    header << "#pragma once\n";
     header << boilerplate::VIDEO_INCLUDES << "\n";
 
     header << "#define VKAPI_PTR\n";
+    header << "#define VKAPI_CALL\n";
+    header << "#define VKAPI_ATTR\n";
+    header << "\nnamespace " << config.namespace_name << " {\n\n";
 
     if (config.generate_handle_class)
         boilerplate::print(header, boilerplate::HANDLE_DEFINITION) << "\n";
@@ -1861,9 +1863,6 @@ void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& so
 
     if (config.generate_flags_class)
         boilerplate::print(header, boilerplate::FLAGS_DEFINITION) << "\n";
-
-    header << "#define VKAPI_CALL\n";
-    header << "#define VKAPI_ATTR\n";
 
     //generate_API_constants(dom, file);
     //generate_types(dom, file);
@@ -1951,7 +1950,7 @@ void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& so
     }
     header_guard.close();
     header << "\n";
-    header << "struct FuncTable {\n";
+    header << "struct Funcs {\n";
 
 
     for (Command* cmd : required_commands.get()) {
@@ -1960,7 +1959,7 @@ void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& so
         header << "    PFN_" << cmd->name << " " << cmd->name << " = nullptr;\n";
     }
     header_guard.close();
-    header << "};\nextern FuncTable funcs;\n";
+    header << "};\nextern Funcs funcs;\n";
 
 
     for (CommandAlias* ca : required_commands_aliases.get()) {
@@ -1987,8 +1986,10 @@ void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& so
     //}
 
     header << "\n" << boilerplate::HEADER_EXTERNS;
+    header << "\n} // namespace " << config.namespace_name << "\n";
 
     source << "#include \"" << config.header_path << "\"\n";
+    source << "namespace " << config.namespace_name << " {\n\n";
     source << boilerplate::CPP_IMPL;
     source << "Instance" << (config.generate_handle_class ? "::HandleType" : "") << " instance = nullptr;\n";
     source << "// static const char* extensions[] = {";
@@ -2033,6 +2034,7 @@ void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& so
     source_guard.close();
 
     source << "}\n";
+    source << "\n} // namespace " << config.namespace_name << "\n";
 
 #else
     //auto unions_filter = has_tag("type") && has_attr("category", "union");
@@ -2400,6 +2402,18 @@ NameTranslator vkg_gen::Generator::NameTranslator::from_type_name(sv name) {
     assert(name.starts_with("Vk"));
 
     return NameTranslator(std::string(name.substr(2)));
+}
+
+NameTranslator vkg_gen::Generator::NameTranslator::from_command_name(sv name) {
+    assert(!name.empty());
+    assert(name.starts_with("vk"));
+
+    std::string new_name(name.substr(2));
+    // Lowercase the first letter: CreateBuffer -> createBuffer
+    assert(!new_name.empty());
+    new_name[0] = std::tolower(new_name[0]);
+
+    return NameTranslator(std::move(new_name));
 }
 
 NameTranslator vkg_gen::Generator::NameTranslator::from_constexpr_value(sv value_name) {

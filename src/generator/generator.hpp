@@ -3,7 +3,7 @@
  * @author Jaroslav Hucel (xhucel00@vutbr.cz)
  * @brief
  * @date Created: 02. 11. 2025
- * @date Modified: 23. 03. 2026
+ * @date Modified: 25. 03. 2026
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -529,6 +529,7 @@ namespace vkg_gen::Generator {
         static NameTranslator from_enum_value(sv value, const TransformedEnumName& enum_class_transformed, bool is_bitmask);
         static NameTranslator from_type_name(sv name); // enums, structs, unions
         static NameTranslator from_constexpr_value(sv value_name);
+        static NameTranslator from_command_name(sv name); // vkCreateBuffer -> createBuffer
 
     protected:
         static void transform_from_upper_constant(std::string& name, size_t start_pos, bool first_is_upper);
