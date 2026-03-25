@@ -24,6 +24,7 @@ To produce the `out.cpp` and `out.hpp` files.
 - Lexer is stateful (context-sensitive), because of the nature of XML.
 
 - Only ASCII, UTF-8 is not supported.
+- Only generating "vulkan" API not "vulkansc"
 
 ## Task List
 
@@ -31,7 +32,7 @@ To produce the `out.cpp` and `out.hpp` files.
 
 - [x] P0-1: Namespace wrapping (`namespace vk { }`, rename FuncTable → Funcs)
 - [x] P0-2: Command name translation (`vkCreateBuffer` → `createBuffer`)
-- [ ] P0-3: Enum extension deduplication (TASK 030226_01)
+- [x] P0-3: Enum extension deduplication (TASK 030226_01)
 - [ ] P0-4: Command alias resolution (generate forwarding wrappers)
 - [ ] P0-5: Header boilerplate matching ref (UniqueHandle, detail namespace, error classes, init declarations)
 - [ ] P0-6: Throw/NoThrow command generation (full ref match: void/VkResult/enumerate patterns)

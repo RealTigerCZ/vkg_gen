@@ -107,8 +107,9 @@ namespace vkg_gen::Generator {
             sv api;
             bool is_alias = false;
             bool is_standalone_comment = false; //TODO:
+            uint16_t ext_number = 0;
 
-            static EnumItem from_xml(const vkg_gen::xml::Element& elem, vkg_gen::Arena& arena, TypeEnum* parent, bool is_standalone_comment = false, bool extend_parent = false, sv block_ext_number = "");
+            static EnumItem from_xml(const vkg_gen::xml::Element& elem, vkg_gen::Arena& arena, TypeEnum* parent, bool is_standalone_comment = false, bool extend_parent = false, uint16_t ext_number = 0);
         };
 
 
@@ -617,7 +618,7 @@ namespace vkg_gen::Generator {
 
         void add_required_version_feature(sv name, vkg_gen::xml::Dom& dom);
 
-        void extend_enum(sv extends, vkg_gen::xml::Element& elem, vkg_gen::Arena& arena, sv block_ext_number = {}, sv protect = {});
+        void extend_enum(sv extends, vkg_gen::xml::Element& elem, vkg_gen::Arena& arena, uint16_t block_ext_number = 0, sv protect = {});
 
         void add_extension_prototype(sv number, xml::Dom& dom);
 

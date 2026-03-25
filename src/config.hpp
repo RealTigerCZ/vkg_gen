@@ -737,7 +737,7 @@ struct Config {
     bool apply_av1_and_vp9_naming_exceptions = true; // AV1 and VP9 would be translated to "Av1" and "Vp9" in C++
 
     Compact compact = Compact::Normal;
-    LogLevel log_level = LogLevel::Error;
+    LogLevel log_level = LogLevel::Warning;
     DeprecationBehavior deprecation_behavior = DeprecationBehavior::GenerateWithDeprecationWarning;
     BetaExtensions beta_extensions = BetaExtensions::GenerateWithProtectMacro;
 

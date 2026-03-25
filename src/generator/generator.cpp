@@ -748,8 +748,8 @@ Member::Member(const vkg_gen::xml::Element& e, vkg_gen::Arena& arena, ParentType
 
 }
 
-TypeEnum::EnumItem TypeEnum::EnumItem::from_xml(const vkg_gen::xml::Element& elem, vkg_gen::Arena& arena, TypeEnum* parent, bool is_standalone_comment, bool extend_parent, sv block_ext_number) {
-    EnumItem item{ .is_standalone_comment = is_standalone_comment };
+TypeEnum::EnumItem TypeEnum::EnumItem::from_xml(const vkg_gen::xml::Element& elem, vkg_gen::Arena& arena, TypeEnum* parent, bool is_standalone_comment, bool extend_parent, uint16_t block_ext_number) {
+    EnumItem item{ .is_standalone_comment = is_standalone_comment, .ext_number = block_ext_number };
 
     assert(!(is_standalone_comment && extend_parent));
 
@@ -764,7 +764,6 @@ TypeEnum::EnumItem TypeEnum::EnumItem::from_xml(const vkg_gen::xml::Element& ele
     bool value_specified = false;
     bool offset_specified = false;
 
-    sv extnumber;
     sv dir;
     sv offset;
 
@@ -836,8 +835,12 @@ TypeEnum::EnumItem TypeEnum::EnumItem::from_xml(const vkg_gen::xml::Element& ele
                     throw my_error{ "Enum item cannot have both 'alias' and 'extnumber/dir/offset'" };
             }
 
-            if (attr.name == "extnumber")
-                extnumber = attr.value;
+            if (attr.name == "extnumber") {
+                auto num = std::stoul(std::string(attr.value)); // TODO: check if the extension number is valid and should be generated
+                //if (ext_number != 0 && num != ext_number) // TODO: handle this
+                item.ext_number = num;
+            }
+
             else if (attr.name == "dir")
                 dir = attr.value;
             else if (attr.name == "offset")
@@ -866,19 +869,15 @@ TypeEnum::EnumItem TypeEnum::EnumItem::from_xml(const vkg_gen::xml::Element& ele
         if (parent->type != Type::Normal)
             throw my_error{ "Offset/extnumber/dir can only be used with 'normal' enum type, not bitmask or constant." };
 
-        if (extnumber.empty())
-            if (block_ext_number.empty())
-                throw my_error{ "Cannot infer extnumber when extending enum with offset! (Move this enum to <extension> tag or add 'extnumber' attribute)" };
-            else
-                extnumber = block_ext_number;
+        if (item.ext_number == 0)
+            throw my_error{ "Cannot infer extnumber when extending enum with offset! (Move this enum to <extension> tag or add 'extnumber' attribute)" };
 
-        int ext_number = std::stoi(extnumber.data()) - 1;
-        int offset_i = std::stoi(offset.data());
+        int offset_i = std::stoi(std::string(offset));
         if (offset_i > 1000) // 3 digits
             throw my_error{ "Offset must be less than 1000" };
 
         // Vulkan spec:
-        long normal_value = 1000'000'000 + ext_number * 1000 + offset_i;
+        long normal_value = 1000'000'000 + (item.ext_number - 1) * 1000 + offset_i;
         item.normal.value = arena.storeString(std::string(dir) + std::to_string(normal_value));
     }
 
@@ -1008,72 +1007,14 @@ void Generator::generate_enum_alias(Type& e, std::ofstream& file) {
         << NameTranslator::from_type_name(e.alias) << ";\n\n";
 }
 
-// TASK: 030226_01, Also AI function
-void sort_enum_items(std::vector<TypeEnum::EnumItem>& items, TypeEnum::Type type) {
-    // STEP 1: Move all concrete definitions (non-aliases) to the front, sorted by value.
-    auto alias_start = std::stable_partition(items.begin(), items.end(),
-        [](const TypeEnum::EnumItem& item) {
-            return !item.is_alias;
+// Ensures aliases come after the items they reference.
+// Sorts by extension number
+// Keeps XML order otherwise, still an bit hacky function, because we dont handle enum items dependencies
+void order_enum_aliases(std::vector<TypeEnum::EnumItem>& items) {
+    std::ranges::stable_sort(items, [](const TypeEnum::EnumItem& a, const TypeEnum::EnumItem& b) {
+        return std::tie(a.is_alias, a.ext_number) < std::tie(b.is_alias, b.ext_number);
         });
-
-    // STEP 1.5: Sort concrete items by numeric value
-    if (type == TypeEnum::Type::Normal) {
-        std::stable_sort(items.begin(), alias_start,
-            [](const TypeEnum::EnumItem& a, const TypeEnum::EnumItem& b) {
-                if (a.is_standalone_comment || b.is_standalone_comment)
-                    return false;
-                long va = std::stol(std::string(a.normal.value), nullptr, 0);
-                long vb = std::stol(std::string(b.normal.value), nullptr, 0);
-                return va < vb;
-            });
-    } else if (type == TypeEnum::Type::Bitmask) {
-        std::stable_sort(items.begin(), alias_start,
-            [](const TypeEnum::EnumItem& a, const TypeEnum::EnumItem& b) {
-                if (a.is_standalone_comment || b.is_standalone_comment)
-                    return false;
-                // bitfield items (bitpos) come before value items, then sort by bitpos/value
-                if (a.bitmask.is_bitfield != b.bitmask.is_bitfield)
-                    return a.bitmask.is_bitfield;
-                if (a.bitmask.is_bitfield)
-                    return a.bitmask.bitpos < b.bitmask.bitpos;
-                // both are value items
-                long va = std::stol(std::string(a.bitmask.value), nullptr, 0);
-                long vb = std::stol(std::string(b.bitmask.value), nullptr, 0);
-                return va < vb;
-            });
-    }
-
-    // STEP 2: Resolve alias chains (e.g., A = B, B = C).
-    // We need 'C' then 'B' then 'A'.
-    // We iterate through the alias section and bubble up dependencies.
-
-    bool changed = true;
-    int max_passes = items.size(); // Safety break for circular dependencies
-
-    while (changed && max_passes-- > 0) {
-        changed = false;
-
-        // Iterate only through the items identified as aliases
-        for (auto it = alias_start; it != items.end(); ++it) {
-
-            // Look ahead to see if the item this alias points to
-            // is currently sitting *below* us in the list.
-            auto dependency_it = std::find_if(std::next(it), items.end(),
-                [&](const TypeEnum::EnumItem& potential_dep) {
-                    return potential_dep.name == it->alias;
-                });
-
-            if (dependency_it != items.end()) {
-                // We found the dependency lower down. Move it to right before us.
-                // std::rotate effectively pulls dependency_it up to position it
-                std::rotate(it, dependency_it, dependency_it + 1);
-
-                // Since we shifted the list, mark as changed to re-scan
-                // (in case the item we just moved up relies on something else)
-                changed = true;
-            }
-        }
-    }
+    // TODO: possible edge case: alias of alias, then if A = 1; B = A; C = B; they must be generated in that order, but this guarantees only that A will be generated first
 }
 
 void Generator::generate_enum(TypeEnum& e, std::ofstream& file) {
@@ -1095,8 +1036,7 @@ void Generator::generate_enum(TypeEnum& e, std::ofstream& file) {
     file << "enum" << (config.generate_enums_classes ? " class" : "") << Deprecate{ e.deprecated } << NameTranslator::from_type_name(e.name) <<
         " " << bitwidth_to_str_type(e.bitwidth) << " {\n";
 
-    // TASK: 030226_01 Enum member dependencies
-    sort_enum_items(e.items, e.type);
+    order_enum_aliases(e.items);
 
     // Move protected items to end, grouped by protect value
     std::stable_partition(e.items.begin(), e.items.end(),
@@ -1700,7 +1640,7 @@ void Generator::add_required_version_feature(sv name, vkg_gen::xml::Dom& dom) {
     }
 }
 
-void Generator::extend_enum(sv extends, Element& elem, vkg_gen::Arena& arena, sv block_ext_number, sv protect) {
+void Generator::extend_enum(sv extends, Element& elem, vkg_gen::Arena& arena, uint16_t block_ext_number, sv protect) {
 
     TypeEnum& enum_ = enums.find(extends)->second;
     auto item = TypeEnum::EnumItem::from_xml(elem, arena, &enum_, false, true, block_ext_number);
@@ -1709,10 +1649,25 @@ void Generator::extend_enum(sv extends, Element& elem, vkg_gen::Arena& arena, sv
     if (!protect.empty() && item.protect.empty())
         item.protect = protect;
 
-    // TASK: 030226_01: Enum member dependencies/redundancy
-    if (std::ranges::find(enum_.items, item.name, &TypeEnum::EnumItem::name) != enum_.items.end())
-        std::cout << "- WARNING: duplicate enum item: '" << item.name << "' in enum '" << extends << "\n";
-    else
+    auto existing = std::ranges::find(enum_.items, item.name, &TypeEnum::EnumItem::name);
+    if (existing != enum_.items.end()) {
+        if (config.log_level == LogLevel::All)
+            std::cout << "INFO: Duplicate enum item '" << item.name << "' when extending '" << extends << "'\n";
+
+        // Check if the duplicate has the same value (expected for promoted extensions)
+        bool same_value = false;
+        if (item.is_alias && existing->is_alias)
+            same_value = (item.alias == existing->alias);
+        else if (!item.is_alias && !existing->is_alias) {
+            if (enum_.type == TypeEnum::Type::Normal)
+                same_value = (item.normal.value == existing->normal.value);
+            else if (enum_.type == TypeEnum::Type::Bitmask)
+                same_value = (item.bitmask.bitpos == existing->bitmask.bitpos);
+        }
+
+        if (!same_value && config.log_level == LogLevel::Warning)
+            std::cout << "WARNING: conflicting duplicate enum item: '" << item.name << "' when extending '" << extends << "'\n";
+    } else
         enum_.items.emplace_back(std::move(item));
 }
 
@@ -1755,7 +1710,7 @@ void Generator::add_extension_prototype(sv number, xml::Dom& dom) {
             ext_protect = it->second;
         }
 
-        sv ext_number = ext.get_attr_value("number");
+        uint16_t ext_number = std::stoul(std::string(ext.get_attr_value("number")));
 
         included_extensions.push_back(ext);
 
