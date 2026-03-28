@@ -3,7 +3,7 @@
  * @author Jaroslav Hucel (xhucel00@vutbr.cz)
  * @brief
  * @date Created: 12. 11. 2025
- * @date Modified: 25. 03. 2026
+ * @date Modified: 28. 03. 2026
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -983,6 +983,80 @@ bool vkg_gen::Generator::Generator::is_handle(sv type) {
     return it->second.category == Type::Category::Handle;
 }
 
+void vkg_gen::Generator::Generator::cache_handles(std::vector<HandleInfo>& handles) {
+    const auto get_cmd = [&](std::string name) -> const Command* {
+        auto it = commands.find(name);
+        if (it == commands.end())
+            return nullptr;
+        return &it->second;
+        };
+
+
+    for (Type* p : required_types.get()) {
+        if (p == nullptr || p->category != Type::Category::Handle || !p->alias.empty())
+            continue;
+
+        HandleInfo h(*p);
+
+        // Match each handle to its destroy/free/release command by scanning command parameters.
+        // Pattern: vkDestroy/Free/Release commands take (parent, handle, [allocator]) or (handle, [allocator]) for self-destroy.
+        // We match on the handle appearing as param[0] (self-destroy) or param[1] (owned), non-pointer (not batch).
+
+        assert(h.type.name.starts_with("Vk"));
+        sv vk_name = h.type.name.substr(2); // skip "Vk"
+
+        if (auto cmd = get_cmd(std::string("vkDestroy").append(vk_name))) {
+            h.destroy_command = cmd;
+            h.destroy_behavior = HandleInfo::DestroyBehavior::Destroy;
+        } else if (auto cmd = get_cmd(std::string("vkFree").append(vk_name))) {
+            h.destroy_command = cmd;
+            h.destroy_behavior = HandleInfo::DestroyBehavior::Free;
+        } else if (auto cmd = get_cmd(std::string("vkRelease").append(vk_name))) {
+            h.destroy_command = cmd;
+            h.destroy_behavior = HandleInfo::DestroyBehavior::Release;
+        } else {
+            // TODO: Fallback: scan commands by parameter type (handles like VkDeviceMemory → vkFreeMemory)
+            for (auto& [cmd_name, cmd] : commands) {
+                bool is_destroy = cmd_name.starts_with("vkDestroy");
+                bool is_free = cmd_name.starts_with("vkFree");
+                bool is_release = cmd_name.starts_with("vkRelease");
+                if (!is_destroy && !is_free && !is_release) continue;
+                if (cmd.parameters.size() < 2) continue;
+                if (cmd.parameters[1].type_param.type != h.type.name) continue;
+                if (!cmd.parameters[1].type_param.post_quals.empty()) continue; // TODO: skip batch ops
+
+                h.destroy_command = &cmd;
+                h.destroy_behavior = is_destroy ? HandleInfo::DestroyBehavior::Destroy
+                    : is_free ? HandleInfo::DestroyBehavior::Free
+                    : HandleInfo::DestroyBehavior::Release;
+                break;
+            }
+        }
+
+        auto cmd = h.destroy_command;
+        if (vk_name == "Instance" || vk_name == "Device") {
+            assert(cmd != nullptr);
+            assert(cmd->parameters.size() <= 2);
+            assert(cmd->parameters[0].type_param.type == std::string("Vk").append(vk_name));
+
+            h.kind = (vk_name == "Instance") ? HandleInfo::Kind::InstanceItself : HandleInfo::Kind::DeviceItself;
+        } else if (cmd) {
+            assert(cmd->parameters.size() >= 2);
+            assert(cmd->parameters[1].type_param.type == std::string("Vk").append(vk_name));
+            assert(cmd->parameters[1].type_param.post_quals.empty());
+
+            sv parent = cmd->parameters[0].type_param.type;
+            if (parent != "VkInstance" && parent != "VkDevice") { // TODO: this is not supported by UniqueHandle class, may be needed in future
+                h.destroy_behavior = HandleInfo::DestroyBehavior::None;
+                h.destroy_command = nullptr;
+            } else {
+                h.kind = (parent == "VkInstance") ? HandleInfo::Kind::Instance : HandleInfo::Kind::Device;
+            }
+        }
+        handles.push_back(std::move(h));
+    }
+}
+
 constexpr std::string_view bitwidth_to_str_type(TypeEnum::Bitwidth w) {
     switch (w) {
     case TypeEnum::Bitwidth::None:
@@ -998,7 +1072,7 @@ constexpr std::string_view bitwidth_to_str_type(TypeEnum::Bitwidth w) {
     }
 };
 
-void Generator::generate_enum_alias(Type& e, std::ofstream& file) {
+void Generator::generate_enum_alias(const Type& e, std::ofstream& file) {
     if (e.alias.empty())
         return;
 
@@ -1067,7 +1141,7 @@ void Generator::generate_enum(TypeEnum& e, std::ofstream& file) {
 
 
     ProtectGuard guard{ .file = file };
-    for (TypeEnum::EnumItem& item : e.items) {
+    for (const TypeEnum::EnumItem& item : e.items) {
         if (item.is_standalone_comment) {
             file << StandaloneComment{ item.comment, config.generate_comments };
             continue;
@@ -1142,7 +1216,7 @@ void vkg_gen::Generator::Generator::generate_member(Member& member, std::ofstrea
 
 }
 
-void Generator::generate_struct_union(Type& type, std::ofstream& file, sv struct_union) {
+void Generator::generate_struct_union(const Type& type, std::ofstream& file, sv struct_union) {
     assert(struct_union == "struct" || struct_union == "union");
     assert(type.category == (struct_union == "struct" ? Type::Category::Struct : Type::Category::Union));
 
@@ -1166,15 +1240,15 @@ void Generator::generate_struct_union(Type& type, std::ofstream& file, sv struct
     file << "};\n\n";
 }
 
-void Generator::generate_struct(Type& s, std::ofstream& file) {
+void Generator::generate_struct(const Type& s, std::ofstream& file) {
     generate_struct_union(s, file, "struct");
 }
 
-void Generator::generate_union(Type& s, std::ofstream& file) {
+void Generator::generate_union(const Type& s, std::ofstream& file) {
     generate_struct_union(s, file, "union");
 }
 
-void Generator::generate_bitmask(Type& bitmask, std::ofstream& file) {
+void Generator::generate_bitmask(const Type& bitmask, std::ofstream& file) {
     assert(bitmask.category == Type::Category::Bitmask);
 
     file << LineComment{ bitmask.comment, true, config.generate_comments };
@@ -1214,7 +1288,7 @@ void Generator::generate_bitmask(Type& bitmask, std::ofstream& file) {
 
 
 
-void Generator::generate_handle(Type& h, std::ofstream& file, TypeEnum& obj_enum) {
+void Generator::generate_handle(const Type& h, std::ofstream& file, TypeEnum& obj_enum) {
     assert(h.category == Type::Category::Handle);
 
     if (!h.alias.empty()) {
@@ -1234,6 +1308,32 @@ void Generator::generate_handle(Type& h, std::ofstream& file, TypeEnum& obj_enum
         file << "using " << NameTranslator::from_type_name(h.name) << Deprecate{ h.deprecated } << "= "
         << "Handle<struct " << NameTranslator::from_enum_value(h.handle->objtypeenum, enum_transformed, false) << "_T*>" << ";" << LineComment{ h.comment, false, config.generate_comments } << '\n';
 }
+
+// Generate error classes from Result enum values
+void vkg_gen::Generator::Generator::generate_error_classes(std::ofstream& file) {
+    file << boilerplate::ERROR_BASE_CLASS;
+    auto VkResult = enums.at("VkResult");
+    auto enum_name = NameTranslator::transform_enum_name("VkResult", false);
+
+    for (auto& item : VkResult.items) {
+        if (item.is_alias || item.is_standalone_comment) continue;
+
+        auto translated = NameTranslator::from_enum_value(item.name, enum_name, false);
+        sv class_name = translated.new_name;
+        // eErrorOutOfHostMemory -> OutOfHostMemoryError, eSuccess -> SuccessResult
+        if (class_name.starts_with("eError")) {
+            class_name = class_name.substr(6); // skip "eError"
+            file << "class " << class_name << "Error : public Error { public: using Error::Error; };\n";
+        } else {
+            assert(class_name.starts_with("e"));
+            class_name = class_name.substr(1); // skip "e"
+            file << "class " << class_name << "Result : public Error { public: using Error::Error; };\n";
+        }
+    }
+    file << "\n";
+
+}
+
 
 NameTranslator vkg_gen::Generator::Generator::get_translated_type_name(sv name) {
     Type& t = types.at(name);
@@ -1804,23 +1904,7 @@ void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& so
     Deprecate::enabled = config.generate_deprecations;
 
 #if 1
-    header << boilerplate::VIDEO_INCLUDES << "\n";
-
-    header << "#define VKAPI_PTR\n";
-    header << "#define VKAPI_CALL\n";
-    header << "#define VKAPI_ATTR\n";
-    header << "\nnamespace " << config.namespace_name << " {\n\n";
-
-    if (config.generate_handle_class)
-        boilerplate::print(header, boilerplate::HANDLE_DEFINITION) << "\n";
-    else
-        header << "#define VK_DEFINE_HANDLE(object) typedef struct object##_T* object;\n";
-
-    if (config.generate_flags_class)
-        boilerplate::print(header, boilerplate::FLAGS_DEFINITION) << "\n";
-
-    //generate_API_constants(dom, file);
-    //generate_types(dom, file);
+    // ==================== Parsing ====================
     parse_platforms(dom);
     parse_types(dom);
     parse_enums(dom);
@@ -1834,7 +1918,71 @@ void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& so
         required_types.remove("VkFlags64");
     }
 
+    // ==================== Header generation ====================
+    header << "#pragma once\n";
+    header << "#include <cstddef>\n";  // std::nullptr_t used in Handle class
+    header << "#include <cstdint>\n";  // uint32_t, uint64_t ... used everywhere
+    header << "#include <new>\n";      // needed for custom vector class
+    header << "#include <stdlib.h>\n"; // needed for custom Error class - malloc/free
+    header << "#include <string.h>\n"; // needed for custom Error class - strncpy/strlen
+    header << boilerplate::VIDEO_INCLUDES << "\n";
+
+    header << "#define VKAPI_PTR\n";
+    header << "#define VKAPI_CALL\n";
+    header << "#define VKAPI_ATTR\n";
+    header << "\nnamespace " << config.namespace_name << " {\n\n";
+
+    // --- Forward declarations ---
+    header << "struct ExtensionProperties;\n";
+    header << "struct InstanceCreateInfo;\n";
+    header << "struct DeviceCreateInfo;\n";
+    header << "enum class Result;\n\n";
+
+    // --- Handle<T> template ---
+    if (config.generate_handle_class)
+        boilerplate::print(header, boilerplate::HANDLE_DEFINITION) << "\n";
+    else
+        header << "#define VK_DEFINE_HANDLE(object) typedef struct object##_T* object;\n";
+
     ProtectGuard header_guard{ .file = header };
+
+    // --- Build HandleInfo for all concrete handles ---
+    std::vector<HandleInfo> handles;
+    if (config.generate_handle_class)
+        cache_handles(handles);
+
+    // --- Handle type aliases ---
+    auto& obj_enum = enums.at(TypeHandle::obj_enum_name);
+    for (HandleInfo& h : handles) {
+        header_guard.transition(h.type.protect);
+        generate_handle(h.type, header, obj_enum);
+    }
+    header_guard.close();
+    header << "\n";
+
+    // --- UniqueHandle<T> template + aliases (only for destroyable handles) ---
+    header << boilerplate::UNIQUE_HANDLE_DEFINITION;
+    for (auto& h : handles) {
+        if (!h.is_destroyable()) continue;
+        header_guard.transition(h.type.protect);
+        auto name = NameTranslator::from_type_name(h.type.name);
+        header << "using Unique" << name << " = UniqueHandle<" << name << ">;\n";
+    }
+    header_guard.close();
+    header << "\n";
+
+
+    // --- detail namespace, accessors, init declarations ---
+    header << boilerplate::DETAIL_NAMESPACE;
+    header << boilerplate::INIT_DECLARATIONS;
+    header << "void init_vk_functions();\n\n"; // TODO: debug function
+    header << boilerplate::VERSION_HELPERS;
+
+    // --- Flags<BitType> template ---
+    if (config.generate_flags_class)
+        boilerplate::print(header, boilerplate::FLAGS_DEFINITION) << "\n";
+
+    // --- Enums ---
     for (TypeEnum* enum_ : required_enums.get()) {
         if (enum_ == nullptr) continue;
         header_guard.transition(enum_->protect);
@@ -1847,12 +1995,12 @@ void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& so
         header << "#define " << define.name << " " << define.value << "\n";
     }
 
-
+    // --- Types (structs, unions, bitmasks, funcpointers, basetypes) ---
     for (Type* p : required_types.get()) {
-        if (p == nullptr)
-            continue;
+        if (p == nullptr) continue;
 
         auto& type = *p;
+        if (type.category == Type::Category::Handle) continue; // already emitted above
         header_guard.transition(type.protect);
 
         switch (type.category) {
@@ -1863,24 +2011,16 @@ void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& so
             generate_union(type, header);
             break;
         case Type::Category::Enum:
-            // TODO: this should not be needed and should not even happen
             generate_enum_alias(type, header);
             break;
-
         case Type::Category::Bitmask:
             generate_bitmask(type, header);
             break;
-
-            // TODO: temporary solution, TASK: 220326_01 basetype dependencies and imports
         case Type::Category::Basetype:
-            //case Type::Category::Define:
             _gen_arbitrary_C_code_in_type(type.elem, header);
             break;
         case Type::Category::Funcpointer:
             generate_funcpointer(type, header);
-            break;
-        case Type::Category::Handle:
-            generate_handle(type, header, enums.at(TypeHandle::obj_enum_name));
             break;
         default:
             break;
@@ -1888,43 +2028,42 @@ void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& so
     }
     header_guard.close();
 
-    //header << "extern \"C\" {\n";
-    //for (Command* cmd : required_commands.get()) {
-    //    if (cmd == nullptr)
-    //        continue;
-    //    generate_command(*cmd, header);
-    //}
-    //header << "}\n\n";
-
-
-
+    // --- PFN typedefs ---
     for (Command* cmd : required_commands.get()) {
         if (cmd == nullptr) continue;
         header_guard.transition(cmd->protect);
         generate_command_PFN(*cmd, header);
     }
     header_guard.close();
-    header << "\n";
-    header << "struct Funcs {\n";
 
-
+    // --- Funcs struct ---
+    header << "\nstruct Funcs {\n";
     for (Command* cmd : required_commands.get()) {
         if (cmd == nullptr) continue;
         header_guard.transition(cmd->protect);
         header << "    PFN_" << cmd->name << " " << cmd->name << " = nullptr;\n";
     }
     header_guard.close();
-    header << "};\nextern Funcs funcs;\n";
+    header << "};\n";
+    header << "namespace detail { extern Funcs _funcs; }\n";
+    header << "inline Funcs& funcs = detail::_funcs;\n\n";
 
+    // --- Error classes ---
+    if (config.exception_behavior != ExceptionBehavior::NoThrowOnly)
+        generate_error_classes(header);
 
-    for (CommandAlias* ca : required_commands_aliases.get()) {
-        if (ca == nullptr)
-            continue;
-        header << "using " << "PFN_" << ca->name << " = PFN_" << ca->alias << ";\n";
-        // FIXME: because of removing the static linking, the ca->alias is not defined
-        // header << "auto " << ca->name << " = " << ca->alias << ";\n";
+    // --- Proc addr helpers (after Funcs is defined) ---
+    header << boilerplate::PROC_ADDR_HELPERS;
+
+    // --- PFN aliases ---
+    if (config.generate_command_aliases) {
+        for (CommandAlias* ca : required_commands_aliases.get()) {
+            if (ca == nullptr) continue;
+            header << "using " << "PFN_" << ca->name << " = PFN_" << ca->alias << ";\n";
+        }
     }
 
+    // --- Command wrappers ---
     for (Command* cmd : required_commands.get()) {
         if (cmd == nullptr) continue;
         header_guard.transition(cmd->protect);
@@ -1932,36 +2071,57 @@ void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& so
     }
     header_guard.close();
 
+    // --- Command alias wrappers ---
+    if (config.generate_command_aliases) {
+        for (CommandAlias* ca : required_commands_aliases.get()) {
+            if (ca == nullptr) continue;
+            header << "inline constexpr auto& " << NameTranslator::from_command_name(ca->name)
+                << " = " << NameTranslator::from_command_name(ca->alias) << ";\n";
+        }
+    }
 
-    // FIXME: causes redefinition
-    //for (CommandAlias* ca : required_commands_aliases.get()) {
-    //    if (ca == nullptr)
-    //        continue;
-    //    header << "auto " << ca->name << " = " << ca->alias << ";\n"; // TODO: proper name mangling
-    //}
+    // --- destroy() overloads for UniqueHandle ---
+    if (config.generate_handle_class) {
+        header << "\n";
+        for (const auto& h : handles) {
+            if (!h.is_destroyable()) continue;
+            auto name = NameTranslator::from_type_name(h.type.name);
+            header_guard.transition(h.type.protect);
 
-    header << "\n" << boilerplate::HEADER_EXTERNS;
+            bool has_allocator = (h.destroy_behavior == HandleInfo::DestroyBehavior::Destroy
+                || h.destroy_behavior == HandleInfo::DestroyBehavior::Free);
+            sv alloc_arg = has_allocator ? ", a" : "";
+            sv alloc_param = has_allocator ? ", const AllocationCallbacks* a = nullptr" : "";
+            switch (h.kind) {
+            case HandleInfo::Kind::InstanceItself:
+                header << "inline void destroy(Instance::HandleType h" << alloc_param << ") noexcept { funcs."
+                    << h.destroy_command->name << "(h" << alloc_arg << "); }\n";
+                break;
+            case HandleInfo::Kind::DeviceItself:
+                header << "inline void destroy(Device d" << alloc_param << ") noexcept { funcs."
+                    << h.destroy_command->name << "(d.handle()" << alloc_arg << "); }\n";
+                break;
+            case HandleInfo::Kind::Instance:
+                header << "inline void destroy(" << name << " h" << alloc_param << ") noexcept { funcs."
+                    << h.destroy_command->name << "(detail::_instance.handle(), h.handle()"
+                    << alloc_arg << "); }\n";
+                break;
+            case HandleInfo::Kind::Device:
+                header << "inline void destroy(" << name << " h" << alloc_param << ") noexcept { funcs."
+                    << h.destroy_command->name << "(detail::_device.handle(), h.handle()"
+                    << alloc_arg << "); }\n";
+                break;
+            }
+
+        }
+        header_guard.close();
+    }
+
     header << "\n} // namespace " << config.namespace_name << "\n";
 
     source << "#include \"" << config.header_path << "\"\n";
     source << "namespace " << config.namespace_name << " {\n\n";
     source << boilerplate::CPP_IMPL;
-    source << "Instance" << (config.generate_handle_class ? "::HandleType" : "") << " instance = nullptr;\n";
-    source << "// static const char* extensions[] = {";
-    bool first = true;
-    for (const Element& extension : included_extensions) {
-        sv name = extension.get_attr_value("name");
-        if (extension.get_attr_value("type") != "instance")
-            continue;
-
-        if (first)
-            first = false;
-        else
-            source << ", ";
-
-        source << "\"" << name << "\"";
-    }
-    source << "};\n\n";
 
     source << boilerplate::LOAD_UNLOAD_LIB_IMPL << "\n";
 
@@ -1977,7 +2137,7 @@ void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& so
     for (Command* cmd : required_commands.get()) {
         if (cmd == nullptr || ignore.contains(cmd->name)) continue;
         source_guard.transition(cmd->protect);
-        source << "    funcs." << cmd->name << " = (PFN_" << cmd->name << ")funcs.vkGetInstanceProcAddr(instance, \"" << cmd->name << "\");\n";
+        source << "    funcs." << cmd->name << " = (PFN_" << cmd->name << ")funcs.vkGetInstanceProcAddr(detail::_instance.handle(), \"" << cmd->name << "\");\n";
     }
     source_guard.close();
 
@@ -2719,7 +2879,7 @@ void Type::parse_funcpointer(const xml::Element& elem, vkg_gen::Arena& arena) {
     }
 }
 
-std::string vkg_gen::Generator::TypeParam::stringify() {
+std::string vkg_gen::Generator::TypeParam::stringify() const {
     std::stringstream ss;
     if (is_const())
         ss << "const ";

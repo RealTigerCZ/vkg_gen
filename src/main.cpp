@@ -3,7 +3,7 @@
  * @author Jaroslav Hucel (xhucel00@vutbr.cz)
  * @brief TODO:
  * @date Created: 30. 07. 2025
- * @date Modified: 25. 02. 2026
+ * @date Modified: 25. 03. 2026
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -128,15 +128,6 @@ void test(Config& config, vkg_gen::xml::Dom& dom) {
     std::ofstream header = open_or_throw(config.header_path, std::ios::out);
     std::ofstream source = open_or_throw(config.source_path, std::ios::out);
 
-
-    header << "#pragma once\n";
-    header << "#include <cstdint>\n";
-    header << "#include <cstddef>\n";
-    header << "\n";
-
-    //generate_base_types(dom, header);
-    //generate_API_constants(dom, header);
-    //generate_enums(dom, header);
 
     vkg_gen::Generator::Generator generator;
     generator.generate(dom, header, source, config);

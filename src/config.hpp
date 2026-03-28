@@ -4,7 +4,7 @@
  * @brief TODO:
  *
  * @date Created:  25. 02. 2026
- * @date Modified: 25. 02. 2026
+ * @date Modified: 26. 03. 2026
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -735,12 +735,13 @@ struct Config {
     bool generate_enum_numbers = true;  // false tries to remove all unnecessary enum numbers
     bool generate_c_type_keywords = true; // C requires (struct|union|enum) before type name, C++ doesn't
     bool apply_av1_and_vp9_naming_exceptions = true; // AV1 and VP9 would be translated to "Av1" and "Vp9" in C++
+    bool generate_command_aliases = true; // false means skipping aliases for commands, taht usually only adds extension suffix
 
     Compact compact = Compact::Normal;
     LogLevel log_level = LogLevel::Warning;
     DeprecationBehavior deprecation_behavior = DeprecationBehavior::GenerateWithDeprecationWarning;
     BetaExtensions beta_extensions = BetaExtensions::GenerateWithProtectMacro;
-
+    ExceptionBehavior exception_behavior = ExceptionBehavior::BothWithDefaultThrow;
     // C++ features: namespacing?
     // C++ features: modules?
 

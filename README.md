@@ -33,8 +33,8 @@ To produce the `out.cpp` and `out.hpp` files.
 - [x] P0-1: Namespace wrapping (`namespace vk { }`, rename FuncTable → Funcs)
 - [x] P0-2: Command name translation (`vkCreateBuffer` → `createBuffer`)
 - [x] P0-3: Enum extension deduplication (TASK 030226_01)
-- [ ] P0-4: Command alias resolution (generate forwarding wrappers)
-- [ ] P0-5: Header boilerplate matching ref (UniqueHandle, detail namespace, error classes, init declarations)
+- [x] P0-4: Command alias resolution (generate forwarding wrappers)
+- [x] P0-5: Header boilerplate matching ref (UniqueHandle, detail namespace, error classes, init declarations)
 - [ ] P0-6: Throw/NoThrow command generation (full ref match: void/VkResult/enumerate patterns)
 - [ ] P0-7: Source file (.cpp) generation (loadLib, initInstance, initDevice, error handling)
 - [ ] P0-8: Config from file + CLI arguments

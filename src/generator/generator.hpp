@@ -3,7 +3,7 @@
  * @author Jaroslav Hucel (xhucel00@vutbr.cz)
  * @brief
  * @date Created: 02. 11. 2025
- * @date Modified: 25. 03. 2026
+ * @date Modified: 27. 03. 2026
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -202,7 +202,7 @@ namespace vkg_gen::Generator {
 
         static TypeParam from_xml(const xml::Element& elem, vkg_gen::Arena& arena);
         // TODO: replace this with operator<<
-        std::string stringify();
+        std::string stringify() const;
         bool is_const() const;
 
     private:
@@ -515,6 +515,28 @@ namespace vkg_gen::Generator {
         Mtk,
     };
 
+    struct HandleInfo {
+        enum class Kind : uint8_t {
+            InstanceItself, // VkInstance
+            DeviceItself,   // VkDevice
+            Instance,       // Owned by Instance (e.g. VkSurfaceKHR)
+            Device,         // Owned by Device (e.g. VkBuffer)
+        };
+
+        enum class DestroyBehavior : uint8_t {
+            None,       // No cleanup command (e.g. PhysicalDevice, Queue)
+            Destroy,    // vkDestroy* — takes (parent, handle, alloc)
+            Free,       // vkFree* — simple free like vkFreeMemory(device, mem, alloc)
+            Release,    // vkRelease* — vkReleasePerformanceConfigurationINTEL
+        };
+
+        const Type& type;
+        Kind kind;
+        DestroyBehavior destroy_behavior = DestroyBehavior::None;
+        const Command* destroy_command = nullptr; // the vkDestroy*/vkFree* command, if any
+
+        bool is_destroyable() const { return destroy_command != nullptr; }
+    };
 
     struct NameTranslator {
         struct TransformedEnumName {
@@ -591,15 +613,18 @@ namespace vkg_gen::Generator {
         void parse_enums(vkg_gen::xml::Dom& dom);
         void parse_commands(vkg_gen::xml::Dom& dom);
         bool is_handle(sv type);
+        void cache_handles(std::vector<HandleInfo>& handles);
+
 
         void generate_enum(TypeEnum& enum_, std::ofstream& file);
-        void generate_enum_alias(Type& enum_, std::ofstream& file);
+        void generate_enum_alias(const Type& enum_, std::ofstream& file);
         void generate_member(Member& member, std::ofstream& file, sv struct_union, sv parent_name);
-        void generate_struct_union(Type& type, std::ofstream& file, sv struct_union);
-        void generate_struct(Type& struct_, std::ofstream& file);
-        void generate_union(Type& union_, std::ofstream& file);
-        void generate_bitmask(Type& bitmask, std::ofstream& file);
-        void generate_handle(Type& handle, std::ofstream& file, TypeEnum& obj_enum);
+        void generate_struct_union(const Type& type, std::ofstream& file, sv struct_union);
+        void generate_struct(const Type& struct_, std::ofstream& file);
+        void generate_union(const Type& union_, std::ofstream& file);
+        void generate_bitmask(const Type& bitmask, std::ofstream& file);
+        void generate_handle(const Type& handle, std::ofstream& file, TypeEnum& obj_enum);
+        void generate_error_classes(std::ofstream& file);
 
 
         std::ofstream& generate_command_params(Command& cmd, std::ofstream& file, bool is_end_of_line = true);
