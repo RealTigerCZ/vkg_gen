@@ -3,7 +3,7 @@
  * @author Jaroslav Hucel (xhucel00@vutbr.cz)
  * @brief
  * @date Created: 02. 11. 2025
- * @date Modified: 27. 03. 2026
+ * @date Modified: 30. 03. 2026
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -59,6 +59,33 @@ namespace vkg_gen::Generator {
         static Tags from_xml(const xml::Element& elem) { UNUSED(elem); NOT_IMPLEMENTED(); };
     };
 
+    class ApiType {
+    public:
+        enum class Value : uint8_t {
+            Any = 0xff,
+            Vulkan = 1 << 0,
+            VulkanSC = 1 << 1,
+        };
+        using enum Value;
+        using underlying_type = std::underlying_type_t<Value>;
+
+        constexpr ApiType() : value(Any) {}
+        constexpr ApiType(Value val) : value(val) {}
+        constexpr operator Value() const { return value; }
+        explicit operator bool() const { return !!(underlying_type)value; }
+        constexpr bool operator==(ApiType a) const { return value == a.value; }
+        constexpr bool operator!=(ApiType a) const { return value != a.value; }
+        constexpr ApiType operator&(ApiType b) const { return ApiType((Value)((underlying_type)value & (underlying_type)b.value)); }
+        constexpr ApiType operator|(ApiType b) const { return ApiType((Value)((underlying_type)value | (underlying_type)b.value)); }
+        constexpr ApiType operator&(Value b) const { return ApiType((Value)((underlying_type)value & (underlying_type)b)); }
+        constexpr ApiType operator|(Value b) const { return ApiType((Value)((underlying_type)value | (underlying_type)b)); }
+
+        bool is_vulkan() const { return (underlying_type)value & (underlying_type)Vulkan; }
+
+        static ApiType from_string(sv str);
+    private:
+        Value value;
+    };
 
     struct TypeHandle {
         // Name of the enum class containing VK_OBJECT_TYPE_*
@@ -104,7 +131,7 @@ namespace vkg_gen::Generator {
 
             sv protect;
             sv deprecated;
-            sv api;
+            ApiType api;
             bool is_alias = false;
             bool is_standalone_comment = false; //TODO:
             uint16_t ext_number = 0;
@@ -239,7 +266,7 @@ namespace vkg_gen::Generator {
 
         TypeParam type_param;
 
-        sv api;
+        ApiType api;
 
         // if the member is an array, len may be one or more of the following
         // things, separated by commas (one for each array indirection):
@@ -364,7 +391,7 @@ namespace vkg_gen::Generator {
         };
 
         sv name; // name attribute or present it <name>...</name>, always must be present
-        sv api; // api attribute, matches a <feature> api attribute, if present
+        ApiType api; // api attribute, matches a <feature> api attribute, if present
         sv alias; // alias attribute
         union {
             sv requires_ = {}; // requires attribute, pointing to another type
@@ -396,7 +423,7 @@ namespace vkg_gen::Generator {
 
     class CommandParameter {
     public:
-        sv api = {}; // comma separated list, optional
+        ApiType api = ApiType::Any;
         // TASK: 090126_07
         sv len = {};
         sv altlen = {};
@@ -418,7 +445,7 @@ namespace vkg_gen::Generator {
     struct  CommandAlias {
         sv name;
         sv alias;
-        sv api = {}; // comma separated list, optional
+        ApiType api = ApiType::Any; // comma separated list, optional
         sv comment = {}; // optional
 
         static CommandAlias from_xml(const xml::Element& elem, vkg_gen::Arena& arena);
@@ -444,7 +471,7 @@ namespace vkg_gen::Generator {
         sv conditional_rendering = {}; // required for vkCmd* commands.Not allowed for other commands. Values true/false
         bool allow_no_queues = false; // optional, default false
         sv export_ = {}; // comma separated list, optional
-        sv api = {}; // comma separated list, optional
+        ApiType api = {}; // comma separated list, optional
         sv description = {};
 
         xml::Element* implicit_extern_sync_params = nullptr;

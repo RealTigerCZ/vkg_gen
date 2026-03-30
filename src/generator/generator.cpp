@@ -3,7 +3,7 @@
  * @author Jaroslav Hucel (xhucel00@vutbr.cz)
  * @brief
  * @date Created: 12. 11. 2025
- * @date Modified: 29. 03. 2026
+ * @date Modified: 30. 03. 2026
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -385,7 +385,7 @@ Type::Type(const vkg_gen::xml::Element& elem, vkg_gen::Arena& arena) : elem(elem
             name = attr.value;
 
         else if (attr.name == "api")
-            api = attr.value;
+            api = ApiType::from_string(attr.value);
 
         else if (attr.name == "alias")
             alias = attr.value;
@@ -700,7 +700,7 @@ Member::Member(const vkg_gen::xml::Element& e, vkg_gen::Arena& arena, ParentType
 
     for (auto& attr : e.attrs) {
         if (attr.name == "api") {
-            api = attr.value;
+            api = ApiType::from_string(attr.value);
         } else if (attr.name == "comment") {
             comment = attr.value;
         } else if (attr.name == "len") {
@@ -773,7 +773,7 @@ TypeEnum::EnumItem TypeEnum::EnumItem::from_xml(const vkg_gen::xml::Element& ele
         } else if (attr.name == "comment") {
             item.comment = attr.value;
         } else if (attr.name == "api") {
-            item.api = attr.value;
+            item.api = ApiType::from_string(attr.value);
         } else if (attr.name == "protect") {
             item.protect = attr.value;
         } else if (attr.name == "deprecated") {
@@ -1151,7 +1151,7 @@ void Generator::generate_enum(TypeEnum& e, std::ofstream& file) {
             continue;
         }
 
-        if (!item.api.empty() && !std::ranges::contains(std::views::split(item.api, ','), "vulkan", [](auto&& rng) { return sv(rng); }))
+        if (!item.api.is_vulkan())
             continue;
 
         guard.transition(item.protect);
@@ -1197,8 +1197,8 @@ void vkg_gen::Generator::Generator::generate_member(Member& member, std::ofstrea
         file << StandaloneComment{ member.comment, config.generate_comments };
         return;
     }
-    // TODO: custom split
-    if (!member.api.empty() && !std::ranges::contains(std::views::split(member.api, ','), "vulkan", [](auto&& rng) { return sv(rng); })) {
+
+    if (!member.api.is_vulkan()) {
         std::cout << " TODO: Skipping member '" << member.type_param.stringify() << "' of " << struct_union << " '" << parent_name << "', because it does not contain 'vulkan' api.\n";
         return;
     }
@@ -1364,7 +1364,7 @@ std::ofstream& vkg_gen::Generator::Generator::generate_command_params(Command& c
     file << "(";
     bool first = true;
     for (auto& param : cmd.parameters) {
-        if (!param.api.empty() && !std::ranges::contains(std::views::split(param.api, ','), "vulkan", [](auto&& rng) { return sv(rng); })) {
+        if (!param.api.is_vulkan()) {
             std::cout << " TODO: Skipping parameter '" << param.type_param.stringify() << "' of command '" << cmd.name << "', because it does not contain 'vulkan' api.\n";
             continue;
         }
@@ -1453,7 +1453,7 @@ void vkg_gen::Generator::Generator::generate_command_wrapper(Command& cmd, std::
 
     bool first = true;
     for (auto& param : cmd.parameters) {
-        if (!param.api.empty() && !std::ranges::contains(std::views::split(param.api, ','), "vulkan", [](auto&& rng) { return sv(rng); })) {
+        if (!param.api.is_vulkan()) {
             std::cout << " TODO: Skipping parameter '" << param.type_param.stringify() << "' of command '" << cmd.name << "', because it does not contain 'vulkan' api.\n";
             continue;
         }
@@ -1591,7 +1591,7 @@ void Generator::generate_wrapper_params(const Command& cmd, const CommandClassif
         if (i == cc.output_param_idx && !for_nothrow_output) continue; // generate output param for _noThrow variant TODO: could use std::expected
 
         auto& param = cmd.parameters[i];
-        if (!param.api.empty() && !std::ranges::contains(std::views::split(param.api, ','), "vulkan", [](auto&& rng) { return sv(rng); })) {
+        if (!param.api.is_vulkan()) {
             continue;
         }
 
@@ -1650,7 +1650,7 @@ void Generator::generate_call_args(const Command& cmd, const CommandClassificati
     bool first = true;
     for (int i = 0; i < (int)cmd.parameters.size(); ++i) {
         auto& param = cmd.parameters[i];
-        if (!param.api.empty() && !std::ranges::contains(std::views::split(param.api, ','), "vulkan", [](auto&& rng) { return sv(rng); })) {
+        if (!param.api.is_vulkan()) {
             continue;
         }
 
@@ -1761,7 +1761,7 @@ void Generator::generate_wrapper_result_void(const Command& cmd, const CommandCl
         for (int i = 0; i < (int)cmd.parameters.size(); ++i) {
             if (i == cc.implicit_param_idx || i == cc.output_param_idx) continue;
             auto& param = cmd.parameters[i];
-            if (!param.api.empty() && !std::ranges::contains(std::views::split(param.api, ','), "vulkan", [](auto&& rng) { return sv(rng); })) continue;
+            if (!param.api.is_vulkan()) continue;
             if (first) first = false;
             else file << ", ";
             file << param.type_param.name;
@@ -1806,7 +1806,7 @@ void Generator::generate_wrapper_result_create(const Command& cmd, const Command
         for (int i = 0; i < (int)cmd.parameters.size(); ++i) {
             if (i == cc.implicit_param_idx || i == cc.output_param_idx) continue;
             auto& param = cmd.parameters[i];
-            if (!param.api.empty() && !std::ranges::contains(std::views::split(param.api, ','), "vulkan", [](auto&& rng) { return sv(rng); })) continue;
+            if (!param.api.is_vulkan()) continue;
             if (first) first = false;
             else file << ", ";
             file << param.type_param.name;
@@ -1896,7 +1896,7 @@ void Generator::generate_wrapper_result_outparam(const Command& cmd, const Comma
             if (i == cc.implicit_param_idx) continue;
             if (i == cc.output_param_idx && !by_ref) continue;
             auto& param = cmd.parameters[i];
-            if (!param.api.empty() && !std::ranges::contains(std::views::split(param.api, ','), "vulkan", [](auto&& rng) { return sv(rng); })) continue;
+            if (!param.api.is_vulkan()) continue;
             if (first) first = false;
             else file << ", ";
             file << param.type_param.name;
@@ -2700,7 +2700,7 @@ CommandParameter CommandParameter::from_xml(const xml::Element& elem, vkg_gen::A
 
     for (const Attribute& attr : elem.attrs) {
         if (attr.name == "api")
-            param.api = attr.value;
+            param.api = ApiType::from_string(attr.value);
         else if (attr.name == "len")
             param.len = attr.value;
         else if (attr.name == "altlen")
@@ -2762,7 +2762,7 @@ Command Command::from_xml(const xml::Element& elem, vkg_gen::Arena& arena) {
         else if (attr.name == "export")
             cmd.export_ = attr.value;
         else if (attr.name == "api")
-            cmd.api = attr.value;
+            cmd.api = ApiType::from_string(attr.value);
         else if (attr.name == "comment")
             cmd.comment = attr.value;
         else if (attr.name == "alias" || attr.name == "name")
@@ -2847,7 +2847,7 @@ CommandAlias vkg_gen::Generator::CommandAlias::from_xml(const xml::Element& elem
         else if (attr.name == "comment")
             ca.comment = attr.value;
         else if (attr.name == "api")
-            ca.api = attr.value;
+            ca.api = ApiType::from_string(attr.value);
         else {
             std::cerr << elem << std::endl;
             throw my_error{ "Unknown attribute for command: " + std::string(attr.name) };
@@ -3616,3 +3616,29 @@ TypeParam::State vkg_gen::Generator::TypeParam::parse_string(sv text, State stat
         throw my_error{ "Can't have anything after bitselect (:<num>)!" };
     }
 }
+
+ApiType vkg_gen::Generator::ApiType::from_string(sv str) {
+    if (str.empty())
+        return ApiType::Any;
+
+    ApiType type((Value)0);
+    size_t split;
+    do {
+        split = str.find(',');
+        sv part = str.substr(0, split);
+        if (part == "vulkan")
+            type = type | ApiType::Vulkan;
+        else if (part == "vulkansc")
+            type = type | ApiType::VulkanSC;
+        else
+            throw my_error{ "Unknown api type! '" + std::string(part) + "'" };
+
+        if (split == sv::npos)
+            break;
+
+        str.remove_prefix(split + 1);
+    } while (!str.empty()); // trailing comma check
+
+    return type;
+}
+
