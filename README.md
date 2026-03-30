@@ -35,8 +35,15 @@ To produce the `out.cpp` and `out.hpp` files.
 - [x] P0-3: Enum extension deduplication (TASK 030226_01)
 - [x] P0-4: Command alias resolution (generate forwarding wrappers)
 - [x] P0-5: Header boilerplate matching ref (UniqueHandle, detail namespace, error classes, init declarations)
-- [ ] P0-6: Throw/NoThrow command generation (full ref match: void/VkResult/enumerate patterns)
-- [ ] P0-7: Source file (.cpp) generation (loadLib, initInstance, initDevice, error handling)
+- [x] P0-6: Throw/NoThrow command generation (void/VkResult patterns, handle translation, implicit device/instance)
+- [ ] P0-7: Source file (.cpp) generation + deferred command patterns
+  - [ ] P0-7a: Enumerate-style commands (two-call pattern, vector return, .cpp implementations)
+  - [ ] P0-7b: PhysicalDevice convenience overloads (default to `physicalDevice()`)
+  - [ ] P0-7c: UniqueHandle create variants (`createXxxUnique_throw/noThrow`)
+  - [ ] P0-7d: Proper `throwResultException` with per-Result exception mapping
+  - [ ] P0-7e: `resultToString`, `Error` constructors
+  - [ ] P0-7f: `loadLib_throw/noThrow`, `initInstance`, `initDevice` with PFN loading
+  - [ ] P0-7g: Instance-level vs device-level PFN loading split
 - [ ] P0-8: Config from file + CLI arguments
 
 ### P1 — Important Quality

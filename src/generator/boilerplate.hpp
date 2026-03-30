@@ -225,6 +225,13 @@ namespace boilerplate {
         "template<typename Qual> inline Qual getInstanceProcAddr(const char* name) noexcept { return reinterpret_cast<Qual>(funcs.vkGetInstanceProcAddr(detail::_instance.handle(), name)); }\n"
         "template<typename Qual> inline Qual getDeviceProcAddr(const char* name) noexcept { return reinterpret_cast<Qual>(funcs.vkGetDeviceProcAddr(detail::_device.handle(), name)); }\n\n"sv;
 
+    static constexpr std::string_view PROCESS_RESULT_TEMPLATE =
+        "namespace detail {\n"
+        "    template<typename Qual> void processResult(Result r, Qual& handle, const char* functionName) {"
+        " if (r > Result::eSuccess) { destroy(handle); handle = nullptr; }"
+        " if (r != Result::eSuccess) throwResultException(r, functionName); }\n"
+        "}\n\n"sv;
+
     static constexpr std::string_view CPP_IMPL =
         "#include <dlfcn.h>\n"
         "#include <assert.h>\n"
@@ -234,7 +241,18 @@ namespace boilerplate {
         "PhysicalDevice detail::_physicalDevice = nullptr;\n"
         "Device detail::_device = nullptr;\n"
         "uint32_t detail::_instanceVersion = 0;\n"
-        "Funcs detail::_funcs;\n\n"sv;
+        "Funcs detail::_funcs;\n\n"
+        "// TODO P0-7: generate proper throwResultException, Error constructors\n"
+        "void throwResultException(Result result, const char* funcName) { throw VkgError(funcName); }\n"
+        "void throwResultExceptionWithMessage(Result result, const char* message) { throw VkgError(message); }\n"
+        "Error::Error(const char* msgHeader, const char* msgBody) noexcept {\n"
+        "    size_t l1 = strlen(msgHeader); size_t l2 = strlen(msgBody);\n"
+        "    _msg = reinterpret_cast<char*>(malloc(l1 + l2 + 1));\n"
+        "    if (_msg) { memcpy(_msg, msgHeader, l1); memcpy(_msg + l1, msgBody, l2 + 1); }\n"
+        "}\n"
+        "Error::Error(const char* funcName, Result) noexcept {\n"
+        "    if (funcName) { size_t n = strlen(funcName) + 1; _msg = reinterpret_cast<char*>(malloc(n)); if (_msg) strncpy(_msg, funcName, n); }\n"
+        "}\n\n"sv;
 
     static constexpr std::string_view LOAD_UNLOAD_LIB_IMPL =
         "void loadLib_throw(const char* libPath) {\n"

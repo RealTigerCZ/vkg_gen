@@ -3,7 +3,7 @@
  * @author Jaroslav Hucel (xhucel00@vutbr.cz)
  * @brief
  * @date Created: 12. 11. 2025
- * @date Modified: 28. 03. 2026
+ * @date Modified: 29. 03. 2026
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -1469,6 +1469,442 @@ void vkg_gen::Generator::Generator::generate_command_wrapper(Command& cmd, std::
 
 }
 
+CommandClassification Generator::classify_command(const Command& cmd) {
+    CommandClassification cc;
+
+    // Non-standard return type → pass-through
+    if (cmd.type != "void" && cmd.type != "VkResult") {
+        cc.pattern = CommandClassification::Pattern::Other;
+        return cc;
+    }
+
+    // Detect implicit first param (VkDevice or VkInstance)
+    if (!cmd.parameters.empty()) {
+        sv first_type = cmd.parameters[0].type_param.type;
+        if (first_type == "VkDevice") {
+            cc.implicit_param_idx = 0;
+            cc.implicit_global = "detail::_device";
+        } else if (first_type == "VkInstance") {
+            cc.implicit_param_idx = 0;
+            cc.implicit_global = "detail::_instance";
+        }
+    }
+
+    // Detect allocator param (const VkAllocationCallbacks*)
+    for (int i = 0; i < (int)cmd.parameters.size(); ++i) {
+        if (cmd.parameters[i].type_param.type == "VkAllocationCallbacks"
+            && cmd.parameters[i].type_param.is_const()
+            && !cmd.parameters[i].type_param.post_quals.empty()
+            && bool(cmd.parameters[i].type_param.post_quals[0] & TypeParam::PostQualifier::Pointer)) {
+            cc.allocator_param_idx = i;
+            break;
+        }
+    }
+
+    // Detect enumerate pattern: a count param (uint32_t*) + array param with len referencing it
+    for (int i = 0; i < (int)cmd.parameters.size(); ++i) {
+        auto& p = cmd.parameters[i];
+        if (p.type_param.type == "uint32_t"
+            && !p.type_param.post_quals.empty()
+            && bool(p.type_param.post_quals[0] & TypeParam::PostQualifier::Pointer)
+            && p.optional == "false,true") {
+            // Look for an array param that references this count param
+            for (int j = 0; j < (int)cmd.parameters.size(); ++j) {
+                if (i == j) continue;
+                if (cmd.parameters[j].len == p.type_param.name) {
+                    cc.count_param_idx = i;
+                    cc.array_param_idx = j;
+                    //cc.pattern = CommandClassification::Pattern::Enumerate;
+                    // TODO: handle enumerate patterns P0-7
+                    cc.pattern = CommandClassification::Pattern::Other;
+                    return cc;
+                }
+            }
+        }
+    }
+
+    // Check last param for output detection
+    if (!cmd.parameters.empty()) {
+        int last_idx = (int)cmd.parameters.size() - 1;
+        auto& last = cmd.parameters[last_idx];
+        bool is_pointer = !last.type_param.post_quals.empty()
+            && bool(last.type_param.post_quals[0] & TypeParam::PostQualifier::Pointer);
+        bool is_non_const = !last.type_param.is_const();
+
+        if (is_pointer && is_non_const && last_idx != cc.allocator_param_idx) {
+            bool last_is_handle = is_handle(last.type_param.type);
+
+            if (last_is_handle) {
+                cc.output_param_idx = last_idx;
+                if (cmd.type == "VkResult") {
+                    cc.pattern = CommandClassification::Pattern::ResultCreate;
+                } else {
+                    assert(cmd.type == "void");
+                    cc.pattern = CommandClassification::Pattern::VoidOutParam;
+                }
+                return cc;
+            }
+
+            if (last.type_param.type != "void" && last.type_param.type != "uint32_t") {
+                cc.output_param_idx = last_idx;
+                if (cmd.type == "void") {
+                    cc.pattern = CommandClassification::Pattern::VoidOutParam;
+                    return cc;
+                } else {
+                    assert(cmd.type == "VkResult");
+                    cc.pattern = CommandClassification::Pattern::ResultOutParam;
+                    return cc;
+                }
+            }
+        }
+    }
+
+    // No output data
+    if (cmd.type == "void") {
+        cc.pattern = CommandClassification::Pattern::Void;
+    } else {
+        assert(cmd.type == "VkResult");
+        cc.pattern = CommandClassification::Pattern::ResultVoid;
+    }
+    return cc;
+}
+
+bool Generator::has_pnext(sv struct_type_name) {
+    auto it = types.find(struct_type_name);
+    assert(it != types.end());
+    auto& t = it->second;
+    if (t.category != Type::Category::Struct && t.category != Type::Category::Union) return false;
+    for (auto& m : t.struct_->members) {
+        if (m.type_param.name == "pNext") return true;
+    }
+    return false;
+}
+
+// Writes wrapper parameter list for C++ command wrappers.
+// Differs from generate_command_params (PFN): uses Handle types (not HandleType),
+// skips implicit device/instance, skips allocator in throw versions, transforms struct pointers to references.
+void Generator::generate_wrapper_params(const Command& cmd, const CommandClassification& cc, std::ofstream& file, bool for_nothrow_output) {
+    file << "(";
+    bool first = true;
+    for (int i = 0; i < (int)cmd.parameters.size(); ++i) {
+        if (i == cc.implicit_param_idx) continue;
+        if (i == cc.output_param_idx && !for_nothrow_output) continue; // generate output param for _noThrow variant TODO: could use std::expected
+
+        auto& param = cmd.parameters[i];
+        if (!param.api.empty() && !std::ranges::contains(std::views::split(param.api, ','), "vulkan", [](auto&& rng) { return sv(rng); })) {
+            continue;
+        }
+
+        if (first) first = false;
+        else file << ", ";
+
+        // Output param for _noThrow: Handle& or Struct&
+        if (i == cc.output_param_idx && for_nothrow_output) {
+            sv type = param.type_param.type;
+            if (type.starts_with("Vk")) type.remove_prefix(2);
+            file << type << "& " << param.type_param.name;
+            continue;
+        }
+
+        if (i == cc.allocator_param_idx) {
+            // const VkAllocationCallbacks* pAllocator → const AllocationCallbacks* pAllocator = nullptr
+            // Default value only if no non-default params follow
+            bool has_trailing_params = false;
+            for (int j = i + 1; j < (int)cmd.parameters.size(); ++j) {
+                if (j == cc.implicit_param_idx) continue;
+                if (j == cc.output_param_idx && !for_nothrow_output) continue;
+                has_trailing_params = true;
+                break;
+            }
+            file << "const AllocationCallbacks* " << param.type_param.name;
+            if (!has_trailing_params) file << " = nullptr";
+            continue;
+        }
+
+        Type::Category type_param_category = types.at(param.type_param.type).category;
+        bool param_is_handle = config.generate_handle_class && type_param_category == Type::Category::Handle;
+
+        // Only convert single-pointer-to-const-struct to reference (not void*, not double pointers)
+        bool is_const_struct_ptr = param.type_param.is_const()
+            && param.type_param.post_quals.size() == 1
+            && bool(param.type_param.post_quals[0] & TypeParam::PostQualifier::Pointer)
+            && !param_is_handle
+            && (type_param_category == Type::Category::Struct || type_param_category == Type::Category::Union);
+
+        if (is_const_struct_ptr) {
+            // const VkXxxInfo* pInfo → const XxxInfo& info
+            sv type = param.type_param.type;
+            if (type.starts_with("Vk")) type.remove_prefix(2);
+            file << "const " << type << "& " << param.type_param.name;
+        } else {
+            file << param.type_param.stringify();
+        }
+    }
+    file << ")";
+}
+
+// Writes call arguments for the funcs.vkXxx(...) invocation.
+void Generator::generate_call_args(const Command& cmd, const CommandClassification& cc,
+    std::ofstream& file, bool for_nothrow) {
+    file << "(";
+    bool first = true;
+    for (int i = 0; i < (int)cmd.parameters.size(); ++i) {
+        auto& param = cmd.parameters[i];
+        if (!param.api.empty() && !std::ranges::contains(std::views::split(param.api, ','), "vulkan", [](auto&& rng) { return sv(rng); })) {
+            continue;
+        }
+
+        if (first) first = false;
+        else file << ", ";
+
+        if (i == cc.implicit_param_idx) {
+            file << cc.implicit_global << ".handle()";
+            continue;
+        }
+        if (i == cc.allocator_param_idx) {
+            file << param.type_param.name;
+            continue;
+        }
+        if (i == cc.output_param_idx) {
+            if (for_nothrow) {
+                // _noThrow: output goes through reinterpret_cast
+                bool out_is_handle = is_handle(param.type_param.type);
+                if (out_is_handle) {
+                    sv type = param.type_param.type;
+                    if (type.starts_with("Vk")) type.remove_prefix(2);
+                    file << "reinterpret_cast<" << type << "::HandleType*>(&" << param.type_param.name << ")";
+                } else {
+                    file << "&" << param.type_param.name;
+                }
+            } else {
+                // _throw: output goes through &h (local variable)
+                file << "&h";
+            }
+            continue;
+        }
+
+        Type::Category type_param_category = types.at(param.type_param.type).category;
+        bool param_is_handle = config.generate_handle_class && type_param_category == Type::Category::Handle;
+
+        bool is_const_struct_ptr = param.type_param.is_const()
+            && param.type_param.post_quals.size() == 1
+            && bool(param.type_param.post_quals[0] & TypeParam::PostQualifier::Pointer)
+            && !param_is_handle
+            && (type_param_category == Type::Category::Struct || type_param_category == Type::Category::Union);
+
+
+        if (is_const_struct_ptr) {
+            // Wrapper takes by reference, PFN takes by pointer
+            file << "&" << param.type_param.name;
+        } else if (param_is_handle) {
+            bool is_pointer = !param.type_param.post_quals.empty()
+                && bool(param.type_param.post_quals[0] & TypeParam::PostQualifier::Pointer);
+            if (is_pointer && param.type_param.is_const()) {
+                sv type = param.type_param.type;
+                if (type.starts_with("Vk")) type.remove_prefix(2);
+                file << "reinterpret_cast<const " << type << "::HandleType*>(" << param.type_param.name << ")";
+            } else if (is_pointer) {
+                sv type = param.type_param.type;
+                if (type.starts_with("Vk")) type.remove_prefix(2);
+                file << "reinterpret_cast<" << type << "::HandleType*>(" << param.type_param.name << ")";
+            } else {
+                file << param.type_param.name << ".handle()";
+            }
+        } else {
+            file << param.type_param.name;
+        }
+    }
+    file << ")";
+}
+
+// Pattern 1: void commands — single noexcept inline wrapper
+void Generator::generate_wrapper_void(const Command& cmd, const CommandClassification& cc, std::ofstream& file) {
+    file << "inline void " << NameTranslator::from_command_name(cmd.name);
+    generate_wrapper_params(cmd, cc, file);
+    file << " noexcept { funcs." << cmd.name;
+    generate_call_args(cmd, cc, file);
+    file << "; }\n";
+}
+
+// Pattern 2: VkResult → void — _throw, _noThrow, default
+void Generator::generate_wrapper_result_void(const Command& cmd, const CommandClassification& cc, std::ofstream& file) {
+    auto name = NameTranslator::from_command_name(cmd.name);
+
+    if (should_emit_throw()) {
+        sv suffix = should_emit_default() ? "_throw" : "";
+        file << "inline void " << name << suffix;
+        generate_wrapper_params(cmd, cc, file);
+        file << " { Result r = funcs." << cmd.name;
+        generate_call_args(cmd, cc, file);
+        file << "; checkForSuccessValue(r, \"" << cmd.name << "\"); }\n";
+    }
+
+    if (should_emit_nothrow()) {
+        sv suffix = should_emit_default() ? "_noThrow" : "";
+        file << "inline Result " << name << suffix;
+        generate_wrapper_params(cmd, cc, file);
+        file << " noexcept { return funcs." << cmd.name;
+        generate_call_args(cmd, cc, file);
+        file << "; }\n";
+    }
+
+    if (should_emit_default()) {
+        file << "inline " << (default_is_throw() ? "void " : "Result ") << name;
+        generate_wrapper_params(cmd, cc, file);
+        if (!default_is_throw()) file << " noexcept";
+        file << " { ";
+        if (!default_is_throw()) file << "return ";
+        file << name << (default_is_throw() ? "_throw" : "_noThrow");
+        // Forward just the param names
+        file << "(";
+        bool first = true;
+        for (int i = 0; i < (int)cmd.parameters.size(); ++i) {
+            if (i == cc.implicit_param_idx || i == cc.output_param_idx) continue;
+            auto& param = cmd.parameters[i];
+            if (!param.api.empty() && !std::ranges::contains(std::views::split(param.api, ','), "vulkan", [](auto&& rng) { return sv(rng); })) continue;
+            if (first) first = false;
+            else file << ", ";
+            file << param.type_param.name;
+        }
+        file << "); }\n";
+    }
+}
+
+// Pattern 3: VkResult → creates handle — _throw, _noThrow, default
+void Generator::generate_wrapper_result_create(const Command& cmd, const CommandClassification& cc, std::ofstream& file) {
+    auto name = NameTranslator::from_command_name(cmd.name);
+    auto& out_param = cmd.parameters[cc.output_param_idx];
+    sv out_type = out_param.type_param.type;
+    if (out_type.starts_with("Vk")) out_type.remove_prefix(2);
+
+    if (should_emit_throw()) {
+        sv suffix = should_emit_default() ? "_throw" : "";
+        file << "inline " << out_type << " " << name << suffix;
+        generate_wrapper_params(cmd, cc, file); // skips output param
+        file << " { " << out_type << "::HandleType h; Result r = funcs." << cmd.name;
+        generate_call_args(cmd, cc, file, false);
+        if (cc.output_has_destroy)
+            file << "; detail::processResult(r, h, \"" << cmd.name << "\"); return h; }\n";
+        else
+            file << "; checkForSuccessValue(r, \"" << cmd.name << "\"); return h; }\n";
+    }
+
+    if (should_emit_nothrow()) {
+        sv suffix = should_emit_default() ? "_noThrow" : "";
+        file << "inline Result " << name << suffix;
+        generate_wrapper_params(cmd, cc, file, true); // includes output param as Handle&
+        file << " noexcept { return funcs." << cmd.name;
+        generate_call_args(cmd, cc, file, true);
+        file << "; }\n";
+    }
+
+    if (should_emit_default()) {
+        file << "inline " << out_type << " " << name;
+        generate_wrapper_params(cmd, cc, file);
+        file << " { return " << name << "_throw(";
+        bool first = true;
+        for (int i = 0; i < (int)cmd.parameters.size(); ++i) {
+            if (i == cc.implicit_param_idx || i == cc.output_param_idx) continue;
+            auto& param = cmd.parameters[i];
+            if (!param.api.empty() && !std::ranges::contains(std::views::split(param.api, ','), "vulkan", [](auto&& rng) { return sv(rng); })) continue;
+            if (first) first = false;
+            else file << ", ";
+            file << param.type_param.name;
+        }
+        file << "); }\n";
+    }
+}
+
+// Pattern 4: void → out-param — single noexcept wrapper
+void Generator::generate_wrapper_void_outparam(const Command& cmd, const CommandClassification& cc, std::ofstream& file) {
+    auto name = NameTranslator::from_command_name(cmd.name);
+    auto& out_param = cmd.parameters[cc.output_param_idx];
+    sv out_type = out_param.type_param.type;
+    if (out_type.starts_with("Vk")) out_type.remove_prefix(2);
+
+    bool out_is_handle = is_handle(out_param.type_param.type);
+    // Handles always return by value. Structs with pNext return by reference (caller sets chain).
+    bool by_ref = !out_is_handle && has_pnext(out_param.type_param.type);
+
+    if (by_ref) {
+        // void getPhysicalDeviceProperties2(PhysicalDevice pd, PhysicalDeviceProperties2& p) noexcept
+        file << "inline void " << name;
+        generate_wrapper_params(cmd, cc, file, true); // include output as ref
+        file << " noexcept { funcs." << cmd.name;
+        generate_call_args(cmd, cc, file, true);
+        file << "; }\n";
+    } else {
+        // Return by value: Queue getDeviceQueue(...), PhysicalDeviceProperties getPhysicalDeviceProperties(...)
+        sv local_type = out_is_handle ? sv("::HandleType") : sv("");
+        file << "inline " << out_type << " " << name;
+        generate_wrapper_params(cmd, cc, file); // skip output
+        file << " noexcept { " << out_type << local_type << " h; funcs." << cmd.name;
+        generate_call_args(cmd, cc, file, false);
+        file << "; return h; }\n";
+    }
+}
+
+// Pattern 6: VkResult + non-handle out-param — _throw, _noThrow, default
+void Generator::generate_wrapper_result_outparam(const Command& cmd, const CommandClassification& cc, std::ofstream& file) {
+    auto name = NameTranslator::from_command_name(cmd.name);
+    auto& out_param = cmd.parameters[cc.output_param_idx];
+    sv out_type = out_param.type_param.type;
+    if (out_type.starts_with("Vk")) out_type.remove_prefix(2);
+
+    bool by_ref = has_pnext(out_param.type_param.type);
+
+    if (should_emit_throw()) {
+        sv suffix = should_emit_default() ? "_throw" : "";
+        if (by_ref) {
+            // _throw takes output by ref and returns void
+            file << "inline void " << name << suffix;
+            generate_wrapper_params(cmd, cc, file, true);
+            file << " { Result r = funcs." << cmd.name;
+            generate_call_args(cmd, cc, file, true);
+            file << "; checkForSuccessValue(r, \"" << cmd.name << "\"); }\n";
+        } else {
+            // _throw returns struct by value
+            file << "inline " << out_type << " " << name << suffix;
+            generate_wrapper_params(cmd, cc, file);
+            file << " { " << out_type << " h; Result r = funcs." << cmd.name;
+            generate_call_args(cmd, cc, file, false);
+            file << "; checkForSuccessValue(r, \"" << cmd.name << "\"); return h; }\n";
+        }
+    }
+
+    if (should_emit_nothrow()) {
+        sv suffix = should_emit_default() ? "_noThrow" : "";
+        file << "inline Result " << name << suffix;
+        generate_wrapper_params(cmd, cc, file, true);
+        file << " noexcept { return funcs." << cmd.name;
+        generate_call_args(cmd, cc, file, true);
+        file << "; }\n";
+    }
+
+    if (should_emit_default()) {
+        if (by_ref) {
+            file << "inline void " << name;
+            generate_wrapper_params(cmd, cc, file, true);
+            file << " { " << name << "_throw(";
+        } else {
+            file << "inline " << out_type << " " << name;
+            generate_wrapper_params(cmd, cc, file);
+            file << " { return " << name << "_throw(";
+        }
+        bool first = true;
+        for (int i = 0; i < (int)cmd.parameters.size(); ++i) {
+            if (i == cc.implicit_param_idx) continue;
+            if (i == cc.output_param_idx && !by_ref) continue;
+            auto& param = cmd.parameters[i];
+            if (!param.api.empty() && !std::ranges::contains(std::views::split(param.api, ','), "vulkan", [](auto&& rng) { return sv(rng); })) continue;
+            if (first) first = false;
+            else file << ", ";
+            file << param.type_param.name;
+        }
+        file << "); }\n";
+    }
+}
+
 void Generator::add_required_type(sv name) {
     std::vector<Type*> required_types;
     add_required_type(name, required_types);
@@ -2063,24 +2499,8 @@ void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& so
         }
     }
 
-    // --- Command wrappers ---
-    for (Command* cmd : required_commands.get()) {
-        if (cmd == nullptr) continue;
-        header_guard.transition(cmd->protect);
-        generate_command_wrapper(*cmd, header);
-    }
-    header_guard.close();
-
-    // --- Command alias wrappers ---
-    if (config.generate_command_aliases) {
-        for (CommandAlias* ca : required_commands_aliases.get()) {
-            if (ca == nullptr) continue;
-            header << "inline constexpr auto& " << NameTranslator::from_command_name(ca->name)
-                << " = " << NameTranslator::from_command_name(ca->alias) << ";\n";
-        }
-    }
-
     // --- destroy() overloads for UniqueHandle ---
+    // Must come before command wrappers because processResult calls destroy()
     if (config.generate_handle_class) {
         header << "\n";
         for (const auto& h : handles) {
@@ -2115,6 +2535,71 @@ void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& so
 
         }
         header_guard.close();
+    }
+
+    if (config.exception_behavior != ExceptionBehavior::NoThrowOnly)
+        header << boilerplate::PROCESS_RESULT_TEMPLATE;
+
+    // Collect destroy/free/release commands that already have destroy() overloads
+    std::unordered_set<sv> destroy_commands;
+    for (const auto& h : handles) {
+        if (h.is_destroyable() && h.destroy_command)
+            destroy_commands.insert(h.destroy_command->name);
+    }
+
+    // --- Command wrappers ---
+    for (Command* cmd : required_commands.get()) {
+        if (cmd == nullptr) continue;
+        // Skip commands that already have destroy() overloads
+        if (destroy_commands.contains(cmd->name)) continue;
+        header_guard.transition(cmd->protect);
+
+        auto cc = classify_command(*cmd);
+        // For ResultCreate: check if output handle has a destroy() overload
+        if (cc.pattern == CommandClassification::Pattern::ResultCreate && cc.output_param_idx >= 0) {
+            // Check if any destroy command targets this handle type
+            // by looking at the handles vector
+            sv out_type = cmd->parameters[cc.output_param_idx].type_param.type;
+            for (const auto& h : handles) {
+                if (h.type.name == out_type && h.is_destroyable()) {
+                    cc.output_has_destroy = true;
+                    break;
+                }
+            }
+        }
+        switch (cc.pattern) {
+        case CommandClassification::Pattern::Void:
+            generate_wrapper_void(*cmd, cc, header);
+            break;
+        case CommandClassification::Pattern::ResultVoid:
+            generate_wrapper_result_void(*cmd, cc, header);
+            break;
+        case CommandClassification::Pattern::ResultCreate:
+            generate_wrapper_result_create(*cmd, cc, header);
+            break;
+        case CommandClassification::Pattern::VoidOutParam:
+            generate_wrapper_void_outparam(*cmd, cc, header);
+            break;
+        case CommandClassification::Pattern::ResultOutParam:
+            generate_wrapper_result_outparam(*cmd, cc, header);
+            break;
+        case CommandClassification::Pattern::Enumerate:
+        case CommandClassification::Pattern::Other:
+            generate_command_wrapper(*cmd, header);
+            break;
+        }
+    }
+    header_guard.close();
+
+    // --- Command alias wrappers ---
+    if (config.generate_command_aliases) {
+        for (CommandAlias* ca : required_commands_aliases.get()) {
+            if (ca == nullptr) continue;
+            // Skip aliases that point to destroy commands (already have destroy() overloads)
+            if (destroy_commands.contains(ca->alias)) continue;
+            header << "inline constexpr auto& " << NameTranslator::from_command_name(ca->name)
+                << " = " << NameTranslator::from_command_name(ca->alias) << ";\n";
+        }
     }
 
     header << "\n} // namespace " << config.namespace_name << "\n";

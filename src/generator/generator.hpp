@@ -515,6 +515,26 @@ namespace vkg_gen::Generator {
         Mtk,
     };
 
+    struct CommandClassification {
+        enum class Pattern : uint8_t {
+            Void,           // void return, no error checking
+            ResultVoid,     // VkResult return, no output data
+            ResultCreate,   // VkResult return, creates handle via out-param
+            VoidOutParam,   // void return, fills struct via out-param
+            Enumerate,      // two-call enumerate pattern
+            ResultOutParam, // VkResult + non-handle out-param
+            Other,          // non-standard return type — pass-through
+        };
+        Pattern pattern;
+        int implicit_param_idx = -1;     // device/instance to substitute with global
+        sv implicit_global;              // "detail::_device" or "detail::_instance"
+        int output_param_idx = -1;       // handle or struct output
+        int allocator_param_idx = -1;    // VkAllocationCallbacks*
+        int count_param_idx = -1;        // for enumerate (unused for now)
+        int array_param_idx = -1;        // for enumerate (unused for now)
+        bool output_has_destroy = false; // ResultCreate: output handle has destroy() overload
+    };
+
     struct HandleInfo {
         enum class Kind : uint8_t {
             InstanceItself, // VkInstance
@@ -632,6 +652,26 @@ namespace vkg_gen::Generator {
         void generate_command_PFN(Command& cmd, std::ofstream& file);
         void generate_command_wrapper(Command& cmd, std::ofstream& file);
         void generate_funcpointer(Type& type, std::ofstream& file);
+
+        // P0-6: Command classification and pattern-specific generators
+        CommandClassification classify_command(const Command& cmd);
+        bool has_pnext(sv struct_type_name);
+
+        bool should_emit_throw() const;
+        bool should_emit_nothrow() const;
+        bool should_emit_default() const;
+        bool default_is_throw() const;
+
+        void generate_wrapper_params(const Command& cmd, const CommandClassification& cc,
+            std::ofstream& file, bool for_nothrow_output = false);
+        void generate_call_args(const Command& cmd, const CommandClassification& cc,
+            std::ofstream& file, bool for_nothrow = false);
+
+        void generate_wrapper_void(const Command& cmd, const CommandClassification& cc, std::ofstream& file);
+        void generate_wrapper_result_void(const Command& cmd, const CommandClassification& cc, std::ofstream& file);
+        void generate_wrapper_result_create(const Command& cmd, const CommandClassification& cc, std::ofstream& file);
+        void generate_wrapper_void_outparam(const Command& cmd, const CommandClassification& cc, std::ofstream& file);
+        void generate_wrapper_result_outparam(const Command& cmd, const CommandClassification& cc, std::ofstream& file);
 
         NameTranslator get_translated_type_name(sv name);
 
@@ -754,6 +794,21 @@ namespace vkg_gen::Generator {
             nameIndex.erase(it);
         }
     }
+
+    inline bool Generator::should_emit_throw() const {
+        return config.exception_behavior != ExceptionBehavior::NoThrowOnly;
+    }
+    inline bool Generator::should_emit_nothrow() const {
+        return config.exception_behavior != ExceptionBehavior::ThrowOnly;
+    }
+    inline bool Generator::should_emit_default() const {
+        return config.exception_behavior == ExceptionBehavior::BothWithDefaultThrow
+            || config.exception_behavior == ExceptionBehavior::BothWithDefaultNoThrow;
+    }
+    inline bool Generator::default_is_throw() const {
+        return config.exception_behavior == ExceptionBehavior::BothWithDefaultThrow;
+    }
+
 
 } // namespace vkg_gen::Generator
 
