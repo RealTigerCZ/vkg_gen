@@ -1,0 +1,9 @@
+# Generated vkg source code
+out.cpp
+out.hpp
+# Compiled shaders
+*.spv
+# Object files
+.o
+# Executable
+vkg_triangle

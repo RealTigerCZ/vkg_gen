@@ -19,6 +19,12 @@ cp ../../vk.xml . # copy vk.xml to build directory
 
 To produce the `out.cpp` and `out.hpp` files.
 
+## Examples
+
+The `examples/` directory contains sample applications that use the generated wrapper:
+
+- **[rotating_triangle](examples/rotating_triangle/)** — A Vulkan rotating triangle demo using the `vk::` API. See its README for build instructions and prerequisites.
+
 # Limitations:
 
 - Lexer is stateful (context-sensitive), because of the nature of XML.
