@@ -3,7 +3,7 @@
  * @author Jaroslav Hucel (xhucel00@vutbr.cz)
  * @brief
  * @date Created: 02. 11. 2025
- * @date Modified: 23. 03. 2026
+ * @date Modified: 08. 04. 2026
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -59,7 +59,35 @@ namespace vkg_gen::Generator {
         static Tags from_xml(const xml::Element& elem) { UNUSED(elem); NOT_IMPLEMENTED(); };
     };
 
+    class ApiType {
+    public:
+        enum class Value : uint8_t {
+            Any = 0xff,
+            Vulkan = 1 << 0,
+            VulkanSC = 1 << 1,
+        };
+        using enum Value;
+        using underlying_type = std::underlying_type_t<Value>;
 
+        constexpr ApiType() : value(Any) {}
+        constexpr ApiType(Value val) : value(val) {}
+        constexpr operator Value() const { return value; }
+        explicit operator bool() const { return !!(underlying_type)value; }
+        constexpr bool operator==(ApiType a) const { return value == a.value; }
+        constexpr bool operator!=(ApiType a) const { return value != a.value; }
+        constexpr ApiType operator&(ApiType b) const { return ApiType((Value)((underlying_type)value & (underlying_type)b.value)); }
+        constexpr ApiType operator|(ApiType b) const { return ApiType((Value)((underlying_type)value | (underlying_type)b.value)); }
+        constexpr ApiType operator&(Value b) const { return ApiType((Value)((underlying_type)value & (underlying_type)b)); }
+        constexpr ApiType operator|(Value b) const { return ApiType((Value)((underlying_type)value | (underlying_type)b)); }
+
+        bool is_vulkan() const { return (underlying_type)value & (underlying_type)Vulkan; }
+
+        static ApiType from_string(sv str);
+    private:
+        Value value;
+    };
+
+    struct HandleInfo;
     struct TypeHandle {
         // Name of the enum class containing VK_OBJECT_TYPE_*
         static constexpr sv obj_enum_name = "VkObjectType";
@@ -70,6 +98,8 @@ namespace vkg_gen::Generator {
 
         sv objtypeenum; // name of VK_OBJECT_TYPE_* API enumerant which
         // corresponds to this type. Should be present
+
+        HandleInfo* info = nullptr; // FIXME: TASK: 310326_01 Currently we create this info in the cache_handles function into array, that then is cleared, THIS IS A BIG HACK and needs refactoring
     };
 
     struct TypeEnum {
@@ -104,11 +134,12 @@ namespace vkg_gen::Generator {
 
             sv protect;
             sv deprecated;
-            sv api;
+            ApiType api;
             bool is_alias = false;
             bool is_standalone_comment = false; //TODO:
+            uint16_t ext_number = 0;
 
-            static EnumItem from_xml(const vkg_gen::xml::Element& elem, vkg_gen::Arena& arena, TypeEnum* parent, bool is_standalone_comment = false, bool extend_parent = false, sv block_ext_number = "");
+            static EnumItem from_xml(const vkg_gen::xml::Element& elem, vkg_gen::Arena& arena, TypeEnum* parent, bool is_standalone_comment = false, bool extend_parent = false, uint16_t ext_number = 0);
         };
 
 
@@ -201,7 +232,7 @@ namespace vkg_gen::Generator {
 
         static TypeParam from_xml(const xml::Element& elem, vkg_gen::Arena& arena);
         // TODO: replace this with operator<<
-        std::string stringify();
+        std::string stringify() const;
         bool is_const() const;
 
     private:
@@ -238,7 +269,7 @@ namespace vkg_gen::Generator {
 
         TypeParam type_param;
 
-        sv api;
+        ApiType api;
 
         // if the member is an array, len may be one or more of the following
         // things, separated by commas (one for each array indirection):
@@ -363,7 +394,7 @@ namespace vkg_gen::Generator {
         };
 
         sv name; // name attribute or present it <name>...</name>, always must be present
-        sv api; // api attribute, matches a <feature> api attribute, if present
+        ApiType api; // api attribute, matches a <feature> api attribute, if present
         sv alias; // alias attribute
         union {
             sv requires_ = {}; // requires attribute, pointing to another type
@@ -395,7 +426,7 @@ namespace vkg_gen::Generator {
 
     class CommandParameter {
     public:
-        sv api = {}; // comma separated list, optional
+        ApiType api = ApiType::Any;
         // TASK: 090126_07
         sv len = {};
         sv altlen = {};
@@ -417,7 +448,7 @@ namespace vkg_gen::Generator {
     struct  CommandAlias {
         sv name;
         sv alias;
-        sv api = {}; // comma separated list, optional
+        ApiType api = ApiType::Any; // comma separated list, optional
         sv comment = {}; // optional
 
         static CommandAlias from_xml(const xml::Element& elem, vkg_gen::Arena& arena);
@@ -443,7 +474,7 @@ namespace vkg_gen::Generator {
         sv conditional_rendering = {}; // required for vkCmd* commands.Not allowed for other commands. Values true/false
         bool allow_no_queues = false; // optional, default false
         sv export_ = {}; // comma separated list, optional
-        sv api = {}; // comma separated list, optional
+        ApiType api = {}; // comma separated list, optional
         sv description = {};
 
         xml::Element* implicit_extern_sync_params = nullptr;
@@ -514,6 +545,48 @@ namespace vkg_gen::Generator {
         Mtk,
     };
 
+    struct CommandClassification {
+        enum class Pattern : uint8_t {
+            Void,           // void return, no error checking
+            ResultVoid,     // VkResult return, no output data
+            ResultCreate,   // VkResult return, creates handle via out-param
+            VoidOutParam,   // void return, fills struct via out-param
+            Enumerate,      // two-call enumerate pattern
+            ResultOutParam, // VkResult + non-handle out-param
+            Other,          // non-standard return type — pass-through
+        };
+        Pattern pattern;
+        int implicit_param_idx = -1;     // device/instance to substitute with global
+        sv implicit_global;              // implicit parameter replacement: "detail::_device" or "detail::_instance"
+        int output_param_idx = -1;       // handle or struct output
+        int allocator_param_idx = -1;    // VkAllocationCallbacks*
+        int count_param_idx = -1;        // for enumerate
+        int array_param_idx = -1;        // for enumerate
+        bool output_has_destroy = false; // ResultCreate: output handle has destroy() overload
+    };
+
+    struct HandleInfo {
+        enum class Kind : uint8_t {
+            InstanceItself, // VkInstance
+            DeviceItself,   // VkDevice
+            Instance,       // Owned by Instance (e.g. VkSurfaceKHR)
+            Device,         // Owned by Device (e.g. VkBuffer)
+        };
+
+        enum class DestroyBehavior : uint8_t {
+            None,       // No cleanup command (e.g. PhysicalDevice, Queue)
+            Destroy,    // vkDestroy* — takes (parent, handle, alloc)
+            Free,       // vkFree* — simple free like vkFreeMemory(device, mem, alloc)
+            Release,    // vkRelease* — vkReleasePerformanceConfigurationINTEL
+        };
+
+        const Type& type;
+        Kind kind;
+        DestroyBehavior destroy_behavior = DestroyBehavior::None;
+        const Command* destroy_command = nullptr; // the vkDestroy*/vkFree* command, if any
+
+        bool is_destroyable() const { return destroy_command != nullptr; }
+    };
 
     struct NameTranslator {
         struct TransformedEnumName {
@@ -529,6 +602,8 @@ namespace vkg_gen::Generator {
         static NameTranslator from_enum_value(sv value, const TransformedEnumName& enum_class_transformed, bool is_bitmask);
         static NameTranslator from_type_name(sv name); // enums, structs, unions
         static NameTranslator from_constexpr_value(sv value_name);
+        static NameTranslator from_command_name(sv name); // vkCreateBuffer -> createBuffer
+        static std::pair<std::string, std::string> unique_command_name(sv name); // vkCreateBuffer -> createBufferUnique, createBuffer
 
     protected:
         static void transform_from_upper_constant(std::string& name, size_t start_pos, bool first_is_upper);
@@ -589,15 +664,18 @@ namespace vkg_gen::Generator {
         void parse_enums(vkg_gen::xml::Dom& dom);
         void parse_commands(vkg_gen::xml::Dom& dom);
         bool is_handle(sv type);
+        void cache_handles(std::vector<HandleInfo>& handles);
+
 
         void generate_enum(TypeEnum& enum_, std::ofstream& file);
-        void generate_enum_alias(Type& enum_, std::ofstream& file);
+        void generate_enum_alias(const Type& enum_, std::ofstream& file);
         void generate_member(Member& member, std::ofstream& file, sv struct_union, sv parent_name);
-        void generate_struct_union(Type& type, std::ofstream& file, sv struct_union);
-        void generate_struct(Type& struct_, std::ofstream& file);
-        void generate_union(Type& union_, std::ofstream& file);
-        void generate_bitmask(Type& bitmask, std::ofstream& file);
-        void generate_handle(Type& handle, std::ofstream& file, TypeEnum& obj_enum);
+        void generate_struct_union(const Type& type, std::ofstream& file, sv struct_union);
+        void generate_struct(const Type& struct_, std::ofstream& file);
+        void generate_union(const Type& union_, std::ofstream& file);
+        void generate_bitmask(const Type& bitmask, std::ofstream& file);
+        void generate_handle(const Type& handle, std::ofstream& file, TypeEnum& obj_enum);
+        void generate_error_classes(std::ofstream& file);
 
 
         std::ofstream& generate_command_params(Command& cmd, std::ofstream& file, bool is_end_of_line = true);
@@ -605,6 +683,48 @@ namespace vkg_gen::Generator {
         void generate_command_PFN(Command& cmd, std::ofstream& file);
         void generate_command_wrapper(Command& cmd, std::ofstream& file);
         void generate_funcpointer(Type& type, std::ofstream& file);
+
+        // P0-6: Command classification and pattern-specific generators
+        CommandClassification classify_command(const Command& cmd);
+        bool has_pnext(sv struct_type_name);
+
+        bool should_emit_throw() const;
+        bool should_emit_nothrow() const;
+        bool should_emit_default() const;
+        bool default_is_throw() const;
+
+        // Emits a single parameter in C++ wrapper style (const struct ptr → const ref, VkHandle → Handle, else raw stringify)
+        void emit_wrapper_param(const CommandParameter& param, std::ofstream& file);
+        // Emits comma-separated param names for forwarding calls. skip_idx: extra index to skip (PD param)
+        void emit_forward_param_names(const Command& cmd, const CommandClassification& cc,
+            std::ofstream& file, bool include_nothrow_output = false, int skip_idx = -1);
+        // Emits "(params, vector<ElemType>& v)" for enumerate _noThrow signatures. skip_idx for PD overloads.
+        void emit_enumerate_nothrow_params(const Command& cmd, const CommandClassification& cc,
+            std::ofstream& file, int skip_idx = -1);
+        // Generates entire parameter list
+        void generate_wrapper_params(const Command& cmd, const CommandClassification& cc,
+            std::ofstream& file, bool for_nothrow_output = false, int skip_idx = -1);
+        // Generates the argument list for a wrapper function call
+        void generate_call_args(const Command& cmd, const CommandClassification& cc,
+            std::ofstream& file, bool for_nothrow = false);
+
+        void generate_wrapper_void(const Command& cmd, const CommandClassification& cc, std::ofstream& file);
+        void generate_wrapper_result_void(const Command& cmd, const CommandClassification& cc, std::ofstream& file);
+        void generate_wrapper_result_create(const Command& cmd, const CommandClassification& cc, std::ofstream& file);
+        void generate_wrapper_void_outparam(const Command& cmd, const CommandClassification& cc, std::ofstream& file);
+        void generate_wrapper_result_outparam(const Command& cmd, const CommandClassification& cc, std::ofstream& file);
+
+        void generate_wrapper_enumerate_header(const Command& cmd, const CommandClassification& cc, std::ofstream& file);
+        void generate_wrapper_enumerate_source(const Command& cmd, const CommandClassification& cc, std::ofstream& file);
+        void generate_enumerate_call(const Command& cmd, const CommandClassification& cc, std::ofstream& file, bool second_call);
+        void generate_throw_result_exception(std::ofstream& source);
+        void generate_physical_device_overloads(const Command& cmd, const CommandClassification& cc, std::ofstream& file);
+        void generate_physical_device_overload_alias(const CommandAlias& cmd, std::ofstream& file);
+        void generate_unique_handle_create(const Command& cmd, const CommandClassification& cc, std::ofstream& file);
+
+
+        bool is_device_level_command(const Command& cmd) const;
+        std::pair<bool, bool> is_handle_or_const_ptr_struct_argument(const CommandParameter& param);
 
         NameTranslator get_translated_type_name(sv name);
 
@@ -616,7 +736,7 @@ namespace vkg_gen::Generator {
 
         void add_required_version_feature(sv name, vkg_gen::xml::Dom& dom);
 
-        void extend_enum(sv extends, vkg_gen::xml::Element& elem, vkg_gen::Arena& arena, sv block_ext_number = {}, sv protect = {});
+        void extend_enum(sv extends, vkg_gen::xml::Element& elem, vkg_gen::Arena& arena, uint16_t block_ext_number = 0, sv protect = {});
 
         void add_extension_prototype(sv number, xml::Dom& dom);
 
@@ -726,6 +846,31 @@ namespace vkg_gen::Generator {
             names[it->second] = nullptr;
             nameIndex.erase(it);
         }
+    }
+
+    inline bool Generator::should_emit_throw() const {
+        return config.exception_behavior != ExceptionBehavior::NoThrowOnly;
+    }
+    inline bool Generator::should_emit_nothrow() const {
+        return config.exception_behavior != ExceptionBehavior::ThrowOnly;
+    }
+    inline bool Generator::should_emit_default() const {
+        return config.exception_behavior == ExceptionBehavior::BothWithDefaultThrow
+            || config.exception_behavior == ExceptionBehavior::BothWithDefaultNoThrow;
+    }
+    inline bool Generator::default_is_throw() const {
+        return config.exception_behavior == ExceptionBehavior::BothWithDefaultThrow;
+    }
+
+    inline std::pair<bool, bool> Generator::is_handle_or_const_ptr_struct_argument(const CommandParameter& param) {
+        Type::Category cat = types.at(param.type_param.type).category;
+        bool param_is_handle = config.generate_handle_class && cat == Type::Category::Handle;
+        bool is_const_struct_ptr = param.type_param.is_const()
+            && param.type_param.post_quals.size() == 1
+            && bool(param.type_param.post_quals[0] & TypeParam::PostQualifier::Pointer) // TODO: can't use PostQualifier::ConstPointer because the const qualifier is before type name (in pre-qualifiers)
+            && !param_is_handle
+            && (cat == Type::Category::Struct || cat == Type::Category::Union);
+        return { param_is_handle, is_const_struct_ptr };
     }
 
 } // namespace vkg_gen::Generator

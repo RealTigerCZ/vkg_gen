@@ -35,11 +35,6 @@
 - Remove the "add_extension_prototype" function and implement handling extensions into the generator
 - Handle "defines" in extensions defined as <enum value="" name=".."></enum>
 
-// TASK: 030226_01
-
-- Extending enum can create duplicities and also dependecies.
-- Refactor current temporary solution
-
 // TASK: 040226_01
 
 - Commands are generated to directly link with vulkan, but some of them are only acessible in runtime.
@@ -69,3 +64,8 @@
 
 - some bitmasks are empty and dont have alias or bitvalues but are still used, VkPipelineCoverageReductionStateCreateFlagsNV
 - they can also have different api, ex. VkPipelineDepthStencilStateCreateFlags
+
+// FIXME: TASK: 310326_01
+
+- Handle does not own HandleInfo, it has an pointer that then goes out of scope, so its even more unsafe
+- handle info searches command (vkDestroy ...), but it should go thrugh the parent chain, to end up with VkInstance/VkDevice or other instead.

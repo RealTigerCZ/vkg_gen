@@ -4,7 +4,7 @@
  * @brief TODO:
  *
  * @date Created:  25. 02. 2026
- * @date Modified: 25. 02. 2026
+ * @date Modified: 26. 03. 2026
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -711,17 +711,23 @@ enum class STLClassesInfo : uint8_t {
 };
 
 enum class ExceptionBehavior : uint8_t {
-    ThrowOnly,
-    NoThrowOnly,
-    BothWithDefaultThrow,
-    BothWithDefaultNoThrow,
-    BothWithoutDefault
+    ThrowOnly,              // Generate only throwing functions, without suffix
+    NoThrowOnly,            // Generate only nothrow functions, without suffix
+    BothWithDefaultThrow,   // Generate throw and nothrow functions with suffixes, generate additional default function that calls throw function
+    BothWithDefaultNoThrow, // Generate throw and nothrow functions with suffixes, generate additional default function that calls nothrow function
+    BothWithoutDefault      // Generate throw and nothrow functions with suffixes
 };
 
 enum class BetaExtensions : uint8_t {
     DontGenerate,
     GenerateWithProtectMacro,
     Generate,
+};
+
+enum class ToCstrFunction : uint8_t {
+    None,  // Don't generate to_cstr()
+    InCpp, // Generate declarations in hpp but define it in cpp
+    InHpp, // Generate inline to_cstr() in hpp
 };
 
 struct Config {
@@ -735,11 +741,14 @@ struct Config {
     bool generate_enum_numbers = true;  // false tries to remove all unnecessary enum numbers
     bool generate_c_type_keywords = true; // C requires (struct|union|enum) before type name, C++ doesn't
     bool apply_av1_and_vp9_naming_exceptions = true; // AV1 and VP9 would be translated to "Av1" and "Vp9" in C++
+    bool generate_command_aliases = true; // false means skipping aliases for commands, taht usually only adds extension suffix
 
     Compact compact = Compact::Normal;
-    LogLevel log_level = LogLevel::Error;
+    LogLevel log_level = LogLevel::Warning;
     DeprecationBehavior deprecation_behavior = DeprecationBehavior::GenerateWithDeprecationWarning;
     BetaExtensions beta_extensions = BetaExtensions::GenerateWithProtectMacro;
+    ExceptionBehavior exception_behavior = ExceptionBehavior::BothWithDefaultThrow;
+    ToCstrFunction to_cstr_behavior = ToCstrFunction::None;
 
     // C++ features: namespacing?
     // C++ features: modules?
