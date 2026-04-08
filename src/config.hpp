@@ -711,17 +711,23 @@ enum class STLClassesInfo : uint8_t {
 };
 
 enum class ExceptionBehavior : uint8_t {
-    ThrowOnly,
-    NoThrowOnly,
-    BothWithDefaultThrow,
-    BothWithDefaultNoThrow,
-    BothWithoutDefault
+    ThrowOnly,              // Generate only throwing functions, without suffix
+    NoThrowOnly,            // Generate only nothrow functions, without suffix
+    BothWithDefaultThrow,   // Generate throw and nothrow functions with suffixes, generate additional default function that calls throw function
+    BothWithDefaultNoThrow, // Generate throw and nothrow functions with suffixes, generate additional default function that calls nothrow function
+    BothWithoutDefault      // Generate throw and nothrow functions with suffixes
 };
 
 enum class BetaExtensions : uint8_t {
     DontGenerate,
     GenerateWithProtectMacro,
     Generate,
+};
+
+enum class ToCstrFunction : uint8_t {
+    None,  // Don't generate to_cstr()
+    InCpp, // Generate declarations in hpp but define it in cpp
+    InHpp, // Generate inline to_cstr() in hpp
 };
 
 struct Config {
@@ -742,6 +748,8 @@ struct Config {
     DeprecationBehavior deprecation_behavior = DeprecationBehavior::GenerateWithDeprecationWarning;
     BetaExtensions beta_extensions = BetaExtensions::GenerateWithProtectMacro;
     ExceptionBehavior exception_behavior = ExceptionBehavior::BothWithDefaultThrow;
+    ToCstrFunction to_cstr_behavior = ToCstrFunction::None;
+
     // C++ features: namespacing?
     // C++ features: modules?
 

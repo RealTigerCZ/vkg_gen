@@ -3,7 +3,7 @@
  * @author Jaroslav Hucel (xhucel00@vutbr.cz)
  * @brief
  * @date Created: 12. 11. 2025
- * @date Modified: 30. 03. 2026
+ * @date Modified: 08. 04. 2026
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -157,7 +157,7 @@ std::ostream& helper_test(std::ostream& os, const vkg_gen::xml::Node* node) {
 
 // Helper for emitting grouped #if defined() / #endif guards during output
 struct ProtectGuard {
-    sv current;
+    sv current = {};
     std::ofstream& file;
 
     void transition(sv protect) {
@@ -171,6 +171,8 @@ struct ProtectGuard {
         if (!current.empty()) file << "#endif // " << current << "\n";
         current = {};
     }
+
+    ~ProtectGuard() { close(); }
 };
 
 std::string_view to_string(Extension ext) {
@@ -1054,6 +1056,7 @@ void vkg_gen::Generator::Generator::cache_handles(std::vector<HandleInfo>& handl
             }
         }
         handles.push_back(std::move(h));
+        p->handle->info = &handles.back(); // FIXME: TASK: 310326_01 Currently we create this info in the cache_handles function into array, that then is cleared, THIS IS A BIG HACK and needs refactoring
     }
 }
 
@@ -1331,6 +1334,32 @@ void vkg_gen::Generator::Generator::generate_error_classes(std::ofstream& file) 
         }
     }
     file << "\n";
+}
+
+void vkg_gen::Generator::Generator::generate_throw_result_exception(std::ofstream& source) {
+    const TypeEnum& VkResult = enums.at("VkResult");
+    auto enum_name = NameTranslator::transform_enum_name("VkResult", false);
+    ProtectGuard guard{ .file = source };
+
+    const auto emit_switch = [&](sv signature, sv throw_args) {
+        source << signature << " {\n    switch (result) {\n";
+        for (auto& item : VkResult.items) {
+            if (item.is_alias || item.is_standalone_comment) continue;
+            auto translated = NameTranslator::from_enum_value(item.name, enum_name, false);
+            sv new_name = translated.new_name;
+            guard.transition(item.protect);
+            sv class_suffix = new_name.starts_with("eError") ? "Error" : "Result";
+            sv class_name = new_name.substr(new_name.starts_with("eError") ? 6 : 1); // skip "eError" or "e"
+            source << "    case Result::" << new_name <<
+                ": throw " << class_name << class_suffix << "(" << throw_args << ");\n";
+        }
+        guard.close();
+        source << "    default: throw VkgError(\"throwResultException\", result);\n"
+            << "    }\n}\n\n";
+        };
+
+    emit_switch("void throwResultException(Result result, const char* funcName)", "funcName, result");
+    emit_switch("void throwResultExceptionWithMessage(Result result, const char* message)", "message");
 
 }
 
@@ -1514,9 +1543,7 @@ CommandClassification Generator::classify_command(const Command& cmd) {
                 if (cmd.parameters[j].len == p.type_param.name) {
                     cc.count_param_idx = i;
                     cc.array_param_idx = j;
-                    //cc.pattern = CommandClassification::Pattern::Enumerate;
-                    // TODO: handle enumerate patterns P0-7
-                    cc.pattern = CommandClassification::Pattern::Other;
+                    cc.pattern = CommandClassification::Pattern::Enumerate;
                     return cc;
                 }
             }
@@ -1569,6 +1596,14 @@ CommandClassification Generator::classify_command(const Command& cmd) {
     return cc;
 }
 
+// Everything else is instance-level. Global commands are handled separately.
+bool Generator::is_device_level_command(const Command& cmd) const {
+    if (cmd.parameters.empty()) return false;
+    auto& type = types.at(cmd.parameters[0].type_param.type);
+    if (type.category != Type::Category::Handle) return false;
+    return type.handle->info->kind == HandleInfo::Kind::Device || type.handle->info->kind == HandleInfo::Kind::DeviceItself;
+}
+
 bool Generator::has_pnext(sv struct_type_name) {
     auto it = types.find(struct_type_name);
     assert(it != types.end());
@@ -1580,15 +1615,70 @@ bool Generator::has_pnext(sv struct_type_name) {
     return false;
 }
 
-// Writes wrapper parameter list for C++ command wrappers.
-// Differs from generate_command_params (PFN): uses Handle types (not HandleType),
-// skips implicit device/instance, skips allocator in throw versions, transforms struct pointers to references.
-void Generator::generate_wrapper_params(const Command& cmd, const CommandClassification& cc, std::ofstream& file, bool for_nothrow_output) {
-    file << "(";
+// Emits a single parameter in C++ wrapper style:
+// - const VkXxxInfo* (struct/union pointer) → const XxxInfo& (reference)
+// - All other cases (handles, primitives, etc.) fall through to stringify(),
+//   which already strips the Vk prefix and handles pointers/const
+void Generator::emit_wrapper_param(const CommandParameter& param, std::ofstream& file) {
+    auto [param_is_handle, is_const_struct_ptr] = is_handle_or_const_ptr_struct_argument(param);
+
+    if (is_const_struct_ptr) {
+        sv type = param.type_param.type;
+        if (type.starts_with("Vk")) type.remove_prefix(2);
+        file << "const " << type << "& " << param.type_param.name;
+    } else {
+        file << param.type_param.stringify();
+    }
+}
+
+// Emits comma-separated parameter names for forwarding calls.
+void Generator::emit_forward_param_names(const Command& cmd, const CommandClassification& cc,
+    std::ofstream& file, bool include_nothrow_output, int skip_idx) {
     bool first = true;
     for (int i = 0; i < (int)cmd.parameters.size(); ++i) {
         if (i == cc.implicit_param_idx) continue;
-        if (i == cc.output_param_idx && !for_nothrow_output) continue; // generate output param for _noThrow variant TODO: could use std::expected
+        if (i == cc.output_param_idx && !include_nothrow_output) continue;
+        if (i == cc.count_param_idx || i == cc.array_param_idx) continue;
+        if (i == skip_idx) continue;
+        auto& param = cmd.parameters[i];
+        if (!param.api.is_vulkan()) continue;
+        if (first) first = false;
+        else file << ", ";
+        file << param.type_param.name;
+    }
+}
+
+// Emits "(params, vector<ElemType>& v)" for enumerate _noThrow signatures.
+void Generator::emit_enumerate_nothrow_params(const Command& cmd, const CommandClassification& cc,
+    std::ofstream& file, int skip_idx) {
+    auto& arr_param = cmd.parameters[cc.array_param_idx];
+    sv elem_type = arr_param.type_param.type;
+    if (elem_type.starts_with("Vk")) elem_type.remove_prefix(2);
+
+    file << "(";
+    bool first = true;
+    for (int i = 0; i < (int)cmd.parameters.size(); ++i) {
+        if (i == cc.implicit_param_idx || i == cc.count_param_idx || i == cc.array_param_idx) continue;
+        if (i == skip_idx) continue;
+        auto& param = cmd.parameters[i];
+        if (!param.api.is_vulkan()) continue;
+        if (first) first = false;
+        else file << ", ";
+        emit_wrapper_param(param, file);
+    }
+    if (!first) file << ", ";
+    file << "vector<" << elem_type << ">& v)";
+}
+
+// Writes wrapper parameter list for C++ command wrappers.
+void Generator::generate_wrapper_params(const Command& cmd, const CommandClassification& cc,
+    std::ofstream& file, bool for_nothrow_output, int skip_idx) {
+    file << "(";
+    bool first = true;
+    for (int i = 0; i < (int)cmd.parameters.size(); ++i) {
+        if (i == cc.implicit_param_idx || i == skip_idx) continue;
+        if (i == cc.output_param_idx && !for_nothrow_output) continue;
+        if (i == cc.count_param_idx || i == cc.array_param_idx) continue;
 
         auto& param = cmd.parameters[i];
         if (!param.api.is_vulkan()) {
@@ -1611,8 +1701,9 @@ void Generator::generate_wrapper_params(const Command& cmd, const CommandClassif
             // Default value only if no non-default params follow
             bool has_trailing_params = false;
             for (int j = i + 1; j < (int)cmd.parameters.size(); ++j) {
-                if (j == cc.implicit_param_idx) continue;
+                if (j == cc.implicit_param_idx || j == skip_idx) continue;
                 if (j == cc.output_param_idx && !for_nothrow_output) continue;
+                if (j == cc.count_param_idx || j == cc.array_param_idx) continue;
                 has_trailing_params = true;
                 break;
             }
@@ -1621,24 +1712,7 @@ void Generator::generate_wrapper_params(const Command& cmd, const CommandClassif
             continue;
         }
 
-        Type::Category type_param_category = types.at(param.type_param.type).category;
-        bool param_is_handle = config.generate_handle_class && type_param_category == Type::Category::Handle;
-
-        // Only convert single-pointer-to-const-struct to reference (not void*, not double pointers)
-        bool is_const_struct_ptr = param.type_param.is_const()
-            && param.type_param.post_quals.size() == 1
-            && bool(param.type_param.post_quals[0] & TypeParam::PostQualifier::Pointer)
-            && !param_is_handle
-            && (type_param_category == Type::Category::Struct || type_param_category == Type::Category::Union);
-
-        if (is_const_struct_ptr) {
-            // const VkXxxInfo* pInfo → const XxxInfo& info
-            sv type = param.type_param.type;
-            if (type.starts_with("Vk")) type.remove_prefix(2);
-            file << "const " << type << "& " << param.type_param.name;
-        } else {
-            file << param.type_param.stringify();
-        }
+        emit_wrapper_param(param, file);
     }
     file << ")";
 }
@@ -1683,15 +1757,7 @@ void Generator::generate_call_args(const Command& cmd, const CommandClassificati
             continue;
         }
 
-        Type::Category type_param_category = types.at(param.type_param.type).category;
-        bool param_is_handle = config.generate_handle_class && type_param_category == Type::Category::Handle;
-
-        bool is_const_struct_ptr = param.type_param.is_const()
-            && param.type_param.post_quals.size() == 1
-            && bool(param.type_param.post_quals[0] & TypeParam::PostQualifier::Pointer)
-            && !param_is_handle
-            && (type_param_category == Type::Category::Struct || type_param_category == Type::Category::Union);
-
+        auto [param_is_handle, is_const_struct_ptr] = is_handle_or_const_ptr_struct_argument(param);
 
         if (is_const_struct_ptr) {
             // Wrapper takes by reference, PFN takes by pointer
@@ -1799,17 +1865,17 @@ void Generator::generate_wrapper_result_create(const Command& cmd, const Command
     }
 
     if (should_emit_default()) {
-        file << "inline " << out_type << " " << name;
-        generate_wrapper_params(cmd, cc, file);
-        file << " { return " << name << "_throw(";
-        bool first = true;
-        for (int i = 0; i < (int)cmd.parameters.size(); ++i) {
-            if (i == cc.implicit_param_idx || i == cc.output_param_idx) continue;
-            auto& param = cmd.parameters[i];
-            if (!param.api.is_vulkan()) continue;
-            if (first) first = false;
-            else file << ", ";
-            file << param.type_param.name;
+        sv target = default_is_throw() ? "_throw" : "_noThrow";
+        if (default_is_throw()) {
+            file << "inline " << out_type << " " << name;
+            generate_wrapper_params(cmd, cc, file);
+            file << " { return " << name << target << "(";
+            emit_forward_param_names(cmd, cc, file);
+        } else {
+            file << "inline Result " << name;
+            generate_wrapper_params(cmd, cc, file, true);
+            file << " noexcept { return " << name << target << "(";
+            emit_forward_param_names(cmd, cc, file, true);
         }
         file << "); }\n";
     }
@@ -1882,26 +1948,379 @@ void Generator::generate_wrapper_result_outparam(const Command& cmd, const Comma
     }
 
     if (should_emit_default()) {
-        if (by_ref) {
-            file << "inline void " << name;
-            generate_wrapper_params(cmd, cc, file, true);
-            file << " { " << name << "_throw(";
+        sv target = default_is_throw() ? "_throw" : "_noThrow";
+        if (default_is_throw()) {
+            if (by_ref) {
+                file << "inline void " << name;
+                generate_wrapper_params(cmd, cc, file, true);
+                file << " { " << name << target << "(";
+                emit_forward_param_names(cmd, cc, file, true);
+            } else {
+                file << "inline " << out_type << " " << name;
+                generate_wrapper_params(cmd, cc, file);
+                file << " { return " << name << target << "(";
+                emit_forward_param_names(cmd, cc, file);
+            }
         } else {
-            file << "inline " << out_type << " " << name;
-            generate_wrapper_params(cmd, cc, file);
-            file << " { return " << name << "_throw(";
+            // _noThrow always takes output by ref and returns Result
+            file << "inline Result " << name;
+            generate_wrapper_params(cmd, cc, file, true);
+            file << " noexcept { return " << name << target << "(";
+            emit_forward_param_names(cmd, cc, file, true);
         }
+        file << "); }\n";
+    }
+}
+
+// Emits funcs.vkXxx(...) call for enumerate pattern.
+// second_call: false emits nullptr for array param, true emits v.data()
+void Generator::generate_enumerate_call(const Command& cmd, const CommandClassification& cc,
+    std::ofstream& file, bool second_call) {
+    file << "funcs." << cmd.name << "(";
+    bool first = true;
+    for (int i = 0; i < (int)cmd.parameters.size(); ++i) {
+        auto& param = cmd.parameters[i];
+        if (!param.api.is_vulkan()) continue;
+        if (first) first = false;
+        else file << ", ";
+
+        if (i == cc.implicit_param_idx) {
+            file << cc.implicit_global << ".handle()";
+        } else if (i == cc.count_param_idx) {
+            file << "&n";
+        } else if (i == cc.array_param_idx) {
+            if (second_call)
+                if (config.generate_handle_class && is_handle(param.type_param.type)) {
+                    sv type = param.type_param.type;
+                    if (type.starts_with("Vk")) type.remove_prefix(2);
+                    file << "reinterpret_cast<" << type << "::HandleType*>(v.data())";
+                } else
+                    file << "v.data()";
+            else
+                file << "nullptr";
+        } else {
+            auto [param_is_handle, is_const_struct_ptr] = is_handle_or_const_ptr_struct_argument(param);
+
+            if (is_const_struct_ptr) {
+                file << "&" << param.type_param.name;
+            } else if (param_is_handle) {
+                file << param.type_param.name << ".handle()";
+            } else {
+                file << param.type_param.name;
+            }
+        }
+    }
+    file << ")";
+}
+
+// Header: forward declarations for enumerate commands
+void Generator::generate_wrapper_enumerate_header(const Command& cmd, const CommandClassification& cc, std::ofstream& file) {
+    auto name = NameTranslator::from_command_name(cmd.name);
+    auto& arr_param = cmd.parameters[cc.array_param_idx];
+    sv elem_type = arr_param.type_param.type;
+    if (elem_type.starts_with("Vk")) elem_type.remove_prefix(2);
+
+    if (should_emit_throw()) {
+        sv suffix = should_emit_default() ? "_throw" : "";
+        file << "vector<" << elem_type << "> " << name << suffix;
+        generate_wrapper_params(cmd, cc, file);
+        file << ";\n";
+    }
+
+    if (should_emit_nothrow()) {
+        sv suffix = should_emit_default() ? "_noThrow" : "";
+        file << "Result " << name << suffix;
+        emit_enumerate_nothrow_params(cmd, cc, file);
+        file << " noexcept;\n";
+    }
+
+    if (should_emit_default()) {
+        sv target = default_is_throw() ? "_throw" : "_noThrow";
+        if (default_is_throw()) {
+            file << "inline vector<" << elem_type << "> " << name;
+            generate_wrapper_params(cmd, cc, file);
+            file << " { return " << name << target << "(";
+            emit_forward_param_names(cmd, cc, file);
+            file << "); }\n";
+        } else {
+            file << "inline Result " << name;
+            emit_enumerate_nothrow_params(cmd, cc, file);
+            file << " noexcept { return " << name << target << "(";
+            emit_forward_param_names(cmd, cc, file);
+            file << ", v); }\n";
+        }
+    }
+}
+
+// Source (.cpp): implementations for enumerate commands
+void Generator::generate_wrapper_enumerate_source(const Command& cmd, const CommandClassification& cc, std::ofstream& file) {
+    auto name = NameTranslator::from_command_name(cmd.name);
+    auto& arr_param = cmd.parameters[cc.array_param_idx];
+    sv elem_type = arr_param.type_param.type;
+    if (elem_type.starts_with("Vk")) elem_type.remove_prefix(2);
+
+    bool returns_result = (cmd.type == "VkResult");
+    assert(returns_result || cmd.type == "void");
+
+    // _throw variant
+    if (should_emit_throw()) {
+        sv suffix = should_emit_default() ? "_throw" : "";
+        file << "vector<" << elem_type << "> " << name << suffix;
+        generate_wrapper_params(cmd, cc, file);
+        file << " {\n";
+        file << "    vector<" << elem_type << "> v;\n";
+        file << "    uint32_t n;\n";
+
+        if (returns_result) {
+            // do-while with eIncomplete
+            file << "    Result r;\n"
+                << "    do {\n"
+                << "        r = "; generate_enumerate_call(cmd, cc, file, false); file << ";\n"
+                << "        checkForSuccessValue(r, \"" << cmd.name << "\");\n"
+                << "        v.alloc(n);\n"
+                << "        r = "; generate_enumerate_call(cmd, cc, file, true); file << ";\n"
+                << "        checkSuccess(r, \"" << cmd.name << "\");\n"
+                << "    } while (r == Result::eIncomplete);\n"
+                << "    if (n != v.size()) v.resize(n);\n";
+        } else {
+            // void return: single two-call, no loop
+            file << "    "; generate_enumerate_call(cmd, cc, file, false); file << ";\n"
+                << "    v.alloc(n);\n"
+                << "    "; generate_enumerate_call(cmd, cc, file, true); file << ";\n";
+        }
+        file << "    return v;\n}\n\n";
+    }
+
+    // _noThrow variant
+    if (should_emit_nothrow()) {
+        sv suffix = should_emit_default() ? "_noThrow" : "";
+        file << "Result " << name << suffix;
+        emit_enumerate_nothrow_params(cmd, cc, file);
+        file << " noexcept {\n";
+        file << "    uint32_t n;\n";
+
+        if (returns_result) {
+            file << "    Result r;\n"
+                << "    do {\n"
+                << "        r = "; generate_enumerate_call(cmd, cc, file, false); file << ";\n"
+                << "        if (r != Result::eSuccess) return r;\n"
+                << "        if (!v.alloc_noThrow(n)) return Result::eErrorOutOfHostMemory;\n"
+                << "        r = "; generate_enumerate_call(cmd, cc, file, true); file << ";\n"
+                << "        if (int32_t(r) < 0) return r;\n"
+                << "    } while (r == Result::eIncomplete);\n"
+                << "    if (n != v.size())\n"
+                << "        if (!v.resize_noThrow(n)) return Result::eErrorOutOfHostMemory;\n";
+        } else {
+            file << "    "; generate_enumerate_call(cmd, cc, file, false); file << ";\n"
+                << "    if (!v.alloc_noThrow(n)) return Result::eErrorOutOfHostMemory;\n"
+                << "    "; generate_enumerate_call(cmd, cc, file, true); file << ";\n";
+        }
+        file << "    return Result::eSuccess;\n}\n\n";
+    }
+}
+
+// UniqueHandle create variants: createXxxUnique_throw/noThrow/default
+void Generator::generate_unique_handle_create(const Command& cmd, const CommandClassification& cc, std::ofstream& file) {
+    assert(cc.pattern == CommandClassification::Pattern::ResultCreate && cc.output_has_destroy);
+
+    const auto [unique_name, name] = NameTranslator::unique_command_name(cmd.name);
+    auto& out_param = cmd.parameters[cc.output_param_idx];
+    sv out_type = out_param.type_param.type;
+    if (out_type.starts_with("Vk")) out_type.remove_prefix(2);
+    std::string unique_type = "Unique" + std::string(out_type);
+
+    // _throw: return UniqueXxx(createXxx_throw(params))
+    if (should_emit_throw()) {
+        sv suffix = should_emit_default() ? "_throw" : "";
+        file << "inline " << unique_type << " " << unique_name << suffix;
+        generate_wrapper_params(cmd, cc, file);
+        file << " { return " << unique_type << "(" << name << suffix << "(";
+        emit_forward_param_names(cmd, cc, file);
+        file << ")); }\n";
+    }
+
+    // _noThrow: reset + write directly into UniqueHandle via reinterpret_cast
+    if (should_emit_nothrow()) {
+        sv suffix = should_emit_default() ? "_noThrow" : "";
+        file << "inline Result " << unique_name << suffix << "(";
         bool first = true;
         for (int i = 0; i < (int)cmd.parameters.size(); ++i) {
-            if (i == cc.implicit_param_idx) continue;
-            if (i == cc.output_param_idx && !by_ref) continue;
+            if (i == cc.implicit_param_idx || i == cc.output_param_idx) continue;
             auto& param = cmd.parameters[i];
             if (!param.api.is_vulkan()) continue;
             if (first) first = false;
             else file << ", ";
-            file << param.type_param.name;
+            if (i == cc.allocator_param_idx) {
+                file << "const AllocationCallbacks* " << param.type_param.name;
+            } else {
+                emit_wrapper_param(param, file);
+            }
         }
-        file << "); }\n";
+        if (!first) file << ", ";
+        file << unique_type << "& " << out_param.type_param.name << ") noexcept { "
+            << out_param.type_param.name << ".reset(); return funcs." << cmd.name;
+        generate_call_args(cmd, cc, file, true);
+        file << "; }\n";
+    }
+
+    if (should_emit_default()) {
+        sv target = default_is_throw() ? "_throw" : "_noThrow";
+        if (default_is_throw()) {
+            file << "inline " << unique_type << " " << unique_name;
+            generate_wrapper_params(cmd, cc, file);
+            file << " { return " << unique_name << target << "(";
+            emit_forward_param_names(cmd, cc, file);
+            file << "); }\n";
+        } else {
+            // Forward to _noThrow: takes UniqueXxx& as output, returns Result
+            file << "inline Result " << unique_name << "(";
+            bool first = true;
+            for (int i = 0; i < (int)cmd.parameters.size(); ++i) {
+                if (i == cc.implicit_param_idx || i == cc.output_param_idx) continue;
+                auto& param = cmd.parameters[i];
+                if (!param.api.is_vulkan()) continue;
+                if (first) first = false;
+                else file << ", ";
+                if (i == cc.allocator_param_idx)
+                    file << "const AllocationCallbacks* " << param.type_param.name;
+                else
+                    emit_wrapper_param(param, file);
+            }
+            if (!first) file << ", ";
+            file << unique_type << "& " << out_param.type_param.name << ") noexcept { return "
+                << unique_name << target << "(";
+            emit_forward_param_names(cmd, cc, file);
+            file << ", " << out_param.type_param.name << "); }\n";
+        }
+    }
+}
+
+// PhysicalDevice convenience overloads: drop the PhysicalDevice param, forward to physicalDevice()
+void Generator::generate_physical_device_overloads(const Command& cmd, const CommandClassification& cc, std::ofstream& file) {
+    assert(!cmd.parameters.empty() && cmd.parameters[0].type_param.type == "VkPhysicalDevice");
+    constexpr int pd_idx = 0;
+
+    auto name = NameTranslator::from_command_name(cmd.name);
+    bool is_enumerate = (cc.pattern == CommandClassification::Pattern::Enumerate);
+
+    // Helper: emit "physicalDevice(), remaining_args"
+    auto emit_pd_forward = [&](bool include_nothrow_output) {
+        file << "physicalDevice()";
+        for (int i = 0; i < (int)cmd.parameters.size(); ++i) {
+            if (i == pd_idx || i == cc.implicit_param_idx) continue;
+            if (i == cc.count_param_idx || i == cc.array_param_idx) continue;
+            if (i == cc.output_param_idx && !include_nothrow_output) continue;
+            auto& param = cmd.parameters[i];
+            if (!param.api.is_vulkan()) continue;
+            file << ", " << param.type_param.name;
+        }
+        };
+
+    // Helper: emit a single PD overload line
+    // inline RetType name[decl_suffix](params_no_pd) [noexcept] { [return] name[call_suffix](physicalDevice(), args); }
+    auto emit_overload = [&](sv ret_type, sv decl_suffix, sv call_suffix,
+        bool nothrow_output, bool is_noexcept, bool has_return) {
+            file << "inline " << ret_type << " " << name << decl_suffix;
+            generate_wrapper_params(cmd, cc, file, nothrow_output, pd_idx);
+            if (is_noexcept) file << " noexcept";
+            file << " { ";
+            if (has_return) file << "return ";
+            file << name << call_suffix << "(";
+            emit_pd_forward(nothrow_output);
+            file << "); }\n";
+        };
+
+    // Determine output behavior
+    bool by_ref = false;
+    if (cc.output_param_idx >= 0
+        && (cc.pattern == CommandClassification::Pattern::VoidOutParam || cc.pattern == CommandClassification::Pattern::ResultOutParam)) {
+        by_ref = !is_handle(cmd.parameters[cc.output_param_idx].type_param.type)
+            && has_pnext(cmd.parameters[cc.output_param_idx].type_param.type);
+    }
+
+    // Determine return type
+    std::string return_type;
+    if (is_enumerate) {
+        sv t = cmd.parameters[cc.array_param_idx].type_param.type;
+        if (t.starts_with("Vk")) t.remove_prefix(2);
+        return_type = "vector<" + std::string(t) + ">";
+    } else if (cc.output_param_idx >= 0) {
+        sv t = cmd.parameters[cc.output_param_idx].type_param.type;
+        if (t.starts_with("Vk")) t.remove_prefix(2);
+        return_type = std::string(t);
+    } else {
+        return_type = "void";
+    }
+
+
+    // Void and VoidOutParam have no _throw/_noThrow — just one overload
+    if (cc.pattern == CommandClassification::Pattern::Void) {
+        emit_overload("void", "", "", false, true, false);
+        return;
+    }
+    if (cc.pattern == CommandClassification::Pattern::VoidOutParam) {
+        if (by_ref)
+            emit_overload("void", "", "", true, true, false);
+        else
+            emit_overload(return_type, "", "", false, true, true);
+        return;
+    }
+
+    // Patterns with _throw/_noThrow variants
+    if (should_emit_throw()) {
+        sv suffix = should_emit_default() ? "_throw" : "";
+        bool returns_void = (cc.pattern == CommandClassification::Pattern::ResultVoid) || by_ref;
+        if (returns_void)
+            emit_overload("void", suffix, suffix, by_ref, false, false);
+        else
+            emit_overload(return_type, suffix, suffix, false, false, true);
+    }
+
+    if (should_emit_nothrow()) {
+        sv suffix = should_emit_default() ? "_noThrow" : "";
+        if (is_enumerate) {
+            file << "inline Result " << name << suffix;
+            emit_enumerate_nothrow_params(cmd, cc, file, pd_idx);
+            file << " noexcept { return " << name << suffix << "(";
+            emit_pd_forward(false);
+            file << ", v); }\n";
+        } else {
+            emit_overload("Result", suffix, suffix, true, true, true);
+        }
+    }
+
+    if (should_emit_default()) {
+        sv target = default_is_throw() ? "_throw" : "_noThrow";
+        if (default_is_throw()) {
+            bool returns_void = (cc.pattern == CommandClassification::Pattern::ResultVoid) || by_ref;
+            if (is_enumerate) {
+                emit_overload(return_type, "", target, false, false, true);
+            } else if (returns_void) {
+                emit_overload("void", "", target, by_ref, false, false);
+            } else {
+                emit_overload(return_type, "", target, false, false, true);
+            }
+        } else {
+            if (is_enumerate) {
+                file << "inline Result " << name;
+                emit_enumerate_nothrow_params(cmd, cc, file, pd_idx);
+                file << " noexcept { return " << name << target << "(";
+                emit_pd_forward(false);
+                file << ", v); }\n";
+            } else {
+                emit_overload("Result", "", target, true, true, true);
+            }
+        }
+    }
+}
+
+void vkg_gen::Generator::Generator::generate_physical_device_overload_alias(const CommandAlias& alias, std::ofstream& file) {
+    if (config.exception_behavior == ExceptionBehavior::BothWithoutDefault) {
+
+        file << "template<typename... Args> inline auto " << NameTranslator::from_command_name(alias.name) << "_noThrow(Args&&... args) { return " << NameTranslator::from_command_name(alias.alias) << "_noThrow(detail::forward<Args>(args)...); }\n";
+        file << "template<typename... Args> inline auto " << NameTranslator::from_command_name(alias.name) << "_throw(Args&&... args) { return " << NameTranslator::from_command_name(alias.alias) << "_throw(detail::forward<Args>(args)...); }\n";
+    } else {
+        file << "template<typename... Args> inline auto " << NameTranslator::from_command_name(alias.name) << "(Args&&... args) { return " << NameTranslator::from_command_name(alias.alias) << "(detail::forward<Args>(args)...); }\n";
     }
 }
 
@@ -2411,8 +2830,12 @@ void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& so
     // --- detail namespace, accessors, init declarations ---
     header << boilerplate::DETAIL_NAMESPACE;
     header << boilerplate::INIT_DECLARATIONS;
-    header << "void init_vk_functions();\n\n"; // TODO: debug function
+    header << "void initInstancePFNs() noexcept;\n"
+        << "void initDevicePFNs() noexcept;\n\n";
     header << boilerplate::VERSION_HELPERS;
+    header << boilerplate::CUSTOM_VECTOR_DECL << "\n";
+    header << boilerplate::CUSTOM_VECTOR_IMPL << "\n";
+    header << boilerplate::CUSTOM_UTILS_DECL << "\n";
 
     // --- Flags<BitType> template ---
     if (config.generate_flags_class)
@@ -2514,8 +2937,8 @@ void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& so
             sv alloc_param = has_allocator ? ", const AllocationCallbacks* a = nullptr" : "";
             switch (h.kind) {
             case HandleInfo::Kind::InstanceItself:
-                header << "inline void destroy(Instance::HandleType h" << alloc_param << ") noexcept { funcs."
-                    << h.destroy_command->name << "(h" << alloc_arg << "); }\n";
+                header << "inline void destroy(Instance i" << alloc_param << ") noexcept { funcs."
+                    << h.destroy_command->name << "(i.handle()" << alloc_arg << "); }\n";
                 break;
             case HandleInfo::Kind::DeviceItself:
                 header << "inline void destroy(Device d" << alloc_param << ") noexcept { funcs."
@@ -2576,6 +2999,8 @@ void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& so
             break;
         case CommandClassification::Pattern::ResultCreate:
             generate_wrapper_result_create(*cmd, cc, header);
+            if (cc.output_has_destroy)
+                generate_unique_handle_create(*cmd, cc, header);
             break;
         case CommandClassification::Pattern::VoidOutParam:
             generate_wrapper_void_outparam(*cmd, cc, header);
@@ -2584,9 +3009,17 @@ void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& so
             generate_wrapper_result_outparam(*cmd, cc, header);
             break;
         case CommandClassification::Pattern::Enumerate:
+            generate_wrapper_enumerate_header(*cmd, cc, header);
+            break;
         case CommandClassification::Pattern::Other:
             generate_command_wrapper(*cmd, header);
             break;
+        }
+
+        // PhysicalDevice convenience overloads
+        if (!cmd->parameters.empty() && cmd->parameters[0].type_param.type == "VkPhysicalDevice"
+            && cc.pattern != CommandClassification::Pattern::Other) {
+            generate_physical_device_overloads(*cmd, cc, header);
         }
     }
     header_guard.close();
@@ -2597,6 +3030,14 @@ void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& so
             if (ca == nullptr) continue;
             // Skip aliases that point to destroy commands (already have destroy() overloads)
             if (destroy_commands.contains(ca->alias)) continue;
+            // Cant generate aliases where target is overloaded (PhysicalDevice overloads make constexpr auto& ambiguous)
+            if (auto it = commands.find(ca->alias); it != commands.end()) {
+                auto& target_cmd = it->second;
+                if (!target_cmd.parameters.empty() && target_cmd.parameters[0].type_param.type == "VkPhysicalDevice") {
+                    generate_physical_device_overload_alias(*ca, header);
+                    continue;
+                }
+            }
             header << "inline constexpr auto& " << NameTranslator::from_command_name(ca->name)
                 << " = " << NameTranslator::from_command_name(ca->alias) << ";\n";
         }
@@ -2605,12 +3046,18 @@ void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& so
     header << "\n} // namespace " << config.namespace_name << "\n";
 
     source << "#include \"" << config.header_path << "\"\n";
+    // TODO: This is only for testing
+    source << "#include <iostream>\n"
+        << "#define assert(x) if (!(x)) std::cerr << \"Assertion failed: \" << #x << std::endl; \n";
+
     source << "namespace " << config.namespace_name << " {\n\n";
     source << boilerplate::CPP_IMPL;
+    generate_throw_result_exception(source);
 
     source << boilerplate::LOAD_UNLOAD_LIB_IMPL << "\n";
 
-    static const std::unordered_set<std::string_view> ignore = {
+    // Global commands loaded in loadLib — skip in PFN loading
+    static const std::unordered_set<std::string_view> global_commands = {
         "vkGetInstanceProcAddr",
         "vkCreateInstance",
         "vkEnumerateInstanceExtensionProperties",
@@ -2618,22 +3065,48 @@ void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& so
     };
 
     ProtectGuard source_guard{ .file = source };
-    source << "void init_vk_functions() {\n";
+
+    // --- initInstancePFNs: instance-level commands via vkGetInstanceProcAddr ---
+    source << "void initInstancePFNs() noexcept {\n";
+    // vkGetDeviceProcAddr must be loaded first (needed by initDevicePFNs)
+    source << "    funcs.vkGetDeviceProcAddr = (PFN_vkGetDeviceProcAddr)funcs.vkGetInstanceProcAddr(detail::_instance.handle(), \"vkGetDeviceProcAddr\");\n";
     for (Command* cmd : required_commands.get()) {
-        if (cmd == nullptr || ignore.contains(cmd->name)) continue;
+        if (cmd == nullptr || global_commands.contains(cmd->name)) continue;
+        if (cmd->name == "vkGetDeviceProcAddr") continue; // already loaded above
+        if (is_device_level_command(*cmd)) continue;
         source_guard.transition(cmd->protect);
-        source << "    funcs." << cmd->name << " = (PFN_" << cmd->name << ")funcs.vkGetInstanceProcAddr(detail::_instance.handle(), \"" << cmd->name << "\");\n";
+        source << "    funcs." << cmd->name << " = (PFN_" << cmd->name
+            << ")funcs.vkGetInstanceProcAddr(detail::_instance.handle(), \"" << cmd->name << "\");\n";
+    }
+    source_guard.close();
+    source << "}\n\n";
+
+    // --- initDevicePFNs: device-level commands via vkGetDeviceProcAddr ---
+    source << "void initDevicePFNs() noexcept {\n";
+    for (Command* cmd : required_commands.get()) {
+        if (cmd == nullptr) continue;
+        if (!is_device_level_command(*cmd)) continue;
+        if (cmd->name == "vkGetDeviceProcAddr") continue; // already loaded in initInstancePFNs
+        source_guard.transition(cmd->protect);
+        source << "    funcs." << cmd->name << " = (PFN_" << cmd->name
+            << ")funcs.vkGetDeviceProcAddr(detail::_device.handle(), \"" << cmd->name << "\");\n";
+    }
+    source_guard.close();
+    source << "}\n\n";
+
+    source << boilerplate::INIT_INSTANCE_DEVICE_IMPL;
+
+    // --- Enumerate command implementations (.cpp) ---
+    for (Command* cmd : required_commands.get()) {
+        if (cmd == nullptr) continue;
+        if (destroy_commands.contains(cmd->name)) continue;
+        auto cc = classify_command(*cmd);
+        if (cc.pattern != CommandClassification::Pattern::Enumerate) continue;
+        source_guard.transition(cmd->protect);
+        generate_wrapper_enumerate_source(*cmd, cc, source);
     }
     source_guard.close();
 
-    for (Command* cmd : required_commands.get()) {
-        if (cmd == nullptr || ignore.contains(cmd->name)) continue;
-        source_guard.transition(cmd->protect);
-        source << "    assert(funcs." << cmd->name << ");\n";
-    }
-    source_guard.close();
-
-    source << "}\n";
     source << "\n} // namespace " << config.namespace_name << "\n";
 
 #else
@@ -3014,6 +3487,24 @@ NameTranslator vkg_gen::Generator::NameTranslator::from_command_name(sv name) {
     new_name[0] = std::tolower(new_name[0]);
 
     return NameTranslator(std::move(new_name));
+}
+
+std::pair<std::string, std::string> vkg_gen::Generator::NameTranslator::unique_command_name(sv name) {
+    assert(!name.empty());
+    assert(name.starts_with("vk"));
+
+    std::string not_unique_name(name.substr(2));
+    assert(!not_unique_name.empty());
+    not_unique_name[0] = std::tolower(not_unique_name[0]);
+    name = not_unique_name;
+
+    Extension ext = get_and_remove_extension_name(name);
+    std::string unique_name(name);
+    unique_name.append("Unique");
+    if (ext != Extension::None)
+        unique_name.append(to_string(ext));
+
+    return std::make_pair(std::move(unique_name), std::move(not_unique_name));
 }
 
 NameTranslator vkg_gen::Generator::NameTranslator::from_constexpr_value(sv value_name) {

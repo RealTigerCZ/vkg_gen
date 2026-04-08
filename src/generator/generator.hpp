@@ -3,7 +3,7 @@
  * @author Jaroslav Hucel (xhucel00@vutbr.cz)
  * @brief
  * @date Created: 02. 11. 2025
- * @date Modified: 30. 03. 2026
+ * @date Modified: 08. 04. 2026
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -87,6 +87,7 @@ namespace vkg_gen::Generator {
         Value value;
     };
 
+    struct HandleInfo;
     struct TypeHandle {
         // Name of the enum class containing VK_OBJECT_TYPE_*
         static constexpr sv obj_enum_name = "VkObjectType";
@@ -97,6 +98,8 @@ namespace vkg_gen::Generator {
 
         sv objtypeenum; // name of VK_OBJECT_TYPE_* API enumerant which
         // corresponds to this type. Should be present
+
+        HandleInfo* info = nullptr; // FIXME: TASK: 310326_01 Currently we create this info in the cache_handles function into array, that then is cleared, THIS IS A BIG HACK and needs refactoring
     };
 
     struct TypeEnum {
@@ -554,11 +557,11 @@ namespace vkg_gen::Generator {
         };
         Pattern pattern;
         int implicit_param_idx = -1;     // device/instance to substitute with global
-        sv implicit_global;              // "detail::_device" or "detail::_instance"
+        sv implicit_global;              // implicit parameter replacement: "detail::_device" or "detail::_instance"
         int output_param_idx = -1;       // handle or struct output
         int allocator_param_idx = -1;    // VkAllocationCallbacks*
-        int count_param_idx = -1;        // for enumerate (unused for now)
-        int array_param_idx = -1;        // for enumerate (unused for now)
+        int count_param_idx = -1;        // for enumerate
+        int array_param_idx = -1;        // for enumerate
         bool output_has_destroy = false; // ResultCreate: output handle has destroy() overload
     };
 
@@ -600,6 +603,7 @@ namespace vkg_gen::Generator {
         static NameTranslator from_type_name(sv name); // enums, structs, unions
         static NameTranslator from_constexpr_value(sv value_name);
         static NameTranslator from_command_name(sv name); // vkCreateBuffer -> createBuffer
+        static std::pair<std::string, std::string> unique_command_name(sv name); // vkCreateBuffer -> createBufferUnique, createBuffer
 
     protected:
         static void transform_from_upper_constant(std::string& name, size_t start_pos, bool first_is_upper);
@@ -689,8 +693,18 @@ namespace vkg_gen::Generator {
         bool should_emit_default() const;
         bool default_is_throw() const;
 
+        // Emits a single parameter in C++ wrapper style (const struct ptr → const ref, VkHandle → Handle, else raw stringify)
+        void emit_wrapper_param(const CommandParameter& param, std::ofstream& file);
+        // Emits comma-separated param names for forwarding calls. skip_idx: extra index to skip (PD param)
+        void emit_forward_param_names(const Command& cmd, const CommandClassification& cc,
+            std::ofstream& file, bool include_nothrow_output = false, int skip_idx = -1);
+        // Emits "(params, vector<ElemType>& v)" for enumerate _noThrow signatures. skip_idx for PD overloads.
+        void emit_enumerate_nothrow_params(const Command& cmd, const CommandClassification& cc,
+            std::ofstream& file, int skip_idx = -1);
+        // Generates entire parameter list
         void generate_wrapper_params(const Command& cmd, const CommandClassification& cc,
-            std::ofstream& file, bool for_nothrow_output = false);
+            std::ofstream& file, bool for_nothrow_output = false, int skip_idx = -1);
+        // Generates the argument list for a wrapper function call
         void generate_call_args(const Command& cmd, const CommandClassification& cc,
             std::ofstream& file, bool for_nothrow = false);
 
@@ -699,6 +713,18 @@ namespace vkg_gen::Generator {
         void generate_wrapper_result_create(const Command& cmd, const CommandClassification& cc, std::ofstream& file);
         void generate_wrapper_void_outparam(const Command& cmd, const CommandClassification& cc, std::ofstream& file);
         void generate_wrapper_result_outparam(const Command& cmd, const CommandClassification& cc, std::ofstream& file);
+
+        void generate_wrapper_enumerate_header(const Command& cmd, const CommandClassification& cc, std::ofstream& file);
+        void generate_wrapper_enumerate_source(const Command& cmd, const CommandClassification& cc, std::ofstream& file);
+        void generate_enumerate_call(const Command& cmd, const CommandClassification& cc, std::ofstream& file, bool second_call);
+        void generate_throw_result_exception(std::ofstream& source);
+        void generate_physical_device_overloads(const Command& cmd, const CommandClassification& cc, std::ofstream& file);
+        void generate_physical_device_overload_alias(const CommandAlias& cmd, std::ofstream& file);
+        void generate_unique_handle_create(const Command& cmd, const CommandClassification& cc, std::ofstream& file);
+
+
+        bool is_device_level_command(const Command& cmd) const;
+        std::pair<bool, bool> is_handle_or_const_ptr_struct_argument(const CommandParameter& param);
 
         NameTranslator get_translated_type_name(sv name);
 
@@ -836,6 +862,16 @@ namespace vkg_gen::Generator {
         return config.exception_behavior == ExceptionBehavior::BothWithDefaultThrow;
     }
 
+    inline std::pair<bool, bool> Generator::is_handle_or_const_ptr_struct_argument(const CommandParameter& param) {
+        Type::Category cat = types.at(param.type_param.type).category;
+        bool param_is_handle = config.generate_handle_class && cat == Type::Category::Handle;
+        bool is_const_struct_ptr = param.type_param.is_const()
+            && param.type_param.post_quals.size() == 1
+            && bool(param.type_param.post_quals[0] & TypeParam::PostQualifier::Pointer) // TODO: can't use PostQualifier::ConstPointer because the const qualifier is before type name (in pre-qualifiers)
+            && !param_is_handle
+            && (cat == Type::Category::Struct || cat == Type::Category::Union);
+        return { param_is_handle, is_const_struct_ptr };
+    }
 
 } // namespace vkg_gen::Generator
 

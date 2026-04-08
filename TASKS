@@ -64,3 +64,8 @@
 
 - some bitmasks are empty and dont have alias or bitvalues but are still used, VkPipelineCoverageReductionStateCreateFlagsNV
 - they can also have different api, ex. VkPipelineDepthStencilStateCreateFlags
+
+// FIXME: TASK: 310326_01
+
+- Handle does not own HandleInfo, it has an pointer that then goes out of scope, so its even more unsafe
+- handle info searches command (vkDestroy ...), but it should go thrugh the parent chain, to end up with VkInstance/VkDevice or other instead.
