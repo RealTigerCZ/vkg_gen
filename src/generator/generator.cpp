@@ -3,7 +3,7 @@
  * @author Jaroslav Hucel (xhucel00@vutbr.cz)
  * @brief
  * @date Created: 12. 11. 2025
- * @date Modified: 08. 04. 2026
+ * @date Modified: 09. 04. 2026
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -1569,31 +1569,75 @@ CommandClassification Generator::classify_command(const Command& cmd) {
                     assert(cmd.type == "void");
                     cc.pattern = CommandClassification::Pattern::VoidOutParam;
                 }
-                return cc;
-            }
-
-            if (last.type_param.type != "void" && last.type_param.type != "uint32_t") {
+            } else if (last.type_param.type != "void" && last.type_param.type != "uint32_t") {
                 cc.output_param_idx = last_idx;
                 if (cmd.type == "void") {
                     cc.pattern = CommandClassification::Pattern::VoidOutParam;
-                    return cc;
                 } else {
                     assert(cmd.type == "VkResult");
                     cc.pattern = CommandClassification::Pattern::ResultOutParam;
-                    return cc;
                 }
             }
         }
     }
 
-    // No output data
-    if (cmd.type == "void") {
-        cc.pattern = CommandClassification::Pattern::Void;
-    } else {
-        assert(cmd.type == "VkResult");
-        cc.pattern = CommandClassification::Pattern::ResultVoid;
+    // No output data — set pattern if not already determined by output detection
+    if (cc.output_param_idx == -1) {
+        if (cmd.type == "void") {
+            cc.pattern = CommandClassification::Pattern::Void;
+        } else {
+            assert(cmd.type == "VkResult");
+            cc.pattern = CommandClassification::Pattern::ResultVoid;
+        }
     }
+
+    // Detect 1:1 input array pairs, can be combined with other patterns
+    detect_input_arrays(cmd, cc);
+
     return cc;
+}
+
+// Detects 1:1 input array pairs: non-pointer uint32_t count + const T* with len referencing it.
+// Shared counts (one count → multiple arrays) and complex len expressions are skipped.
+void Generator::detect_input_arrays(const Command& cmd, CommandClassification& cc) {
+    for (int j = 0; j < (int)cmd.parameters.size(); ++j) {
+        auto& arr = cmd.parameters[j];
+        if (arr.len.empty()) continue;
+        // Skip complex len expressions (commas, latexmath)
+        if (arr.len.find(',') != sv::npos) continue;
+        if (arr.len.starts_with("latexmath:")) continue;
+        // Must be a const pointer
+        if (!arr.type_param.is_const()) continue;
+        if (arr.type_param.post_quals.empty()) continue;
+        if (!bool(arr.type_param.post_quals[0] & TypeParam::PostQualifier::Pointer)) continue;
+        // Skip void* (e.g. vkCmdPushConstants) and handle arrays (P1-9: need reinterpret_cast)
+        if (arr.type_param.type == "void") continue;
+        if (is_handle(arr.type_param.type)) continue;
+
+        // Find the count param by name
+        int count_idx = -1;
+        for (int i = 0; i < (int)cmd.parameters.size(); ++i) {
+            if (cmd.parameters[i].type_param.name == arr.len
+                && cmd.parameters[i].type_param.type == "uint32_t"
+                && cmd.parameters[i].type_param.post_quals.empty()) {
+                count_idx = i;
+                break;
+            }
+        }
+        if (count_idx < 0) continue;
+
+        // Check 1:1: this count must not be referenced by any other array param
+        bool shared = false;
+        for (int k = 0; k < (int)cmd.parameters.size(); ++k) {
+            if (k == j) continue;
+            if (cmd.parameters[k].len == arr.len) { shared = true; break; }
+        }
+        if (shared) continue;
+
+        if (cc.input_array_count < CommandClassification::max_input_arrays) {
+            cc.input_arrays[cc.input_array_count++] = { count_idx, j };
+        }
+    }
 }
 
 // Everything else is instance-level. Global commands are handled separately.
@@ -1634,17 +1678,22 @@ void Generator::emit_wrapper_param(const CommandParameter& param, std::ofstream&
 // Emits comma-separated parameter names for forwarding calls.
 void Generator::emit_forward_param_names(const Command& cmd, const CommandClassification& cc,
     std::ofstream& file, bool include_nothrow_output, int skip_idx) {
+
     bool first = true;
     for (int i = 0; i < (int)cmd.parameters.size(); ++i) {
         if (i == cc.implicit_param_idx) continue;
         if (i == cc.output_param_idx && !include_nothrow_output) continue;
         if (i == cc.count_param_idx || i == cc.array_param_idx) continue;
         if (i == skip_idx) continue;
+        if (cc.is_input_count(i)) continue;
         auto& param = cmd.parameters[i];
         if (!param.api.is_vulkan()) continue;
         if (first) first = false;
         else file << ", ";
-        file << param.type_param.name;
+        if (cc.is_input_array(i))
+            file << NameTranslator::from_input_array_name(param.type_param.name).new_name;
+        else
+            file << param.type_param.name;
     }
 }
 
@@ -1679,6 +1728,7 @@ void Generator::generate_wrapper_params(const Command& cmd, const CommandClassif
         if (i == cc.implicit_param_idx || i == skip_idx) continue;
         if (i == cc.output_param_idx && !for_nothrow_output) continue;
         if (i == cc.count_param_idx || i == cc.array_param_idx) continue;
+        if (cc.is_input_count(i)) continue;
 
         auto& param = cmd.parameters[i];
         if (!param.api.is_vulkan()) {
@@ -1704,11 +1754,20 @@ void Generator::generate_wrapper_params(const Command& cmd, const CommandClassif
                 if (j == cc.implicit_param_idx || j == skip_idx) continue;
                 if (j == cc.output_param_idx && !for_nothrow_output) continue;
                 if (j == cc.count_param_idx || j == cc.array_param_idx) continue;
+                if (cc.is_input_count(j)) continue;
                 has_trailing_params = true;
                 break;
             }
             file << "const AllocationCallbacks* " << param.type_param.name;
             if (!has_trailing_params) file << " = nullptr";
+            continue;
+        }
+
+        // Input array param: const T* pName → const vector<T>& name
+        if (cc.is_input_array(i)) {
+            sv type = param.type_param.type;
+            if (type.starts_with("Vk")) type.remove_prefix(2);
+            file << "const vector<" << type << ">& " << NameTranslator::from_input_array_name(param.type_param.name).new_name;
             continue;
         }
 
@@ -1739,6 +1798,25 @@ void Generator::generate_call_args(const Command& cmd, const CommandClassificati
             file << param.type_param.name;
             continue;
         }
+
+        // Input array pairs: count → .size(), array → .data()
+        bool handled_input_array = false;
+        for (int k = 0; k < cc.input_array_count; ++k) {
+            if (i == cc.input_arrays[k].count_idx) {
+                auto vec_name = NameTranslator::from_input_array_name(cmd.parameters[cc.input_arrays[k].array_idx].type_param.name).new_name;
+                file << vec_name << ".size()";
+                handled_input_array = true;
+                break;
+            }
+            if (i == cc.input_arrays[k].array_idx) {
+                auto vec_name = NameTranslator::from_input_array_name(cmd.parameters[cc.input_arrays[k].array_idx].type_param.name).new_name;
+                file << vec_name << ".data()";
+                handled_input_array = true;
+                break;
+            }
+        }
+        if (handled_input_array) continue;
+
         if (i == cc.output_param_idx) {
             if (for_nothrow) {
                 // _noThrow: output goes through reinterpret_cast
@@ -1823,15 +1901,7 @@ void Generator::generate_wrapper_result_void(const Command& cmd, const CommandCl
         file << name << (default_is_throw() ? "_throw" : "_noThrow");
         // Forward just the param names
         file << "(";
-        bool first = true;
-        for (int i = 0; i < (int)cmd.parameters.size(); ++i) {
-            if (i == cc.implicit_param_idx || i == cc.output_param_idx) continue;
-            auto& param = cmd.parameters[i];
-            if (!param.api.is_vulkan()) continue;
-            if (first) first = false;
-            else file << ", ";
-            file << param.type_param.name;
-        }
+        emit_forward_param_names(cmd, cc, file);
         file << "); }\n";
     }
 }
@@ -2203,6 +2273,7 @@ void Generator::generate_physical_device_overloads(const Command& cmd, const Com
     auto name = NameTranslator::from_command_name(cmd.name);
     bool is_enumerate = (cc.pattern == CommandClassification::Pattern::Enumerate);
 
+
     // Helper: emit "physicalDevice(), remaining_args"
     auto emit_pd_forward = [&](bool include_nothrow_output) {
         file << "physicalDevice()";
@@ -2210,9 +2281,13 @@ void Generator::generate_physical_device_overloads(const Command& cmd, const Com
             if (i == pd_idx || i == cc.implicit_param_idx) continue;
             if (i == cc.count_param_idx || i == cc.array_param_idx) continue;
             if (i == cc.output_param_idx && !include_nothrow_output) continue;
+            if (cc.is_input_count(i)) continue;
             auto& param = cmd.parameters[i];
             if (!param.api.is_vulkan()) continue;
-            file << ", " << param.type_param.name;
+            if (cc.is_input_array(i))
+                file << ", " << NameTranslator::from_input_array_name(param.type_param.name).new_name;
+            else
+                file << ", " << param.type_param.name;
         }
         };
 
@@ -3487,6 +3562,17 @@ NameTranslator vkg_gen::Generator::NameTranslator::from_command_name(sv name) {
     new_name[0] = std::tolower(new_name[0]);
 
     return NameTranslator(std::move(new_name));
+}
+
+// pViewports -> viewports, pCoverageModulationTable -> coverageModulationTable
+NameTranslator vkg_gen::Generator::NameTranslator::from_input_array_name(sv name) {
+    assert(!name.empty());
+    if (name.size() > 1 && name[0] == 'p' && std::isupper(name[1])) {
+        std::string new_name(name.substr(1));
+        new_name[0] = std::tolower(new_name[0]);
+        return NameTranslator(std::move(new_name));
+    }
+    return NameTranslator(std::string(name));
 }
 
 std::pair<std::string, std::string> vkg_gen::Generator::NameTranslator::unique_command_name(sv name) {

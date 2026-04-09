@@ -3,7 +3,7 @@
  * @author Jaroslav Hucel (xhucel00@vutbr.cz)
  * @brief
  * @date Created: 02. 11. 2025
- * @date Modified: 08. 04. 2026
+ * @date Modified: 09. 04. 2026
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -563,6 +563,23 @@ namespace vkg_gen::Generator {
         int count_param_idx = -1;        // for enumerate
         int array_param_idx = -1;        // for enumerate
         bool output_has_destroy = false; // ResultCreate: output handle has destroy() overload
+
+        // Input array pairs: non-pointer uint32_t count + const T* with len referencing it (1:1 only)
+        static constexpr int max_input_arrays = 8;
+        struct InputArrayPair { int count_idx; int array_idx; };
+        InputArrayPair input_arrays[max_input_arrays] = {};
+        int input_array_count = 0;
+
+        bool is_input_count(int idx) const {
+            for (int k = 0; k < input_array_count; ++k)
+                if (input_arrays[k].count_idx == idx) return true;
+            return false;
+        }
+        bool is_input_array(int idx) const {
+            for (int k = 0; k < input_array_count; ++k)
+                if (input_arrays[k].array_idx == idx) return true;
+            return false;
+        }
     };
 
     struct HandleInfo {
@@ -603,6 +620,7 @@ namespace vkg_gen::Generator {
         static NameTranslator from_type_name(sv name); // enums, structs, unions
         static NameTranslator from_constexpr_value(sv value_name);
         static NameTranslator from_command_name(sv name); // vkCreateBuffer -> createBuffer
+        static NameTranslator from_input_array_name(sv name); // pViewports -> viewports
         static std::pair<std::string, std::string> unique_command_name(sv name); // vkCreateBuffer -> createBufferUnique, createBuffer
 
     protected:
@@ -684,8 +702,8 @@ namespace vkg_gen::Generator {
         void generate_command_wrapper(Command& cmd, std::ofstream& file);
         void generate_funcpointer(Type& type, std::ofstream& file);
 
-        // P0-6: Command classification and pattern-specific generators
         CommandClassification classify_command(const Command& cmd);
+        void detect_input_arrays(const Command& cmd, CommandClassification& cc);
         bool has_pnext(sv struct_type_name);
 
         bool should_emit_throw() const;

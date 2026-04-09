@@ -531,15 +531,14 @@ private:
 
         vk::cmdPushConstants(commandBuffers[currentFrame], pipelineLayout, vk::ShaderStageFlagBits::eVertex, 0, sizeof(PushConstants), &push);
 
-        vk::Viewport viewport{};
-        viewport.width = (float)swapchainExtent.width;
-        viewport.height = (float)swapchainExtent.height;
-        viewport.maxDepth = 1.0f;
-        vk::cmdSetViewport(commandBuffers[currentFrame], 0, 1, viewport);
+        vk::vector<vk::Viewport> viewports(1);
+        viewports[0] = { .width = (float)swapchainExtent.width, .height = (float)swapchainExtent.height, .maxDepth = 1.0f };
 
-        vk::Rect2D scissor{};
-        scissor.extent = swapchainExtent;
-        vk::cmdSetScissor(commandBuffers[currentFrame], 0, 1, scissor);
+        vk::cmdSetViewport(commandBuffers[currentFrame], 0, viewports);
+
+        vk::vector<vk::Rect2D> scissors(1);
+        scissors[0] = { .extent = swapchainExtent };
+        vk::cmdSetScissor(commandBuffers[currentFrame], 0, scissors);
 
         vk::cmdDraw(commandBuffers[currentFrame], 3, 1, 0, 0);
         vk::cmdEndRenderPass(commandBuffers[currentFrame]);
@@ -559,7 +558,10 @@ private:
         submitInfo.signalSemaphoreCount = 1;
         submitInfo.pSignalSemaphores = signalSemaphores;
 
-        vk::queueSubmit(graphicsQueue, 1, submitInfo, inFlightFences[currentFrame]);
+        vk::vector<vk::SubmitInfo> submitInfos(1);
+        submitInfos[0] = submitInfo;
+
+        vk::queueSubmit(graphicsQueue, submitInfos, inFlightFences[currentFrame]);
 
         // Present
         vk::PresentInfoKHR presentInfo{};
