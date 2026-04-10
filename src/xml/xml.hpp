@@ -4,7 +4,7 @@
  * @brief Definitions of xml data structures
  *
  * @date Created: 12. 10. 2025
- * @date Modified: 1. 11. 2025
+ * @date Modified: 10. 04. 2026
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -16,6 +16,8 @@
 #include "../arena.hpp"
 #include <variant>
 #include <ranges>
+#include <optional>
+#include <stdexcept>
 
 namespace vkg_gen::xml {
     using sv = std::string_view;

@@ -4,7 +4,7 @@
  * @brief Helper implementation of xml data structures
  *
  * @date Created: 13. 10. 2025
- * @date Modified: 1. 11. 2025
+ * @date Modified: 10. 04. 2026
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -14,6 +14,8 @@
 #include <ranges>
 #include <queue>
 #include <functional>
+
+#include "../debug_macros.h"
 
 namespace vkg_gen::xml {
     static void free_node(Node* node) {
@@ -37,7 +39,7 @@ namespace vkg_gen::xml {
             if (err_len == 0)
                 return ss.str();
 
-            sv line{ &data[line_start], data.end().base() };
+            sv line{ &data[line_start], data.data() + data.size() };
             size_t new_size = line.find_first_of('\n');
             if (new_size != sv::npos)
                 line = line.substr(0, new_size);
@@ -195,7 +197,8 @@ namespace vkg_gen::xml {
     };
 
     vec<Node*> Dom::getChildrenByChildrenFilter(const Filter& filter, Node* node) const noexcept {
-
+        NOT_IMPLEMENTED();
+        return {};
     };
 
 

@@ -690,8 +690,8 @@ namespace ExtensionIDs {
     };
 #undef X
     // X(name, id) [id] = #name,
-#define X(id) [id] = #id,
-    static const char* const names[] = { [NONE] = "NONE", EXTENSION_LIST(X) };
+#define X(id) #id,
+    static const char* const names[] = { "NONE", EXTENSION_LIST(X) };
 #undef X
     inline const char* to_cstr(ExtensionIDs id) { if (id >= ExtensionIDs::_COUNT) return "Invalid"; return names[id]; }
     constexpr auto a = VK_KHR_ray_tracing_pipeline;
