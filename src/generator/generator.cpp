@@ -1712,6 +1712,7 @@ void Generator::emit_forward_param_names(const Command& cmd, const CommandClassi
         if (i == cc.output_param_idx && !include_nothrow_output) continue;
         if (i == cc.count_param_idx || i == cc.array_param_idx) continue;
         if (i == skip_idx) continue;
+        if (i == cc.allocator_param_idx) continue;
         if (cc.is_input_count(i)) continue;
         auto& param = cmd.parameters[i];
         if (!param.api.is_vulkan()) continue;
@@ -1736,6 +1737,7 @@ void Generator::emit_enumerate_nothrow_params(const Command& cmd, const CommandC
     for (int i = 0; i < (int)cmd.parameters.size(); ++i) {
         if (i == cc.implicit_param_idx || i == cc.count_param_idx || i == cc.array_param_idx) continue;
         if (i == skip_idx) continue;
+        if (i == cc.allocator_param_idx) continue;
         auto& param = cmd.parameters[i];
         if (!param.api.is_vulkan()) continue;
         if (first) first = false;
@@ -1757,6 +1759,8 @@ void Generator::generate_wrapper_params(const Command& cmd, const CommandClassif
         if (i == cc.count_param_idx || i == cc.array_param_idx) continue;
         if (cc.is_input_count(i)) continue;
 
+        if (i == cc.allocator_param_idx) continue;
+
         auto& param = cmd.parameters[i];
         if (!param.api.is_vulkan()) {
             continue;
@@ -1770,23 +1774,6 @@ void Generator::generate_wrapper_params(const Command& cmd, const CommandClassif
             sv type = param.type_param.type;
             if (type.starts_with("Vk")) type.remove_prefix(2);
             file << type << "& " << param.type_param.name;
-            continue;
-        }
-
-        if (i == cc.allocator_param_idx) {
-            // const VkAllocationCallbacks* pAllocator → const AllocationCallbacks* pAllocator = nullptr
-            // Default value only if no non-default params follow
-            bool has_trailing_params = false;
-            for (int j = i + 1; j < (int)cmd.parameters.size(); ++j) {
-                if (j == cc.implicit_param_idx || j == skip_idx) continue;
-                if (j == cc.output_param_idx && !for_nothrow_output) continue;
-                if (j == cc.count_param_idx || j == cc.array_param_idx) continue;
-                if (cc.is_input_count(j)) continue;
-                has_trailing_params = true;
-                break;
-            }
-            file << "const AllocationCallbacks* " << param.type_param.name;
-            if (!has_trailing_params) file << " = nullptr";
             continue;
         }
 
@@ -1822,7 +1809,7 @@ void Generator::generate_call_args(const Command& cmd, const CommandClassificati
             continue;
         }
         if (i == cc.allocator_param_idx) {
-            file << param.type_param.name;
+            file << "detail::_allocator";
             continue;
         }
 
@@ -2095,6 +2082,8 @@ void Generator::generate_enumerate_call(const Command& cmd, const CommandClassif
                     file << "v.data()";
             else
                 file << "nullptr";
+        } else if (i == cc.allocator_param_idx) {
+            file << "detail::_allocator";
         } else {
             auto [param_is_handle, is_const_struct_ptr] = is_handle_or_const_ptr_struct_argument(param);
 
@@ -2243,15 +2232,12 @@ void Generator::generate_unique_handle_create(const Command& cmd, const CommandC
         bool first = true;
         for (int i = 0; i < (int)cmd.parameters.size(); ++i) {
             if (i == cc.implicit_param_idx || i == cc.output_param_idx) continue;
+            if (i == cc.allocator_param_idx) continue;
             auto& param = cmd.parameters[i];
             if (!param.api.is_vulkan()) continue;
             if (first) first = false;
             else file << ", ";
-            if (i == cc.allocator_param_idx) {
-                file << "const AllocationCallbacks* " << param.type_param.name;
-            } else {
-                emit_wrapper_param(param, file);
-            }
+            emit_wrapper_param(param, file);
         }
         if (!first) file << ", ";
         file << unique_type << "& " << out_param.type_param.name << ") noexcept { "
@@ -2274,14 +2260,12 @@ void Generator::generate_unique_handle_create(const Command& cmd, const CommandC
             bool first = true;
             for (int i = 0; i < (int)cmd.parameters.size(); ++i) {
                 if (i == cc.implicit_param_idx || i == cc.output_param_idx) continue;
+                if (i == cc.allocator_param_idx) continue;
                 auto& param = cmd.parameters[i];
                 if (!param.api.is_vulkan()) continue;
                 if (first) first = false;
                 else file << ", ";
-                if (i == cc.allocator_param_idx)
-                    file << "const AllocationCallbacks* " << param.type_param.name;
-                else
-                    emit_wrapper_param(param, file);
+                emit_wrapper_param(param, file);
             }
             if (!first) file << ", ";
             file << unique_type << "& " << out_param.type_param.name << ") noexcept { return "
@@ -2308,6 +2292,7 @@ void Generator::generate_physical_device_overloads(const Command& cmd, const Com
             if (i == pd_idx || i == cc.implicit_param_idx) continue;
             if (i == cc.count_param_idx || i == cc.array_param_idx) continue;
             if (i == cc.output_param_idx && !include_nothrow_output) continue;
+            if (i == cc.allocator_param_idx) continue;
             if (cc.is_input_count(i)) continue;
             auto& param = cmd.parameters[i];
             if (!param.api.is_vulkan()) continue;
@@ -3011,6 +2996,10 @@ void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& so
     header << "namespace detail { extern Funcs _funcs; }\n";
     header << "inline Funcs& funcs = detail::_funcs;\n\n";
 
+    header << "namespace detail { extern const AllocationCallbacks* _allocator; }\n";
+    header << "inline const AllocationCallbacks* allocator() noexcept { return detail::_allocator; }\n";
+    header << "void setAllocator(const AllocationCallbacks* a) noexcept;\n\n";
+
     // --- Error classes ---
     if (config.exception_behavior != ExceptionBehavior::NoThrowOnly)
         generate_error_classes(header);
@@ -3037,24 +3026,23 @@ void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& so
 
             bool has_allocator = (h.destroy_behavior == HandleInfo::DestroyBehavior::Destroy
                 || h.destroy_behavior == HandleInfo::DestroyBehavior::Free);
-            sv alloc_arg = has_allocator ? ", a" : "";
-            sv alloc_param = has_allocator ? ", const AllocationCallbacks* a = nullptr" : "";
+            sv alloc_arg = has_allocator ? ", detail::_allocator" : "";
             switch (h.kind) {
             case HandleInfo::Kind::InstanceItself:
-                header << "inline void destroy(Instance i" << alloc_param << ") noexcept { funcs."
+                header << "inline void destroy(Instance i) noexcept { funcs."
                     << h.destroy_command->name << "(i.handle()" << alloc_arg << "); }\n";
                 break;
             case HandleInfo::Kind::DeviceItself:
-                header << "inline void destroy(Device d" << alloc_param << ") noexcept { funcs."
+                header << "inline void destroy(Device d) noexcept { funcs."
                     << h.destroy_command->name << "(d.handle()" << alloc_arg << "); }\n";
                 break;
             case HandleInfo::Kind::Instance:
-                header << "inline void destroy(" << name << " h" << alloc_param << ") noexcept { funcs."
+                header << "inline void destroy(" << name << " h) noexcept { funcs."
                     << h.destroy_command->name << "(detail::_instance.handle(), h.handle()"
                     << alloc_arg << "); }\n";
                 break;
             case HandleInfo::Kind::Device:
-                header << "inline void destroy(" << name << " h" << alloc_param << ") noexcept { funcs."
+                header << "inline void destroy(" << name << " h) noexcept { funcs."
                     << h.destroy_command->name << "(detail::_device.handle(), h.handle()"
                     << alloc_arg << "); }\n";
                 break;
@@ -3199,6 +3187,11 @@ void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& so
     source << "}\n\n";
 
     source << boilerplate::INIT_INSTANCE_DEVICE_IMPL;
+
+    source << "void setAllocator(const AllocationCallbacks* a) noexcept {\n"
+              "    assert(!detail::_instance && \"vk::setAllocator() must be called before vk::initInstance().\");\n"
+              "    detail::_allocator = a;\n"
+              "}\n\n";
 
     // --- Enumerate command implementations (.cpp) ---
     for (Command* cmd : required_commands.get()) {
