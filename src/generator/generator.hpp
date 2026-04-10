@@ -3,7 +3,7 @@
  * @author Jaroslav Hucel (xhucel00@vutbr.cz)
  * @brief
  * @date Created: 02. 11. 2025
- * @date Modified: 09. 04. 2026
+ * @date Modified: 10. 04. 2026
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -416,6 +416,11 @@ namespace vkg_gen::Generator {
 
         // TODO: change to static from_xml(...)
         Type(const xml::Element& elem, vkg_gen::Arena& arena);
+        Type(Type&& other) noexcept;
+        Type& operator=(Type&&) = delete;
+        Type(const Type&) = delete;
+        Type& operator=(const Type&) = delete;
+        ~Type();
 
     private:
         Category category_from_string(sv s) const;

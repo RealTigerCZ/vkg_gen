@@ -504,6 +504,25 @@ Type::Type(const vkg_gen::xml::Element& elem, vkg_gen::Arena& arena) : elem(elem
     };
 }
 
+Type::Type(Type&& other) noexcept
+    : name(other.name), api(other.api), alias(other.alias),
+    comment(other.comment), deprecated(other.deprecated), protect(other.protect),
+    category(other.category), state(other.state), elem(other.elem) {
+    requires_ = other.requires_;
+    handle = other.handle;
+    other.category = Category::None; // prevent double destruction
+}
+
+// Manually destroy arena-allocated sub-objects that contain std::vectors
+Type::~Type() {
+    switch (category) {
+    case Category::Struct:  struct_->~TypeStruct(); break;
+    case Category::Union:   union_->~TypeUnion(); break;
+    case Category::Funcpointer: funcptr->~TypeFuncpointer(); break;
+    default: break;
+    }
+}
+
 // TASK: 090126_03
 void _gen_arbitrary_C_code_in_type(const vkg_gen::xml::Element& elem, std::ofstream& file) {
     bool last_was_element = false;
@@ -995,6 +1014,11 @@ void vkg_gen::Generator::Generator::cache_handles(std::vector<HandleInfo>& handl
         return &it->second;
         };
 
+    // Reserve to prevent reallocation — pointers into handles are stored in Type::handle->info
+    size_t handle_count = 0;
+    for (Type* p : required_types.get())
+        if (p && p->category == Type::Category::Handle && p->alias.empty()) ++handle_count;
+    handles.reserve(handle_count);
 
     for (Type* p : required_types.get()) {
         if (p == nullptr || p->category != Type::Category::Handle || !p->alias.empty())
@@ -1162,10 +1186,12 @@ void Generator::generate_enum(TypeEnum& e, std::ofstream& file) {
         guard.transition(item.protect);
 
         bool is_bitfield_value = false;
-        if (item.is_alias)
-            is_bitfield_value = e.type == TypeEnum::Type::Bitmask && std::ranges::find(e.items, item.alias, &TypeEnum::EnumItem::name)->bitmask.is_bitfield;
-        else
-            is_bitfield_value = e.type == TypeEnum::Type::Bitmask && item.bitmask.is_bitfield;
+        if (e.type == TypeEnum::Type::Bitmask) {
+            auto* target = &item;
+            while (target->is_alias)
+                target = &*std::ranges::find(e.items, target->alias, &TypeEnum::EnumItem::name);
+            is_bitfield_value = target->bitmask.is_bitfield;
+        }
 
         file << "    " << NameTranslator::from_enum_value(item.name, enum_name_transformed, is_bitfield_value) << Deprecate{ item.deprecated } << "= ";
 
@@ -3240,7 +3266,7 @@ void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& so
             //    }
             //}
         }
-}
+    }
 #endif
 };
 

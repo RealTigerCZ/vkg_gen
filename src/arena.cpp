@@ -4,7 +4,7 @@
  * @brief Implementation of Arena allocator
  *
  * @date Created: 12. 10. 2025
- * @date Modified: 1. 11. 2025
+ * @date Modified: 10. 04. 2026
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -49,7 +49,7 @@ void Arena::allocateBlock(size_t size) {
 
 
 std::string_view Arena::storeString(const sv& str) {
-    void* mem = allocate(str.size(), alignof(char)); // TODO: wchar?
+    void* mem = allocate(str.size() + 1, alignof(char)); // +1 for null terminator
     char* dst = reinterpret_cast<char*>(mem);
     std::memcpy(dst, str.data(), str.size());
     dst[str.size()] = '\0';
