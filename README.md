@@ -50,7 +50,7 @@ The `examples/` directory contains sample applications that use the generated wr
   - [ ] P0-7e: `resultToString`, `Error` constructors
   - [x] P0-7f: `loadLib_throw/noThrow`, `initInstance`, `initDevice` with PFN loading
   - [x] P0-7g: Instance-level vs device-level PFN loading split
-  - [x] P0-7h: Input array → `vector<T>` conversion (1:1 count/array pairs, excludes handles and void) TODO: add a way co construct one elemnent vector without heap or copy
+  - [x] P0-7h: Input array → `span<T>` conversion (1:1 count/array pairs, includes handles), also handles the case of single item "array"
 - [ ] P0-8: Config from file + CLI arguments
 
 ### P1 — Important Quality
@@ -63,7 +63,7 @@ The `examples/` directory contains sample applications that use the generated wr
 - [ ] P1-6: MSVC compatibility of generated code
 - [ ] P1-7: Shared-count input arrays (one count → multiple arrays)
 - [ ] P1-8: Complex `len` expressions (latexmath, commas)
-- [ ] P1-9: Handle arrays in input array conversion (needs `reinterpret_cast`)
+- [x] P1-9: ~~Handle arrays in input array conversion~~ (resolved by `span<T>`)
 
 ### P2 — After MVP
 

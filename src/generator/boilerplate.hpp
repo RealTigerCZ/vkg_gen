@@ -3,7 +3,7 @@
  * @author Jaroslav Hucel (xhucel00@vutbr.cz)
  * @brief Pregenerated boilerplate code for the generator.
  * @date Created: 23. 03. 2026
- * @date Modified: 05. 04. 2026
+ * @date Modified: 10. 04. 2026
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -146,6 +146,35 @@ namespace boilerplate {
         "    explicit operator Type() const noexcept { return _value; }\n"
         "    explicit operator bool() const noexcept { return _value != nullptr; }\n"
         "};\n\n"sv;
+
+
+    static constexpr std::array CUSTOM_SPAN_DEFINITION = {
+        "// Helper class for eliminating unnecessary overloads, does not own the data\n"sv,
+        "// Type is expected to be primitive type, vulkan struct or custom handle class\n"sv,
+        "template<typename Type>\n"sv,
+        "class span {\n"sv,
+        "    const Type* _data;\n"sv,
+        "    uint32_t _size;\n\n"sv,
+
+        "public:\n"sv,
+        "    constexpr span(const Type* data, size_t size) : _data(data), _size(size) {}\n"sv,
+        "    constexpr span(const Type& data) : _data(&data), _size(1) {}\n"sv,
+        "    constexpr span(const vector<Type>& data) : _data(data.data()), _size(data.size()) {}\n\n"sv,
+
+        "    // If Type is handle, add UniqueHandle overloads\n"sv,
+        "    template <typename U = Type, typename = detail::enable_if_t<detail::is_handle<U>::value>>\n"sv,
+        "    constexpr span(const UniqueHandle<U>& data) noexcept : _data(reinterpret_cast<const Type*>(&data)), _size(1) {}\n"sv,
+        "    template <typename U = Type, typename = detail::enable_if_t<detail::is_handle<U>::value>>\n"sv,
+        "    constexpr span(const vector<UniqueHandle<U>>& data) noexcept : _data(reinterpret_cast<const Type*>(data.data())), _size(data.size()) {}\n\n"sv,
+
+        "    const typename detail::native_type<Type>::type* data() const noexcept {\n"sv,
+        "        return reinterpret_cast<const typename detail::native_type<Type>::type*>(_data);\n"sv,
+        "    }\n\n"sv,
+
+        "    constexpr uint32_t size() const noexcept { return _size; }\n"sv,
+        "};\n"sv
+    };
+
 
     // author: PCJohn (peciva at fit.vut.cz)
     static constexpr std::string_view DETAIL_NAMESPACE =
@@ -434,6 +463,18 @@ namespace boilerplate {
         "\n"
         "    template<typename _Tp>\n"
         "    constexpr _Tp&& forward(typename remove_reference<_Tp>::type& __t) noexcept { return static_cast<_Tp&&>(__t); }\n"
+        "    template<bool B, class T = void> struct enable_if {};\n"
+        "    template<class T> struct enable_if<true, T> { using type = T; };\n"
+        "    template<bool B, class T = void> using enable_if_t = typename enable_if<B, T>::type;\n"
+        "\n"
+        "    template <typename T> struct is_handle { static constexpr bool value = false; };\n"
+        "    template <typename T> struct is_handle<Handle<T>> { static constexpr bool value = true; };\n"
+        "\n"
+        "    template <typename T, bool IsHandle = is_handle<T>::value>\n"
+        "    struct native_type { using type = T; };\n"
+        "\n"
+        "    template <typename T>\n"
+        "    struct native_type<T, true> { using type = typename T::HandleType; };\n"
         "};\n";
 
     static constexpr std::string_view CUSTOM_VECTOR_IMPL = ""

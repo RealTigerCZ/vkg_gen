@@ -3,7 +3,7 @@
  * @author Jaroslav Hucel (xhucel00@vutbr.cz)
  * @brief
  * @date Created: 12. 11. 2025
- * @date Modified: 09. 04. 2026
+ * @date Modified: 10. 04. 2026
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -1610,9 +1610,8 @@ void Generator::detect_input_arrays(const Command& cmd, CommandClassification& c
         if (!arr.type_param.is_const()) continue;
         if (arr.type_param.post_quals.empty()) continue;
         if (!bool(arr.type_param.post_quals[0] & TypeParam::PostQualifier::Pointer)) continue;
-        // Skip void* (e.g. vkCmdPushConstants) and handle arrays (P1-9: need reinterpret_cast)
+        // Skip void* (e.g. vkCmdPushConstants) — span<void> is invalid
         if (arr.type_param.type == "void") continue;
-        if (is_handle(arr.type_param.type)) continue;
 
         // Find the count param by name
         int count_idx = -1;
@@ -1763,11 +1762,11 @@ void Generator::generate_wrapper_params(const Command& cmd, const CommandClassif
             continue;
         }
 
-        // Input array param: const T* pName → const vector<T>& name
+        // Input array param: const T* pName → span<T> name
         if (cc.is_input_array(i)) {
             sv type = param.type_param.type;
             if (type.starts_with("Vk")) type.remove_prefix(2);
-            file << "const vector<" << type << ">& " << NameTranslator::from_input_array_name(param.type_param.name).new_name;
+            file << "const span<" << type << "> " << NameTranslator::from_input_array_name(param.type_param.name).new_name;
             continue;
         }
 
@@ -2911,6 +2910,8 @@ void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& so
     header << boilerplate::CUSTOM_VECTOR_DECL << "\n";
     header << boilerplate::CUSTOM_VECTOR_IMPL << "\n";
     header << boilerplate::CUSTOM_UTILS_DECL << "\n";
+
+    boilerplate::print(header, boilerplate::CUSTOM_SPAN_DEFINITION) << "\n";
 
     // --- Flags<BitType> template ---
     if (config.generate_flags_class)
