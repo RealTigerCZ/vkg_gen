@@ -3,7 +3,7 @@
  * @author Jaroslav Hucel (xhucel00@vutbr.cz)
  * @brief TODO:
  * @date Created: 12. 10. 2025
- * @date Modified: 1. 11. 2025
+ * @date Modified: 10. 04. 2026
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -19,6 +19,7 @@
 #include <assert.h>
 #include <iostream>
 #include <sstream>
+#include <algorithm>
 
 
 #define DEBUG_HERE(...) std::cout << __FILE__ << ":" << __LINE__ << ": " << __VA_ARGS__ << std::endl;

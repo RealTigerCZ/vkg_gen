@@ -17,6 +17,8 @@
 #include <iostream>
 #include <cassert>
 #include <cstring>
+#include <sstream>
+#include <format>
 
 #include "../xml/xml.hpp"
 #include "../arena.hpp"
@@ -3238,7 +3240,7 @@ void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& so
             //    }
             //}
         }
-    }
+}
 #endif
 };
 

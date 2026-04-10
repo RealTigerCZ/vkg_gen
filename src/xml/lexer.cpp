@@ -4,7 +4,7 @@
  * @brief Implementation of Lexer (tokenizer)
  *
  * @date Created: 31. 07. 2025
- * @date Modified: 1. 11. 2025
+ * @date Modified: 10. 04. 2026
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -15,6 +15,7 @@
 #include <unordered_map>
 #include <sstream>
 #include <iostream>
+#include <algorithm>
 
 #include "../arena.hpp"
 

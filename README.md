@@ -3,11 +3,30 @@
 ## Building
 
 This project is WIP. Tested on Fedora 43 with `GCC 15.2.1` and `Clang 21.1.8`. Tested generators are `ninja` and `make`. Does NOT work with MSVC yet.
+Also tested on **Ubuntu 24.04** in Docker (for more details see /tests/compiling).
+
+- [x] GCC 13 - 15
+- [x] Clang 18 - 21
+- [x] aarch64-linux-gnu
+- [x] aarch64-clang++
 
 ```bash
 mkdir build && cd build
-cmake ..
-cmake --build . # or you can use `ninja` / `make` directly
+cmake .. -G Ninja # you can also use `make`
+ninja
+```
+
+The default build type is **Debug**. To select a different profile:
+
+```bash
+cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Release        # optimized, no debug info
+cmake .. -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo  # optimized + debug info
+```
+
+To enable **Address, Leak, and Undefined Behavior sanitizers** (forces Debug):
+
+```bash
+cmake .. -G Ninja -DSANITIZE=ON
 ```
 
 Then don't forget to copy the `vk.xml` into build directory and run the generator:
@@ -78,6 +97,29 @@ The `examples/` directory contains sample applications that use the generated wr
 - [ ] P3-1: Refactor lexers data handling
 - [ ] P3-2: Update parser to work more closely with generator
 - [ ] P3-3: Better error handling and reporting
+
+## Testing
+
+The `tests/compiling/` directory contains scripts to verify the generator compiles and produces correct output across compilers and configurations.
+It is supposed to be used as an reference to see, what was tested.
+
+If you want to run tests on your local machine, you need also need to have `Docker` installed.
+The reference output is expected to be provided in the `tests/compiling/golden/` directory.
+
+**Local tests** — builds and runs the generator in Debug, Release, and RelWithDebInfo, then diffs output against golden files:
+
+```bash
+cd tests/compiling
+./run_local_tests.sh
+```
+
+**Cross-compiler matrix** (Docker) — tests GCC 13–15, Clang 18–21, and aarch64 cross-compilation inside an Ubuntu 24.04 container:
+
+```bash
+cd tests/compiling
+./setup_matrix.sh   # build the Docker image (one-time)
+./run_matrix.sh     # run the full matrix
+```
 
 ## Known bugs
 
