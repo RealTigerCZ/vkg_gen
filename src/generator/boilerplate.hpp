@@ -284,7 +284,7 @@ namespace boilerplate {
     static constexpr std::string_view LOAD_UNLOAD_LIB_IMPL =
         "void loadLib_throw(const char* libPath) {\n"
         "    detail::_library = dlopen(libPath, RTLD_NOW);\n"
-        "    if (!detail::_library) throw VkgError(\"Failed to load Vulkan library\");\n"
+        "    if (!detail::_library) throw VkgError((\"Failed to load Vulkan library: \" + std::string(dlerror())).data());\n" // TODO: only for debugging
         "    funcs.vkGetInstanceProcAddr = (PFN_vkGetInstanceProcAddr)(dlsym(detail::_library, \"vkGetInstanceProcAddr\"));\n"
         "    if (!funcs.vkGetInstanceProcAddr) throw VkgError(\"Failed to load vkGetInstanceProcAddr\");\n"
         "    funcs.vkCreateInstance = getGlobalProcAddr<PFN_vkCreateInstance>(\"vkCreateInstance\");\n"

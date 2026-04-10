@@ -105,6 +105,18 @@ docker run --rm -v "$ROOT_DIR:/workspace" -w /workspace/tests/compiling vkg_gen_
             diff -q out.hpp ../golden/out.hpp || exit 1
             diff -q out.cpp ../golden/out.cpp || exit 1
 
+            echo -e "${CYAN}🧪 Validating compilation of generated files...${NC}"
+
+            # Copy the test program into CMAKE_BINARY_DIR
+            cp ../golden/out_comp.cpp .
+
+            # Trigger the custom CMake target
+            ninja out_comp || exit 1
+
+            echo -e "${YELLOW}⚠️ Skipping running out_comp for $CXX_BIN.${NC} because loading vulkan in docker doesnt work right now!"
+
+            echo -e "${GREEN}✅ $CXX_BIN Passed!${NC}"
+
         ) > "logs/${CXX_BIN}.log" 2>&1 &
 
         # Record the background process ID so we can evaluate it later
@@ -115,20 +127,31 @@ docker run --rm -v "$ROOT_DIR:/workspace" -w /workspace/tests/compiling vkg_gen_
     echo -e "${CYAN}⏳ Waiting for remaining compilers to finish...${NC}"
     echo "---------------------------------------------------"
 
+    set +e
+
     FAIL=0
     for CXX_BIN in "${!PIDS[@]}"; do
         wait ${PIDS[$CXX_BIN]}
+        EXIT_STATUS=$?   # Capture the exit code immediately
 
-        if [ $? -eq 0 ]; then
+        if [ $EXIT_STATUS -eq 0 ]; then
             echo -e "${GREEN}✅ $CXX_BIN Passed!${NC}"
         else
             echo -e "${RED}❌ $CXX_BIN Failed! Check logs/${CXX_BIN}.log${NC}"
+
+            # Optional: Print the last 15 lines of the log so you dont even
+            # have to open the file to see what failed!
+            echo -e "${YELLOW}--- Last 15 lines of ${CXX_BIN}.log ---${NC}"
+            tail -n 15 "logs/${CXX_BIN}.log"
+            echo -e "${YELLOW}---------------------------------------${NC}"
+
             FAIL=1
         fi
     done
 
     echo "---------------------------------------------------"
     if [ $FAIL -ne 0 ]; then
+        echo -e "${RED}💥 Matrix test failed! See logs above.${NC}"
         exit 1
     else
         echo -e "${GREEN}🎉 All parallel tests passed perfectly!${NC}"

@@ -24,7 +24,8 @@ RUN apt-get update && apt-get install -y \
     ninja-build \
     diffutils \
     g++-aarch64-linux-gnu \
-    qemu-user
+    qemu-user \
+    git
 
 RUN add-apt-repository ppa:ubuntu-toolchain-r/test -y && \
     apt-get update && \
@@ -35,6 +36,14 @@ RUN wget https://apt.llvm.org/llvm.sh && chmod +x llvm.sh && \
     ./llvm.sh 19 && \
     ./llvm.sh 20 || true && \
     ./llvm.sh 21 || true
+
+# 2. 🟢 THE FIX: Fetch bleeding-edge headers directly from Khronos (VP9/AV1 support)
+RUN git clone https://github.com/KhronosGroup/Vulkan-Headers.git --depth 1 && \
+    cd Vulkan-Headers && \
+    CC=gcc-15 CXX=g++-15 cmake -S . -B build && \
+    cmake --install build --prefix /usr && \
+    cd .. && \
+    rm -rf Vulkan-Headers
 
 RUN apt-get clean && rm -rf /var/lib/apt/lists/*
 EOF

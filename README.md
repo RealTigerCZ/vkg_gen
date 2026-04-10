@@ -104,7 +104,7 @@ The `tests/compiling/` directory contains scripts to verify the generator compil
 It is supposed to be used as an reference to see, what was tested.
 
 If you want to run tests on your local machine, you need also need to have `Docker` installed.
-The reference output is expected to be provided in the `tests/compiling/golden/` directory.
+The reference output (out.cpp and out.hpp) and testing file (out_comp.cpp) are expected to be provided in the `tests/compiling/golden/` directory.
 
 **Local tests** — builds and runs the generator in Debug, Release, and RelWithDebInfo, then diffs output against golden files:
 

@@ -70,13 +70,14 @@ else()
 endif()
 
 # Debug target to check if out.hpp is compilable
-if (NOT CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    add_custom_target(out_comp COMMAND echo "Compiling out.hpp manually with "${CMAKE_CXX_COMPILER_ID}" is not supported (only GCC)!")
+if (MSVC)
+    add_custom_target(out_comp COMMAND echo "Compiling out.hpp manually with MSVC is not supported")
 else()
+    # This works for both GCC (GNU) and Clang
     add_custom_target(out_comp
         COMMAND ${CMAKE_CXX_COMPILER} -c ${CMAKE_BINARY_DIR}/out.cpp -o ${CMAKE_BINARY_DIR}/vk.o -std=c++20 -Wall -Wextra -g -pedantic -fdiagnostics-color=always
         COMMAND ${CMAKE_CXX_COMPILER} ${CMAKE_BINARY_DIR}/out_comp.cpp -g ${CMAKE_BINARY_DIR}/vk.o -o ${CMAKE_BINARY_DIR}/out
-        COMMAND echo "" && echo "Successfully compiled test file 'out_comp.cpp'!"
-        COMMENT "Compiling out.hpp manually with gcc/clang to check if it compiles"
+        COMMAND echo "" && echo "Successfully compiled test file 'out_comp.cpp' with ${CMAKE_CXX_COMPILER_ID}!"
+        COMMENT "Compiling out.hpp manually with ${CMAKE_CXX_COMPILER_ID} to check if it compiles"
     )
 endif()

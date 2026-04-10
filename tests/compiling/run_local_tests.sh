@@ -90,6 +90,11 @@ for CONFIG in "${CONFIGS[@]}"; do
         diff -q out.hpp ../golden/out.hpp
         diff -q out.cpp ../golden/out.cpp
 
+        # 6. Execute Test Program
+        cp ../golden/out_comp.cpp .
+        ninja out_comp -j $NINJA_JOBS
+        ./out
+
     ) > "$LOG_FILE" 2>&1; then
         echo -e "${GREEN}✅ $CONFIG Passed!${NC}"
     else
