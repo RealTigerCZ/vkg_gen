@@ -12,6 +12,8 @@
 
 #pragma once
 
+#include <string_view>
+#include <string>
 #include <memory>
 #include <vector>
 

@@ -5,7 +5,7 @@
  *        It's used by the parser.
  *
  * @date Created: 30. 07. 2025
- * @date Modified: 1. 11. 2025
+ * @date Modified: 10. 04. 2026
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -88,14 +88,14 @@ namespace vkg_gen::xml {
         sv get_value() const noexcept { return m_last_value; }
         Position get_pos() const noexcept { return { m_line, static_cast<int>(m_ptr - m_last_line_end) }; }
 
-        int get_token_start() const noexcept { return static_cast<int>(m_token_start - m_data.begin().base()); }
-        int get_token_end() const noexcept { return static_cast<int>(m_ptr - m_data.begin().base()); }
+        int get_token_start() const noexcept { return static_cast<int>(m_token_start - m_data.data()); }
+        int get_token_end() const noexcept { return static_cast<int>(m_ptr - m_data.data()); }
 
         sv get_and_save_value(Arena& arena);
 
         ErrorLoc get_err_loc() const noexcept {
-            return { m_data, get_pos(), file_path, static_cast<int>(m_ptr - m_data.begin().base()),
-                static_cast<int>(m_last_line_end + 1 - m_data.begin().base()) };
+            return { m_data, get_pos(), file_path, static_cast<int>(m_ptr - m_data.data()),
+                static_cast<int>(m_last_line_end + 1 - m_data.data()) };
         }
 
         Lexer(const std::string& data, const char* path) : file_path(path), m_data(data) { m_buffer.reserve(1024) /* FIXME: proper data handling ?*/; };

@@ -84,7 +84,7 @@ struct HasTag {
     inline constexpr bool operator()(const Element& e) const noexcept {
         return e.tag == tag;
     }
-    inline constexpr bool operator()(const Node* n) const noexcept {
+    inline bool operator()(const Node* n) const noexcept {
         return n->isElement() && n->asElement().tag == tag;
     }
 };
@@ -99,7 +99,7 @@ struct HasAttr {
             });
     }
 
-    inline constexpr bool operator()(const Node* n) const noexcept {
+    inline bool operator()(const Node* n) const noexcept {
         if (!n->isElement()) return false;
         return (*this)(n->asElement());
     }
@@ -112,7 +112,7 @@ struct HasAttrName {
     constexpr inline bool operator()(const Element& e) const noexcept {
         return std::ranges::contains(e.attrs, name, &Attribute::name);
     }
-    constexpr inline bool operator()(const Node* n) const noexcept {
+    inline bool operator()(const Node* n) const noexcept {
         if (!n->isElement()) return false;
         return (*this)(n->asElement());
     }
@@ -123,7 +123,7 @@ struct HasAttrValue {
     constexpr inline bool operator()(const Element& e) const noexcept {
         return std::ranges::contains(e.attrs, value, &Attribute::value);
     }
-    constexpr inline bool operator()(const Node* n) const noexcept {
+    inline bool operator()(const Node* n) const noexcept {
         if (!n->isElement()) return false;
         return (*this)(n->asElement());
     }

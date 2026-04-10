@@ -41,8 +41,8 @@ namespace vkg_gen::xml {
         switch (expected) {
         case Expected::Header:
             // CHECK: skip whitespace?
-            if (std::distance(m_ptr, m_data.end().base()) < 5)
-                throw LexerError{ *this, "Unexpected end of data",  (int)std::distance(m_ptr, m_data.end().base()) };
+            if (std::distance(m_ptr, m_data.data() + m_data.size()) < 5)
+                throw LexerError{ *this, "Unexpected end of data",  (int)std::distance(m_ptr, m_data.data() + m_data.size()) };
 
             if (std::string_view{ m_ptr, 5 } != "<?xml") {
                 throw LexerError{ *this,  "Missing '<?xml' tag.", 5 };
@@ -88,8 +88,8 @@ namespace vkg_gen::xml {
                 return TokenType::GreaterThan;
 
             case '<':
-                if (std::distance(m_ptr, m_data.end().base()) < 4) // CHECK: off by one
-                    throw LexerError{ *this, "Unexpected end of data",  (int)std::distance(m_ptr, m_data.end().base()) };
+                if (std::distance(m_ptr, m_data.data() + m_data.size()) < 4) // CHECK: off by one
+                    throw LexerError{ *this, "Unexpected end of data",  (int)std::distance(m_ptr, m_data.data() + m_data.size()) };
                 if (m_ptr[1] != '!' || m_ptr[2] != '-' || m_ptr[3] != '-')
                     throw LexerError{ *this, "Expected atribute or '<!--' tag.", 4 };
                 remove_comment();
@@ -114,7 +114,7 @@ namespace vkg_gen::xml {
         do {
             switch (*m_ptr) {
             case '<':
-                if ((std::distance(m_ptr, m_data.end().base()) >= 4) && m_ptr[1] == '!' && m_ptr[2] == '-' && m_ptr[3] == '-') {
+                if ((std::distance(m_ptr, m_data.data() + m_data.size()) >= 4) && m_ptr[1] == '!' && m_ptr[2] == '-' && m_ptr[3] == '-') {
                     remove_comment();
                     break;
                 }
@@ -133,7 +133,7 @@ namespace vkg_gen::xml {
                 escape_entity();
                 break;
             case ']':
-                if (std::distance(m_ptr, m_data.end().base()) >= 3 && m_ptr[1] == ']' && m_ptr[2] == '>') {
+                if (std::distance(m_ptr, m_data.data() + m_data.size()) >= 3 && m_ptr[1] == ']' && m_ptr[2] == '>') {
                     throw std::runtime_error{ "TODO: CDATA section not supported yet" };
                 }
                 m_buffer.push_back(*m_ptr);

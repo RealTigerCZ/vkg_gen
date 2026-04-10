@@ -2,7 +2,7 @@
 
 ## Building
 
-This project is WIP. Tested on Fedora 43 with `GCC 15.2.1` and `Clang 21.1.8`. Tested generators are `ninja` and `make`. Does NOT work with MSVC yet.
+This project is WIP. Compiling tested on Fedora 43 with `GCC 15.2.1` and `Clang 21.1.8` and Windows 11 with `MSVC 19.44.35225`. Tested generators are `ninja`, `make` and `vs2022`.
 Also tested on **Ubuntu 24.04** in Docker (for more details see /tests/compiling).
 
 - [x] GCC 13 - 15
