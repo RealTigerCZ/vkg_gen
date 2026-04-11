@@ -159,10 +159,12 @@ std::ostream& helper_test(std::ostream& os, const vkg_gen::xml::Node* node) {
 
 // Helper for emitting grouped #if defined() / #endif guards during output
 struct ProtectGuard {
+    static inline bool FilterBetaExtensions = true;
     sv current = {};
     std::ofstream& file;
 
     void transition(sv protect) {
+        if (FilterBetaExtensions && protect == "VK_ENABLE_BETA_EXTENSIONS") protect = {};
         if (protect == current) return;
         if (!current.empty()) file << "#endif // " << current << "\n";
         if (!protect.empty()) file << "#if defined(" << protect << ")\n";
@@ -772,7 +774,7 @@ Member::Member(const vkg_gen::xml::Element& e, vkg_gen::Arena& arena, ParentType
 }
 
 TypeEnum::EnumItem TypeEnum::EnumItem::from_xml(const vkg_gen::xml::Element& elem, vkg_gen::Arena& arena, TypeEnum* parent, bool is_standalone_comment, bool extend_parent, uint16_t block_ext_number) {
-    EnumItem item{ .is_standalone_comment = is_standalone_comment, .ext_number = block_ext_number };
+    EnumItem item{ .name = {}, .is_standalone_comment = is_standalone_comment, .ext_number = block_ext_number };
 
     assert(!(is_standalone_comment && extend_parent));
 
@@ -1101,6 +1103,7 @@ constexpr std::string_view bitwidth_to_str_type(TypeEnum::Bitwidth w) {
     case TypeEnum::Bitwidth::_64:
         return ": uint64_t ";
     }
+    UNREACHABLE();
 };
 
 void Generator::generate_enum_alias(const Type& e, std::ofstream& file) {
@@ -1237,7 +1240,7 @@ void vkg_gen::Generator::Generator::generate_member(Member& member, std::ofstrea
     }
 
     // TODO: this is a hack, because the flag class is cant be used with bitselect, C++ does not allow it
-    if (member.type_param.type.starts_with("Vk") && std::ranges::contains(member.type_param.array_extensions, TypeParam::ArrayExtension::Type::BitSelect, &TypeParam::ArrayExtension::type)) {
+    if (config.generate_flags_class && member.type_param.type.starts_with("Vk") && std::ranges::contains(member.type_param.array_extensions, TypeParam::ArrayExtension::Type::BitSelect, &TypeParam::ArrayExtension::type)) {
         TypeEnum::Bitwidth width = enums.find(types.find(member.type_param.type)->second.bitvalues)->second.bitwidth;
         sv old_type = member.type_param.type;
         member.type_param.type = to_string_type(width);
@@ -2719,126 +2722,183 @@ void Generator::extend_enum(sv extends, Element& elem, vkg_gen::Arena& arena, ui
         enum_.items.emplace_back(std::move(item));
 }
 
+
+int vk_version_cmp(sv token, VulkanVersion version) {
+    VulkanVersion token_version;
+    if (!parse_vulkan_version(token, token_version))
+        throw my_error{ "Invalid version found in depends token: " + std::string(token) };
+    return (int)token_version - (int)version;
+}
+
 // TASK: 100126_01
 // TODO: Refactor - this function currently iterates all extensions and adds all of them.
 //       It should accept a parsed extension structure and add requirements for a single extension.
-void Generator::add_extension_prototype(sv number, xml::Dom& dom) {
-    auto& registry = dom.root->asElement();
-    assert(registry.tag == "registry");
+void Generator::add_extension_with_deps(Element& ext, xml::Dom& dom, sv required_by) {
+    // Already processed? Skip (also prevents circular deps)
+    if (processed_extensions.contains(&ext))
+        return;
+    processed_extensions.insert(&ext);
 
+    sv ext_name = ext.get_attr_value("name");
 
-    Node* extensions = (registry.children | std::views::filter(has_tag("extensions"))).front();
-    if (extensions == nullptr)
-        throw my_error{ "Could not find extensions tag" };
+    // Skip beta extensions if configured
+    if (config.beta_extensions == BetaExtensions::DontGenerate && ext.get_attr_value("provisional") == "true")
+        return;
 
-#if 0
-    Node* extension = (extensions->asElement().children | std::views::filter(has_attr("number", number))).front();
-    if (extension == nullptr)
-        throw my_error{ "Could not find extension with number " + std::string(number) };
-#endif
+    if (config.extension_filter_mode == ExtensionFilterMode::BlackList && config.extension_names.contains(std::string(ext_name))) {
+        std::cout << "Warning: Generating blacklisted extension '" << ext_name << "' because it is required by '" << required_by << "'.\n";
+    }
 
-    for (Node* extension : extensions->asElement().children) {
-        if (extension->isText() || extension->asElement().tag != "extension")
-            continue;
-
-        auto& ext = extension->asElement();
-
-        sv supported = ext.get_attr_value("supported");
-        if (supported == "disabled" || !std::ranges::contains(std::views::split(supported, ','), "vulkan", [](auto&& rng) { return sv(rng); }))
-            continue;
-
-        // TODO: refactor - resolve platform protect from a parsed Extension class instead of raw XML
-        // Resolve platform protect macro
-        sv ext_platform = ext.get_attr_value("platform");
-        sv ext_protect;
-        if (!ext_platform.empty()) {
-            auto it = platform_to_protect.find(ext_platform);
-            if (it == platform_to_protect.end())
-                throw my_error{ "Unknown platform: " + std::string(ext_platform) };
-            ext_protect = it->second;
+    sv depends = ext.get_attr_value("depends");
+    if (!depends.empty()) {
+        // Parse depends expression: split on + (AND) and , (OR), strip parens
+        // TODO: right now we treat all tokens as required
+        std::string deps_str(depends);
+        for (char& c : deps_str) {
+            if (c == '+' || c == ',' || c == '(' || c == ')')
+                c = ' ';
         }
 
-        uint16_t ext_number = std::stoul(std::string(ext.get_attr_value("number")));
+        std::string_view remaining(deps_str);
+        while (!remaining.empty()) {
+            auto start = remaining.find_first_not_of(' ');
+            if (start == std::string_view::npos) break;
+            remaining.remove_prefix(start);
 
-        included_extensions.push_back(ext);
+            auto end = remaining.find(' ');
+            auto token = remaining.substr(0, end);
+            remaining = (end == std::string_view::npos) ? "" : remaining.substr(end);
 
-        for (Node* node : ext.children) {
-            if (node->isText()) {
-                std::cout << "- Skipping: " << node->asText() << std::endl;
-                continue;
+            if (token.starts_with("VK_VERSION_")) {
+                if (vk_version_cmp(token, config.target_version) < 0) {
+                    throw my_error{ std::stringstream() << "Extension '" << ext_name << "' requires newer Vulkan version '" << token << "' than was provided '"
+                        << vulkan_version_to_string(config.target_version) << "'." };
+                }
+                // (already handled by add_required_version_feature call in generate())
+            } else {
+                auto it = extension_name_to_element.find(token);
+                if (it != extension_name_to_element.end()) {
+                    Element& dep = *(it->second);
+                    if (!processed_extensions.contains(&dep)) {
+                        add_extension_with_deps(dep, dom, ext_name);
+                    }
+                } else {
+                    throw my_error{ std::stringstream() << "Dependency '" << token << "' of extension " << ext_name << " not found in vk.xml\n" };
+                }
             }
+        }
+    }
 
-            auto& elem = node->asElement();
-            if (elem.tag == "require") {
-                sv protect = ext_protect;
+    add_extension_prototype(ext, dom);
+}
 
-                for (Node* type : elem.children) {
-                    if (type->isText()) {
-                        std::cout << "- Skipping TEXT: " << type->asText() << std::endl;
+void Generator::add_extension_prototype(Element& ext, xml::Dom& dom) {
+    sv supported = ext.get_attr_value("supported");
+    if (supported == "disabled" || !std::ranges::contains(std::views::split(supported, ','), "vulkan", [](auto&& rng) { return sv(rng); }))
+        return;
+
+    // TODO: refactor - resolve platform protect from a parsed Extension class instead of raw XML
+    // Resolve platform protect macro
+    sv ext_platform = ext.get_attr_value("platform");
+    sv ext_protect;
+    if (!ext_platform.empty()) {
+        auto it = platform_to_protect.find(ext_platform);
+        if (it == platform_to_protect.end())
+            throw my_error{ "Unknown platform: " + std::string(ext_platform) };
+        ext_protect = it->second;
+    }
+
+    // Skip beta/provisional extensions if configured
+    if (config.beta_extensions == BetaExtensions::DontGenerate && ext.get_attr_value("provisional") == "true")
+        return;
+
+    uint16_t ext_number = std::stoul(std::string(ext.get_attr_value("number")));
+
+    for (Node* node : ext.children) {
+        if (node->isText()) {
+            std::cout << "- Skipping: " << node->asText() << std::endl;
+            continue;
+        }
+
+        auto& elem = node->asElement();
+        if (elem.tag == "require") {
+            sv protect = ext_protect;
+
+            for (Node* type : elem.children) {
+                if (type->isText()) {
+                    std::cout << "- Skipping TEXT: " << type->asText() << std::endl;
+                    continue;
+                }
+
+                Element& elem = type->asElement();
+
+                if (elem.tag == "type") {
+                    sv type_name = elem.get_attr_value("name");
+                    add_required_type(type_name);
+                    if (!protect.empty()) {
+                        // Set protect on the type itself
+                        auto type_it = types.find(type_name);
+                        if (type_it != types.end() && type_it->second.protect.empty())
+                            type_it->second.protect = protect;
+                        // If this type is an enum, propagate protect to it too
+                        auto enum_it = enums.find(type_name);
+                        if (enum_it != enums.end() && enum_it->second.protect.empty())
+                            enum_it->second.protect = protect;
+                    }
+                } else if (elem.tag == "enum") {
+                    auto it = std::ranges::find(elem.attrs, "extends", &Attribute::name);
+                    if (it != elem.attrs.end()) {
+                        extend_enum(it->value, elem, dom.arena, ext_number, protect);
+                        add_required_enum(it->value);
                         continue;
                     }
 
-                    Element& elem = type->asElement();
-
-                    if (elem.tag == "type") {
-                        sv type_name = elem.get_attr_value("name");
-                        add_required_type(type_name);
-                        if (!protect.empty()) {
-                            // Set protect on the type itself
-                            auto type_it = types.find(type_name);
-                            if (type_it != types.end() && type_it->second.protect.empty())
-                                type_it->second.protect = protect;
-                            // If this type is an enum, propagate protect to it too
-                            auto enum_it = enums.find(type_name);
-                            if (enum_it != enums.end() && enum_it->second.protect.empty())
-                                enum_it->second.protect = protect;
-                        }
-                    } else if (elem.tag == "enum") {
-                        auto it = std::ranges::find(elem.attrs, "extends", &Attribute::name);
-                        if (it != elem.attrs.end()) {
-                            extend_enum(it->value, elem, dom.arena, ext_number, protect);
-                            add_required_enum(it->value);
-                            continue;
-                        }
-
-                        sv name = elem.get_attr_value("name");
-                        it = std::ranges::find(elem.attrs, "value", &Attribute::name);
-                        if (it != elem.attrs.end()) {
+                    sv name = elem.get_attr_value("name");
+                    it = std::ranges::find(elem.attrs, "value", &Attribute::name);
+                    // TODO: generate_extension_defined_macro not handled
+                    // TODO: This should be handled by adding it as name and version into the extension it self
+                    bool skip_extention_macro =
+                        (!config.generate_extension_name_macro && name.ends_with("_EXTENSION_NAME")) ||
+                        (!config.generate_extension_version_macro && name.ends_with("_SPEC_VERSION"));
+                    if (it != elem.attrs.end()) {
+                        if (!skip_extention_macro)
                             required_defines.push_back({ name, it->value, elem });
-                            continue;
-                        }
-
-                        it = std::ranges::find(elem.attrs, "alias", &Attribute::name);
-                        if (it != elem.attrs.end()) {
-                            // FIXME: should be enum alias
-                            required_defines.push_back({ name, it->value, elem });
-                            continue;
-                        }
-
-                        if (!protect.empty()) {
-                            auto enum_it = enums.find(name);
-                            if (enum_it != enums.end() && enum_it->second.protect.empty())
-                                enum_it->second.protect = protect;
-                        }
-                        add_required_enum(name);
-
-                    } else if (elem.tag == "command") {
-                        sv cmd_name = elem.get_attr_value("name");
-                        add_required_command(cmd_name);
-                        if (!protect.empty()) {
-                            auto cmd_it = commands.find(cmd_name);
-                            if (cmd_it != commands.end() && cmd_it->second.protect.empty())
-                                cmd_it->second.protect = protect;
-                        }
-
-                    } else if (elem.tag == "feature") {
-                        // Do nothing. Feature tag are only purely for documentation
-                    } else if (elem.tag == "comment") {
-                        // CHECK: standalone comment?
-                        std::cout << "Skipping <comment> when parsing require.\n";
-                    } else {
-                        throw my_error{ "Unknown tag: " + std::string(elem.tag) };
+                        continue;
                     }
+
+                    it = std::ranges::find(elem.attrs, "alias", &Attribute::name);
+                    if (it != elem.attrs.end()) {
+                        // FIXME: should be enum alias? Check if it is referencing contexpr value
+                        if (!skip_extention_macro) {
+                            sv value = dom.arena.storeString(NameTranslator::from_constexpr_value(it->value).new_name);
+                            required_defines.push_back({ name, value, elem });
+                        }
+                        continue;
+                    }
+
+                    if (!protect.empty()) {
+                        auto enum_it = enums.find(name);
+                        if (enum_it != enums.end() && enum_it->second.protect.empty())
+                            enum_it->second.protect = protect;
+                    }
+                    add_required_enum(name);
+
+                } else if (elem.tag == "command") {
+                    sv cmd_name = elem.get_attr_value("name");
+                    add_required_command(cmd_name);
+                    if (!protect.empty()) {
+                        auto cmd_it = commands.find(cmd_name);
+                        if (cmd_it != commands.end() && cmd_it->second.protect.empty())
+                            cmd_it->second.protect = protect;
+                    }
+
+                } else if (elem.tag == "feature") {
+                    // Do nothing. Feature tag are only purely for documentation
+                } else if (elem.tag == "comment") {
+                    // CHECK: standalone comment?
+                    std::cout << "Skipping <comment> when parsing require.\n";
+                } else {
+                    throw my_error{ "Unknown tag: " + std::string(elem.tag) };
                 }
             }
         }
@@ -2849,7 +2909,9 @@ void Generator::add_extension_prototype(sv number, xml::Dom& dom) {
 void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& source, Config& config) {
     // TASK: 250226_01 Handle config in generator properly
     this->config = config;
-    Deprecate::enabled = config.generate_deprecations;
+    Deprecate::enabled = config.deprecation_behavior == DeprecationBehavior::GenerateWithDeprecationWarning;
+    NameTranslator::keep_av1_vp9 = config.apply_av1_and_vp9_naming_exceptions;
+    ProtectGuard::FilterBetaExtensions = config.beta_extensions == BetaExtensions::GenerateWithoutProtectMacro;
 
 #if 1
     // ==================== Parsing ====================
@@ -2858,8 +2920,39 @@ void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& so
     parse_enums(dom);
     parse_commands(dom);
 
-    add_required_version_feature("VK_VERSION_1_4", dom);
-    add_extension_prototype("1", dom);
+    add_required_version_feature(vulkan_version_to_string(config.target_version), dom);
+
+    // Build extension name: TASK: 110426_01 Extensions should be parsed same as types, enums etc.
+    auto& registry = dom.root->asElement();
+    for (Node* ext_group : registry.children | std::views::filter(has_tag("extensions"))) {
+        for (Node* ext : ext_group->asElement().children) {
+            if (ext->isText() || ext->asElement().tag != "extension")
+                continue;
+            sv name = ext->asElement().get_attr_value("name");
+            if (!name.empty())
+                extension_name_to_element[name] = &ext->asElement();
+        }
+    }
+
+    if (config.extension_filter_mode == ExtensionFilterMode::WhiteList) {
+        for (const auto& ext_name : config.extension_names) {
+            auto it = extension_name_to_element.find(ext_name);
+            if (it == extension_name_to_element.end())
+                throw my_error{ "Whitelisted extension not found in vk.xml: " + ext_name };
+            add_extension_with_deps(*(it->second), dom);
+        }
+    } else {
+        // BlackList: iterate in XML document order (ordering matters for enum dependencies)
+        for (Node* ext_group : registry.children | std::views::filter(has_tag("extensions"))) {
+            for (Node* ext : ext_group->asElement().children) {
+                if (ext->isText() || ext->asElement().tag != "extension")
+                    continue;
+                sv name = ext->asElement().get_attr_value("name");
+                if (config.extension_names.empty() || !config.extension_names.contains(std::string(name)))
+                    add_extension_prototype(ext->asElement(), dom);
+            }
+        }
+    }
 
     if (config.generate_flags_class) {
         required_types.remove("VkFlags");
@@ -2878,7 +2971,8 @@ void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& so
     header << "#define VKAPI_PTR\n";
     header << "#define VKAPI_CALL\n";
     header << "#define VKAPI_ATTR\n";
-    header << "\nnamespace " << config.namespace_name << " {\n\n";
+    if (!config.namespace_name.empty())
+        header << "\nnamespace " << config.namespace_name << " {\n\n";
 
     // --- Forward declarations ---
     header << "struct ExtensionProperties;\n";
@@ -3141,14 +3235,16 @@ void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& so
         }
     }
 
-    header << "\n} // namespace " << config.namespace_name << "\n";
+    if (!config.namespace_name.empty())
+        header << "\n} // namespace " << config.namespace_name << "\n";
 
     source << "#include \"" << config.header_path << "\"\n";
     // TODO: This is only for testing
     source << "#include <iostream>\n"
         << "#define assert(x) if (!(x)) std::cerr << \"Assertion failed: \" << #x << std::endl; \n";
 
-    source << "namespace " << config.namespace_name << " {\n\n";
+    if (!config.namespace_name.empty())
+        source << "namespace " << config.namespace_name << " {\n\n";
     source << boilerplate::CPP_IMPL;
     generate_throw_result_exception(source);
 
@@ -3210,7 +3306,8 @@ void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& so
     }
     source_guard.close();
 
-    source << "\n} // namespace " << config.namespace_name << "\n";
+    if (!config.namespace_name.empty())
+        source << "\n} // namespace " << config.namespace_name << "\n";
 
 #else
     //auto unions_filter = has_tag("type") && has_attr("category", "union");
@@ -3643,8 +3740,9 @@ void vkg_gen::Generator::NameTranslator::transform_from_upper_constant(std::stri
             next_is_upper = true;
             prev_was_digit = false;
             // Keep "AV1" and "VP9" as-is (would otherwise become "Av1" and "Vp9")
-            if ((i + 4 < name.size() && (std::memcmp(&name[i + 1], "AV1_", 4) == 0 || std::memcmp(&name[i + 1], "VP9_", 4) == 0))
-                || (i + 4 == name.size() && (std::memcmp(&name[i + 1], "AV1", 3) == 0 || std::memcmp(&name[i + 1], "VP9", 3) == 0))) {
+            if (keep_av1_vp9 &&
+                ((i + 4 < name.size() && (std::memcmp(&name[i + 1], "AV1_", 4) == 0 || std::memcmp(&name[i + 1], "VP9_", 4) == 0))
+                    || (i + 4 == name.size() && (std::memcmp(&name[i + 1], "AV1", 3) == 0 || std::memcmp(&name[i + 1], "VP9", 3) == 0)))) {
                 name[j++] = name[i + 1];
                 name[j++] = name[i + 2];
                 name[j++] = name[i + 3];

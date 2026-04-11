@@ -29,14 +29,22 @@ To enable **Address, Leak, and Undefined Behavior sanitizers** (forces Debug):
 cmake .. -G Ninja -DSANITIZE=ON
 ```
 
-Then don't forget to copy the `vk.xml` into build directory and run the generator:
+## Usage
 
-```bash
-cp ../../vk.xml . # copy vk.xml to build directory
-./vkg_gen
+```
+./vkg_gen [options]
 ```
 
-To produce the `out.cpp` and `out.hpp` files.
+Run `./vkg_gen --help` for a full list of options. Key flags:
+
+- `--config <path>` — load a config file (key=value format)
+- `--create-config <path>` — generate a default config file
+- `--xml <path>` — path to `vk.xml` (default: `vk.xml`)
+- `--header <path>` / `--source <path>` — output file paths (default: `out.hpp` / `out.cpp`)
+- `--version <1.X>` — target Vulkan version (e.g. `1.3`)
+- `--ext <list>` — comma-separated extension list
+
+CLI arguments override config file values. Config file overrides defaults.
 
 ## Examples
 
@@ -70,7 +78,7 @@ The `examples/` directory contains sample applications that use the generated wr
   - [x] P0-7f: `loadLib_throw/noThrow`, `initInstance`, `initDevice` with PFN loading
   - [x] P0-7g: Instance-level vs device-level PFN loading split
   - [x] P0-7h: Input array → `span<T>` conversion (1:1 count/array pairs, includes handles), also handles the case of single item "array"
-- [ ] P0-8: Config from file + CLI arguments
+- [x] P0-8: Config from file + CLI arguments
 
 ### P1 — Important Quality
 

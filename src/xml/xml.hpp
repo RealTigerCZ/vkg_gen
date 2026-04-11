@@ -4,15 +4,14 @@
  * @brief Definitions of xml data structures
  *
  * @date Created: 12. 10. 2025
- * @date Modified: 10. 04. 2026
+ * @date Modified: 11. 04. 2026
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
 
 #pragma once
 
-#define UNREACHABLE() std::cerr << "Unreachable code reached at " __FILE__ ":" << __LINE__; std::abort();
-
+#include "../debug_macros.h"
 #include "../arena.hpp"
 #include <variant>
 #include <ranges>
@@ -102,7 +101,7 @@ namespace vkg_gen::xml {
         }
 
         //        auto filterByTag(sv tag, Node* node = nullptr, bool recursive = false) const noexcept;
-        auto filterByTag(sv tag, Node* node, bool recursive = false) const noexcept {
+        auto filterByTag(sv tag, Node* node) const noexcept {
             if (node == nullptr) node = root;
 
             return children(node)

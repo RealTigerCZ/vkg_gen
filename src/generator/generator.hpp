@@ -3,7 +3,7 @@
  * @author Jaroslav Hucel (xhucel00@vutbr.cz)
  * @brief
  * @date Created: 02. 11. 2025
- * @date Modified: 10. 04. 2026
+ * @date Modified: 11. 04. 2026
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -611,6 +611,8 @@ namespace vkg_gen::Generator {
     };
 
     struct NameTranslator {
+        static inline bool keep_av1_vp9 = true;
+
         struct TransformedEnumName {
             const std::string name;
             const Extension ext = Extension::None;
@@ -674,8 +676,9 @@ namespace vkg_gen::Generator {
 
         std::unordered_map<sv, sv> platform_to_protect; // platform name → protect macro
         std::unordered_set<sv> included_platforms;
-        std::unordered_set<sv> included_features;
-        std::vector<std::reference_wrapper<xml::Element>> included_extensions;
+
+        std::unordered_map<sv, xml::Element*> extension_name_to_element; // TASK: 110426_01
+        std::unordered_set<xml::Element*> processed_extensions;
 
         Config config;
 
@@ -761,7 +764,8 @@ namespace vkg_gen::Generator {
 
         void extend_enum(sv extends, vkg_gen::xml::Element& elem, vkg_gen::Arena& arena, uint16_t block_ext_number = 0, sv protect = {});
 
-        void add_extension_prototype(sv number, xml::Dom& dom);
+        void add_extension_prototype(xml::Element& ext, xml::Dom& dom);
+        void add_extension_with_deps(xml::Element& ext, xml::Dom& dom, sv required_by = {});
 
     public:
         Generator() {}

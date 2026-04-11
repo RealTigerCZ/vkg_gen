@@ -14,6 +14,7 @@ endif()
 
 set(APP_SOURCES
    src/arena.cpp
+   src/config.cpp
    src/xml/xml.cpp
    src/xml/lexer.cpp
    src/xml/parser.cpp
