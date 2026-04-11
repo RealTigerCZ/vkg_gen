@@ -3,7 +3,7 @@
  * @author Jaroslav Hucel (xhucel00@vutbr.cz)
  * @brief TODO:
  * @date Created: 12. 10. 2025
- * @date Modified: 10. 04. 2026
+ * @date Modified: 11. 04. 2026
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -125,6 +125,8 @@ namespace vkg_gen::xml {
                 break;
 
             case TokenType::Text: {
+                    if (lexer.get_value().empty() || std::ranges::all_of(lexer.get_value(), isspace))
+                        break;
                     Node* text = dom.arena.make<Node>(Node::Text{ lexer.get_and_save_value(dom.arena) }); // FIXME: replace with interned string
                     stack.top()->asElement().children.push_back(text);
                     break;

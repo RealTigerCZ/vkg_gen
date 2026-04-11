@@ -3,7 +3,7 @@
  * @author Jaroslav Hucel (xhucel00@vutbr.cz)
  * @brief
  * @date Created: 12. 11. 2025
- * @date Modified: 10. 04. 2026
+ * @date Modified: 11. 04. 2026
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -233,7 +233,7 @@ bool vkg_gen::Generator::bool_from_string(std::string_view s) {
         return false;
 
     if (s.find(",") != std::string_view::npos) {
-        std::cout << "FIXME: " << s << "not supported" << std::endl;
+        std::cout << "FIXME: boolean value '" << s << "' not supported!" << std::endl;
         return false;
     }
 
@@ -940,14 +940,16 @@ void Generator::parse_types(vkg_gen::xml::Dom& dom) {
             }
 
             auto& type = child->asElement();
-            if (type.tag != "type") {
-                std::cout << "- FIXME: ";
-                helper_test(std::cout, child) << std::endl;
+            if (type.tag == "comment") {
+                std::cout << "Skipping <comment> when parsing types.\n";
                 continue;
-            };
+            }
+
+            if (type.tag != "type")
+                throw my_error{ "Unknown tag when parsing types: " + std::string(type.tag) };
 
             Type t(type, dom.arena);
-            std::cout << "- " << t.name << std::endl;
+            //std::cout << "- " << t.name << std::endl;
             this->types.emplace(t.name, std::move(t));
 
         }
@@ -961,7 +963,7 @@ void Generator::parse_enums(vkg_gen::xml::Dom& dom) {
 
     for (Node* enum_ : registry.children | std::views::filter(has_tag("enums"))) {
         TypeEnum e(enum_->asElement(), dom.arena);
-        std::cout << "- " << e.name << std::endl;
+        //std::cout << "- " << e.name << std::endl;
         this->enums.emplace(e.name, std::move(e));
     }
 }
@@ -987,13 +989,13 @@ void vkg_gen::Generator::Generator::parse_commands(vkg_gen::xml::Dom& dom) {
             //FIXME: aliased commands
             if (std::ranges::find(cmd.attrs, "alias", &Attribute::name) != cmd.attrs.end()) {
                 CommandAlias ca = CommandAlias::from_xml(cmd, dom.arena);
-                std::cout << "- " << ca.name << std::endl;
+                //std::cout << "- " << ca.name << std::endl;
                 this->command_aliases.emplace(ca.name, std::move(ca));
                 continue;
             }
 
             Command c = Command::from_xml(cmd, dom.arena);
-            std::cout << "- " << c.name << std::endl;
+            //std::cout << "- " << c.name << std::endl;
             this->commands.emplace(c.name, std::move(c));
         }
     }
@@ -2617,9 +2619,11 @@ void Generator::add_required_version_feature(sv name, vkg_gen::xml::Dom& dom) {
                     add_required_command(elem.get_attr_value("name"));
                 } else if (elem.tag == "feature") {
                     // Do nothing. Feature tag are only purely for documentation
+                } else if (elem.tag == "comment") {
+                    // CHECK: ignore standalone comments?
+                    std::cout << "Skipping <comment> when parsing require.\n";
                 } else {
-                    std::cout << "- FIXME: currently ignoring: ";
-                    helper_test(std::cout, type) << std::endl;
+                    throw my_error{ "Unknown tag '" + std::string(elem.tag) + "' in require tag." };
                 }
             }
         } else if (elem.tag == "deprecate") {
@@ -2642,11 +2646,12 @@ void Generator::add_required_version_feature(sv name, vkg_gen::xml::Dom& dom) {
                     sv name = elem.get_attr_value("name");
                     enums.find(name)->second.deprecated = explanation;
                 } else if (elem.tag == "command") {
-                    // TODO: Currently ignoring commands
+                    // TODO: Currently unable to deprecate commands
                     //sv name = elem.get_attr_value("name");
                     //commands.find(name)->second.deprecated = explanation;
                 } else if (elem.tag == "comment") {
                     // CHECK: ignore standalone comments?
+                    std::cout << "Skipping <comment> when parsing deprecate.\n";
                 } else {
                     throw my_error{ "Unknown tag '" + std::string(elem.tag) + "' in deprecate tag." };
                 }
@@ -2670,6 +2675,7 @@ void Generator::add_required_version_feature(sv name, vkg_gen::xml::Dom& dom) {
                     required_commands.remove(elem.get_attr_value("name"));
                 } else if (elem.tag == "comment") {
                     // CHECK: ignore standalone comments?
+                    std::cout << "Skipping <comment> when parsing remove.\n";
                 } else {
                     throw my_error{ "Unknown tag '" + std::string(elem.tag) + "' in remove tag." };
                 }
@@ -2827,11 +2833,11 @@ void Generator::add_extension_prototype(sv number, xml::Dom& dom) {
 
                     } else if (elem.tag == "feature") {
                         // Do nothing. Feature tag are only purely for documentation
+                    } else if (elem.tag == "comment") {
+                        // CHECK: standalone comment?
+                        std::cout << "Skipping <comment> when parsing require.\n";
                     } else {
-
-                        std::cout << "- FIXME: currently ignoring: ";
-                        helper_test(std::cout, type) << std::endl;
-                        continue;
+                        throw my_error{ "Unknown tag: " + std::string(elem.tag) };
                     }
                 }
             }
@@ -3189,9 +3195,9 @@ void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& so
     source << boilerplate::INIT_INSTANCE_DEVICE_IMPL;
 
     source << "void setAllocator(const AllocationCallbacks* a) noexcept {\n"
-              "    assert(!detail::_instance && \"vk::setAllocator() must be called before vk::initInstance().\");\n"
-              "    detail::_allocator = a;\n"
-              "}\n\n";
+        "    assert(!detail::_instance && \"vk::setAllocator() must be called before vk::initInstance().\");\n"
+        "    detail::_allocator = a;\n"
+        "}\n\n";
 
     // --- Enumerate command implementations (.cpp) ---
     for (Command* cmd : required_commands.get()) {
@@ -3654,7 +3660,9 @@ void vkg_gen::Generator::NameTranslator::transform_from_upper_constant(std::stri
         }
 
         if (prev_was_digit && i + 1 < name.size() && std::isdigit(name[i + 1])) {
-            name[j] = name[i] != 'X' ? name[i] : 'x'; // preserve original case between digits, except for X, which is inconsistent so we make it always lowercase
+            name[j++] = name[i++]; // preserve original case between digits (also for 'X', because vk.xml should consistently use 'X' for 'x' for different meanings)
+            name[j++] = name[i];   //copy the digit
+            continue; // [0-9][xX][0-9] dont affect next_is_upper
         } else if (next_is_upper) {
             name[j] = std::toupper(name[i]);
         } else {
