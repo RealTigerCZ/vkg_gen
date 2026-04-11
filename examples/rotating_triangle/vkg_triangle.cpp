@@ -16,8 +16,6 @@ using PFN_vkGetInstanceProcAddr = vk::PFN_vkGetInstanceProcAddr;
 
 #include <GLFW/glfw3.h>
 
-#define RESIZABLE 1
-
 #include <iostream>
 #include <stdexcept>
 #include <vector>
@@ -96,22 +94,15 @@ private:
 
     std::chrono::time_point<std::chrono::high_resolution_clock> startTime;
 
-#ifdef RESIZABLE
     bool framebufferResized = false;
-#endif
 
     void initWindow() {
         glfwInit();
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-#ifdef RESIZABLE
         glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
-        window = glfwCreateWindow(WIDTH, HEIGHT, "VKG New Triangle (generated wrapper)", nullptr, nullptr);
+        window = glfwCreateWindow(WIDTH, HEIGHT, "Vkg rotating triangle", nullptr, nullptr);
         glfwSetWindowUserPointer(window, this);
         glfwSetFramebufferSizeCallback(window, framebufferResizeCallback);
-#else
-        glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
-        window = glfwCreateWindow(WIDTH, HEIGHT, "VKG New Triangle", nullptr, nullptr);
-#endif
     }
 
     void initVulkan() {
@@ -142,7 +133,7 @@ private:
 
             auto frameDuration = std::chrono::duration_cast<std::chrono::milliseconds>(frameEnd - frameStart).count();
             const long targetDuration = 1000 / TARGET_FPS;
-            if (frameDuration < targetDuration) {
+            if (frameDuration < targetDuration && !framebufferResized) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(targetDuration - frameDuration));
             }
         }
@@ -228,7 +219,7 @@ private:
         presentQueue = vk::getDeviceQueue(0, 0);
     }
 
-    void createSwapChain() {
+    void createSwapChain(vk::SwapchainKHR oldSwapchain = nullptr) {
         auto capabilities = vk::getPhysicalDeviceSurfaceCapabilitiesKHR(surface);
         auto formats = vk::getPhysicalDeviceSurfaceFormatsKHR(surface);
         auto presentModes = vk::getPhysicalDeviceSurfacePresentModesKHR(surface);
@@ -274,6 +265,7 @@ private:
         createInfo.compositeAlpha = vk::CompositeAlphaFlagBitsKHR::eOpaque;
         createInfo.presentMode = presentMode;
         createInfo.clipped = 1;
+        createInfo.oldSwapchain = oldSwapchain;
 
         swapchain = vk::createSwapchainKHR(createInfo);
         swapchainImages = vk::getSwapchainImagesKHR(swapchain);
@@ -330,19 +322,19 @@ private:
         renderPass = vk::createRenderPass(renderPassInfo);
     }
 
-    vk::ShaderModule createShaderModule(const std::vector<uint32_t>& code) {
+    vk::UniqueShaderModule createShaderModule(const std::vector<uint32_t>& code) {
         vk::ShaderModuleCreateInfo createInfo{};
         createInfo.sType = vk::StructureType::eShaderModuleCreateInfo;
         createInfo.codeSize = code.size() * 4;
         createInfo.pCode = code.data();
-        return vk::createShaderModule(createInfo);
+        return vk::createShaderModuleUnique(createInfo);
     }
 
     void createGraphicsPipeline() {
         auto vertShaderCode = readSpv("vert_rotating.spv");
         auto fragShaderCode = readSpv("frag.spv");
-        vk::ShaderModule vertShaderModule = createShaderModule(vertShaderCode);
-        vk::ShaderModule fragShaderModule = createShaderModule(fragShaderCode);
+        vk::UniqueShaderModule vertShaderModule = createShaderModule(vertShaderCode);
+        vk::UniqueShaderModule fragShaderModule = createShaderModule(fragShaderCode);
 
         vk::PipelineShaderStageCreateInfo vertShaderStageInfo{};
         vertShaderStageInfo.sType = vk::StructureType::ePipelineShaderStageCreateInfo;
@@ -424,9 +416,6 @@ private:
         pipelineInfo.renderPass = renderPass;
 
         graphicsPipeline = vk::createGraphicsPipelines(nullptr, 1, pipelineInfo);
-
-        vk::destroy(fragShaderModule);
-        vk::destroy(vertShaderModule);
     }
 
     void createFramebuffers() {
@@ -485,7 +474,7 @@ private:
     }
 
     void drawFrame() {
-        vk::waitForFences(1, &inFlightFences[currentFrame], 1, UINT64_MAX);
+        vk::waitForFences(inFlightFences[currentFrame], 1, UINT64_MAX);
 
         uint32_t imageIndex;
         vk::Result result = vk::acquireNextImageKHR_noThrow(swapchain, UINT64_MAX, imageAvailableSemaphores[currentFrame], nullptr, &imageIndex);
@@ -497,7 +486,7 @@ private:
             throw std::runtime_error("failed to acquire image!");
         }
 
-        vk::resetFences(1, &inFlightFences[currentFrame]);
+        vk::resetFences(inFlightFences[currentFrame]);
         vk::resetCommandBuffer(commandBuffers[currentFrame], vk::CommandBufferResetFlags{});
 
         vk::CommandBufferBeginInfo beginInfo{};
@@ -531,14 +520,11 @@ private:
 
         vk::cmdPushConstants(commandBuffers[currentFrame], pipelineLayout, vk::ShaderStageFlagBits::eVertex, 0, sizeof(PushConstants), &push);
 
-        vk::vector<vk::Viewport> viewports(1);
-        viewports[0] = { .width = (float)swapchainExtent.width, .height = (float)swapchainExtent.height, .maxDepth = 1.0f };
+        vk::Viewport viewport{ .width = (float)swapchainExtent.width, .height = (float)swapchainExtent.height, .maxDepth = 1.0f };
+        vk::cmdSetViewport(commandBuffers[currentFrame], 0, viewport);
 
-        vk::cmdSetViewport(commandBuffers[currentFrame], 0, viewports);
-
-        vk::vector<vk::Rect2D> scissors(1);
-        scissors[0] = { .extent = swapchainExtent };
-        vk::cmdSetScissor(commandBuffers[currentFrame], 0, scissors);
+        vk::Rect2D scissor{ .extent = swapchainExtent };
+        vk::cmdSetScissor(commandBuffers[currentFrame], 0, scissor);
 
         vk::cmdDraw(commandBuffers[currentFrame], 3, 1, 0, 0);
         vk::cmdEndRenderPass(commandBuffers[currentFrame]);
@@ -558,10 +544,7 @@ private:
         submitInfo.signalSemaphoreCount = 1;
         submitInfo.pSignalSemaphores = signalSemaphores;
 
-        vk::vector<vk::SubmitInfo> submitInfos(1);
-        submitInfos[0] = submitInfo;
-
-        vk::queueSubmit(graphicsQueue, submitInfos, inFlightFences[currentFrame]);
+        vk::queueSubmit(graphicsQueue, submitInfo, inFlightFences[currentFrame]);
 
         // Present
         vk::PresentInfoKHR presentInfo{};
@@ -575,7 +558,7 @@ private:
 
         result = vk::queuePresentKHR_noThrow(presentQueue, presentInfo);
 
-        if (result == vk::Result::eErrorOutOfDateKHR || result == vk::Result::eSuboptimalKHR || framebufferResized) {
+        if (result == vk::Result::eErrorOutOfDateKHR || framebufferResized) {
             framebufferResized = false;
             recreateSwapChain();
         }
@@ -597,8 +580,14 @@ private:
             glfwWaitEvents();
         }
         vk::deviceWaitIdle();
-        cleanupSwapChain();
-        createSwapChain();
+
+        for (auto framebuffer : swapchainFramebuffers) vk::destroy(framebuffer);
+        for (auto imageView : swapchainImageViews) vk::destroy(imageView);
+
+        auto oldSwapchain = swapchain;
+        createSwapChain(oldSwapchain);
+        vk::destroy(oldSwapchain);
+
         createImageViews();
         createFramebuffers();
     }
