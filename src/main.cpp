@@ -3,7 +3,7 @@
  * @author Jaroslav Hucel (xhucel00@vutbr.cz)
  * @brief TODO:
  * @date Created: 30. 07. 2025
- * @date Modified: 11. 04. 2026
+ * @date Modified: 18. 04. 2026
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -199,8 +199,6 @@ void check_config(const Config& config) {
         std::cout << "Warning: 'generate_enum_numbers = false' is not supported yet\n";
     if (!config.generate_c_type_keywords)
         std::cout << "Warning: 'generate_c_type_keywords = false' is not supported yet\n";
-    if (config.to_cstr_behavior != ToCstrFunction::None)
-        std::cout << "Warning: 'to_cstr_behavior' is not supported yet\n";
 
     // Partially working options
     if (config.deprecation_behavior == DeprecationBehavior::DontGenerateDeprecatedTypes)

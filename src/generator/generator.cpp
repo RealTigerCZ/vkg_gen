@@ -3,7 +3,7 @@
  * @author Jaroslav Hucel (xhucel00@vutbr.cz)
  * @brief
  * @date Created: 12. 11. 2025
- * @date Modified: 11. 04. 2026
+ * @date Modified: 18. 04. 2026
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -30,6 +30,31 @@
 using namespace vkg_gen::xml;
 
 using namespace vkg_gen::Generator;
+
+// Enum items that must be excluded from generated enum bodies and from to_cstr
+// switches. They either shadow a corrected value (duplicate case labels) or are
+// aliases that map to the same translated name as another item.
+static const std::unordered_set<sv> skip_enum_items = {
+    // Shadow correct values (Normal enums)
+    "VK_COLORSPACE_SRGB_NONLINEAR_KHR",       // should be COLOR_SPACE
+    "VK_STENCIL_FRONT_AND_BACK",              // missing _FACE_
+    "VK_STRUCTURE_TYPE_SURFACE_CAPABILITIES2_EXT", // alias collides with _CAPABILITIES_2_EXT
+
+    // Missing "_BIT", aliased to corrected bitmask values — would duplicate
+    "VK_PIPELINE_CREATE_DISPATCH_BASE",
+    "VK_HOST_IMAGE_COPY_MEMCPY",
+    "VK_SURFACE_COUNTER_VBLANK",
+    "VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_DATA_ACCESS",
+    "VK_PERFORMANCE_COUNTER_DESCRIPTION_PERFORMANCE_IMPACTING",
+    "VK_PERFORMANCE_COUNTER_DESCRIPTION_CONCURRENTLY_IMPACTED",
+    "VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_OPACITY_MICROMAP_UPDATE",
+    "VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_DISABLE_OPACITY_MICROMAPS",
+    "VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_OPACITY_MICROMAP_DATA_UPDATE",
+    "VK_GEOMETRY_INSTANCE_FORCE_OPACITY_MICROMAP_2_STATE",
+    "VK_GEOMETRY_INSTANCE_DISABLE_OPACITY_MICROMAPS",
+    "VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_DISPLACEMENT_MICROMAP_UPDATE",
+    "VK_RESOLVE_MODE_EXTERNAL_FORMAT_DOWNSAMPLE",
+};
 
 // TASK: 090126_01
 #ifdef CONCEPT_FILTERING
@@ -1152,28 +1177,6 @@ void Generator::generate_enum(TypeEnum& e, std::ofstream& file) {
 
     auto enum_name_transformed = NameTranslator::transform_enum_name(e.name, e.type == TypeEnum::Type::Bitmask);
 
-    static const std::unordered_set<sv> skip_enum_items = {
-        "VK_COLORSPACE_SRGB_NONLINEAR_KHR", // Skippible because COLORSPACE should be COLOR_SPACE, and it also shadows the correct value
-        "VK_STENCIL_FRONT_AND_BACK", // Skippible because its missing "_FACE_" and it also shadows the correct value
-        "VK_STRUCTURE_TYPE_SURFACE_CAPABILITIES2_EXT", // Skippable because its aliased with "VK_STRUCTURE_TYPE_SURFACE_CAPABILITIES_2_EXT", and after translation it will be the same value
-
-        // These values are skippable because they are missing "_BIT" and also they are aliases to the corrected values
-        "VK_PIPELINE_CREATE_DISPATCH_BASE",
-        "VK_HOST_IMAGE_COPY_MEMCPY",
-        "VK_SURFACE_COUNTER_VBLANK",
-        "VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_DATA_ACCESS",
-        "VK_PERFORMANCE_COUNTER_DESCRIPTION_PERFORMANCE_IMPACTING",
-        "VK_PERFORMANCE_COUNTER_DESCRIPTION_CONCURRENTLY_IMPACTED",
-        "VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_OPACITY_MICROMAP_UPDATE",
-        "VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_DISABLE_OPACITY_MICROMAPS",
-        "VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_OPACITY_MICROMAP_DATA_UPDATE",
-        "VK_GEOMETRY_INSTANCE_FORCE_OPACITY_MICROMAP_2_STATE",
-        "VK_GEOMETRY_INSTANCE_DISABLE_OPACITY_MICROMAPS",
-        "VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_DISPLACEMENT_MICROMAP_UPDATE",
-        "VK_RESOLVE_MODE_EXTERNAL_FORMAT_DOWNSAMPLE",
-    };
-
-
     ProtectGuard guard{ .file = file };
     for (const TypeEnum::EnumItem& item : e.items) {
         if (item.is_standalone_comment) {
@@ -1228,6 +1231,41 @@ void Generator::generate_enum(TypeEnum& e, std::ofstream& file) {
     guard.close();
     file << "};\n\n";
 }
+
+void Generator::generate_to_cstr_decl(TypeEnum& e, std::ofstream& file) {
+    auto type_name = NameTranslator::from_type_name(e.name);
+    file << "const char* to_cstr(" << type_name.new_name << " v);\n";
+}
+
+void Generator::generate_to_cstr_def(TypeEnum& e, std::ofstream& file) {
+    auto type_name = NameTranslator::from_type_name(e.name);
+    auto enum_name_transformed = NameTranslator::transform_enum_name(e.name, false);
+
+    file << "const char* to_cstr(" << type_name.new_name << " v) {\n"
+        << "    switch (v) {\n";
+
+    ProtectGuard guard{ .file = file };
+    for (const TypeEnum::EnumItem& item : e.items) {
+        if (item.is_standalone_comment) continue;
+        if (item.is_alias) continue;
+        if (skip_enum_items.contains(item.name)) continue;
+        if (!item.api.is_vulkan()) continue;
+
+        guard.transition(item.protect);
+
+        auto value = NameTranslator::from_enum_value(item.name, enum_name_transformed, false);
+        sv str_name = value.new_name;
+        if (!str_name.empty() && str_name.front() == 'e')
+            str_name.remove_prefix(1);
+
+        file << "    case " << type_name.new_name << "::" << value.new_name
+            << ": return \"" << str_name << "\";\n";
+    }
+    guard.close();
+    file << "    default: return \"Unknown\";\n"
+        << "    }\n}\n\n";
+}
+
 void vkg_gen::Generator::Generator::generate_member(Member& member, std::ofstream& file, sv struct_union, sv parent_name) {
     if (member.is_standalone_comment) {
         file << StandaloneComment{ member.comment, config.generate_comments };
@@ -3350,6 +3388,24 @@ void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& so
     }
     header_guard.close();
 
+    // --- to_cstr (declarations or inline definitions) ---
+    if (config.to_cstr_behavior != ToCstrFunction::None) {
+        header << "// conversions\n";
+        for (TypeEnum* enum_ : required_enums.get()) {
+            if (enum_ == nullptr) continue;
+            if (enum_->type != TypeEnum::Type::Normal) continue;
+            header_guard.transition(enum_->protect);
+            if (config.to_cstr_behavior == ToCstrFunction::InCpp) {
+                generate_to_cstr_decl(*enum_, header);
+            } else {
+                header << "inline ";
+                generate_to_cstr_def(*enum_, header);
+            }
+        }
+        header_guard.close();
+        header << '\n';
+    }
+
     // TASK: 100126_01
     for (auto& define : required_defines) {
         header << "#define " << define.name << " " << define.value << "\n";
@@ -3685,6 +3741,17 @@ void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& so
         "    assert(!detail::_instance && \"vk::setAllocator() must be called before vk::initInstance().\");\n"
         "    detail::_allocator = a;\n"
         "}\n\n";
+
+    // --- to_cstr definitions (.cpp) ---
+    if (config.to_cstr_behavior == ToCstrFunction::InCpp) {
+        for (TypeEnum* enum_ : required_enums.get()) {
+            if (enum_ == nullptr) continue;
+            if (enum_->type != TypeEnum::Type::Normal) continue;
+            source_guard.transition(enum_->protect);
+            generate_to_cstr_def(*enum_, source);
+        }
+        source_guard.close();
+    }
 
     // --- Enumerate command implementations (.cpp) ---
     for (Command* cmd : required_commands.get()) {

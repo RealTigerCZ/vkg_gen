@@ -3,7 +3,7 @@
  * @author Jaroslav Hucel (xhucel00@vutbr.cz)
  * @brief
  * @date Created: 02. 11. 2025
- * @date Modified: 11. 04. 2026
+ * @date Modified: 18. 04. 2026
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -720,6 +720,8 @@ namespace vkg_gen::Generator {
 
         void generate_enum(TypeEnum& enum_, std::ofstream& file);
         void generate_enum_alias(const Type& enum_, std::ofstream& file);
+        void generate_to_cstr_decl(TypeEnum& enum_, std::ofstream& file);
+        void generate_to_cstr_def(TypeEnum& enum_, std::ofstream& file);
         void generate_member(Member& member, std::ofstream& file, sv struct_union, sv parent_name);
         void generate_struct_union(const Type& type, std::ofstream& file, sv struct_union);
         void generate_struct(const Type& struct_, std::ofstream& file);

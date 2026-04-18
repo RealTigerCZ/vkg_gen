@@ -4,7 +4,7 @@
  * @brief Config file parser (key=value format)
  *
  * @date Created:  11. 04. 2026
- * @date Modified: 11. 04. 2026
+ * @date Modified: 18. 04. 2026
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -261,7 +261,7 @@ static constexpr std::string_view DEFAULT_CONFIG =
 "# ThrowOnly, NoThrowOnly, BothWithDefaultThrow, BothWithDefaultNoThrow, BothWithoutDefault\n"
 "exception_behavior = BothWithDefaultThrow\n"
 "# None, InCpp, InHpp\n"
-"to_cstr_behavior = None\n"
+"to_cstr_behavior = InCpp\n"
 "# VK_VERSION_1_0, VK_VERSION_1_1, VK_VERSION_1_2, VK_VERSION_1_3, VK_VERSION_1_4 or 1.0, 1.1, 1.2, 1.3, 1.4\n"
 "target_version = 1.4\n"
 "\n"

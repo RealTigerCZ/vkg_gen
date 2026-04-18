@@ -4,7 +4,7 @@
  * @brief Program configuration loader
  *
  * @date Created:  25. 02. 2026
- * @date Modified: 11. 04. 2026
+ * @date Modified: 18. 04. 2026
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -111,7 +111,7 @@ struct Config {
     DeprecationBehavior deprecation_behavior = DeprecationBehavior::GenerateWithDeprecationWarning;
     BetaExtensions beta_extensions = BetaExtensions::GenerateWithoutProtectMacro;
     ExceptionBehavior exception_behavior = ExceptionBehavior::BothWithDefaultThrow;
-    ToCstrFunction to_cstr_behavior = ToCstrFunction::None;
+    ToCstrFunction to_cstr_behavior = ToCstrFunction::InCpp;
     VulkanVersion target_version = VulkanVersion::VK_VERSION_1_4;
 
     // C++ features: namespacing?
