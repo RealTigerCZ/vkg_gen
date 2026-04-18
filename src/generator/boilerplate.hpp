@@ -9,8 +9,8 @@
  */
 
 #pragma once
-#include <ostream>
 #include <array>
+#include <ostream>
 #include <string_view>
 
 namespace boilerplate {

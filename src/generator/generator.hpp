@@ -1,7 +1,7 @@
 /**
  * @file generator.hpp
  * @author Jaroslav Hucel (xhucel00@vutbr.cz)
- * @brief
+ * @brief Vulkan registry data model and code generator driver.
  * @date Created: 02. 11. 2025
  * @date Modified: 18. 04. 2026
  *
@@ -10,11 +10,11 @@
 
 #pragma once
 
-#include "../debug_macros.h"
 #include "../config.hpp"
+#include "../debug_macros.h"
 #include "../xml/xml.hpp"
+
 #include <map>
-#include <stack>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -28,7 +28,6 @@ namespace vkgen::Generator {
     // TASK: 090126_02
     using sv = std::string_view;
 
-    // TODO: can we optimize size of optional attributes?
     struct Platform {
         sv name; // Expected short C99 identifier compatible name
         sv protect = {}; // C99 preprocessor token, starting with VK_USE_PLATFORM_
@@ -136,7 +135,7 @@ namespace vkgen::Generator {
             sv deprecated;
             ApiType api;
             bool is_alias = false;
-            bool is_standalone_comment = false; //TODO:
+            bool is_standalone_comment = false;
             uint16_t ext_number = 0;
 
             static EnumItem from_xml(const vkgen::xml::Element& elem, vkgen::Arena& arena, TypeEnum* parent, bool is_standalone_comment = false, bool extend_parent = false, uint16_t ext_number = 0);
@@ -231,7 +230,6 @@ namespace vkgen::Generator {
         };
 
         static TypeParam from_xml(const xml::Element& elem, vkgen::Arena& arena);
-        // TODO: replace this with operator<<
         std::string stringify() const;
         bool is_const() const;
 
@@ -491,7 +489,7 @@ namespace vkgen::Generator {
         sv type; // TODO: link with types? dependencies?
 
         // TODO: the return type and parameters can contain arbitrary C code
-        std::string declatarion;
+        std::string declaration;
 
         std::vector<CommandParameter> parameters = {};
 
@@ -935,14 +933,4 @@ namespace vkgen::Generator {
     }
 
 } // namespace vkgen::Generator
-
-
-
-#if 0
-void generate_types(vkgen::xml::Dom& dom, std::ofstream& file);
-void generate_base_types(const vkgen::xml::Dom& dom, std::ofstream& file);
-void generate_enums(const vkgen::xml::Dom& dom, std::ofstream& file);
-void generate_API_constants(const vkgen::xml::Dom& dom, std::ofstream& file);
-#endif
-
 

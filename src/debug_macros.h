@@ -4,10 +4,13 @@
 // It is here only for debugging purposes
 
 #include <cassert>
+#include <cstdlib>
+#include <source_location>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
-#include <sstream>
+#include <utility>
 
 #if defined(__GNUC__) && !defined(__clang__) && __has_include(<stacktrace>)
 #include <stacktrace>
@@ -49,14 +52,21 @@ public:
 
 #define UNUSED(x) (void)(x)
 
-#if defined(NDEBUG) || defined(IGNORE_NOT_IMPLEMENTED)
+#if defined(NDEBUG)
 
-#define NOT_IMPLEMENTED()
-#define UNREACHABLE()
-
+// Release: abort quietly — safe inside noexcept, std::unreachable() lets the
+// optimiser drop dead code after the call.
+[[noreturn]] inline void NOT_IMPLEMENTED() { std::abort(); }
+[[noreturn]] inline void UNREACHABLE() { std::unreachable(); }
+#define UNREACHABLE_QUIET()
 #else
 #include <iostream>
 [[noreturn]] inline void NOT_IMPLEMENTED() { throw my_error("Called NOT_IMPLEMENTED"); }
-#define UNREACHABLE() std::cerr << "Unreachable code reached at " __FILE__ ":" << __LINE__ << " at " << __PRETTY_FUNCTION__ << "\n"; std::abort();
+[[noreturn]] inline void UNREACHABLE(std::source_location loc = std::source_location::current()) {
+    std::cerr << "Unreachable code reached at " << loc.file_name() << ":" << loc.line()
+        << " in " << loc.function_name() << "\n";
+    std::abort();
+}
+#define UNREACHABLE_QUIET() UNREACHABLE(std::source_location::current())
 
 #endif

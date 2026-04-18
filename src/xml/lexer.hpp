@@ -16,6 +16,7 @@
 
 #include <iostream>
 
+
 namespace vkgen {
     class Arena;
 }
@@ -47,6 +48,8 @@ namespace vkgen::xml {
             Attribute
         };
 
+        // Returns the next UTF-8 code point as a view. Leading-byte prefix determines the
+        // sequence length (1-4 bytes); assumes well-formed input.
         static sv next_utf8_char(const char* p) noexcept {
             unsigned char c = *p;
             size_t len = 1;
@@ -64,7 +67,9 @@ namespace vkgen::xml {
         const std::string& m_data;
         char const* m_ptr = m_data.data();
         char const* m_token_start = m_ptr;
-        char const* m_last_line_end = m_ptr - 1; // CHECK: Points to the end of the last line, could be out of bounds
+        // Points just before m_data; intentionally one-below-begin so column math (m_ptr - m_last_line_end) is 1-based on line 1.
+        // Only used in pointer arithmetic, never dereferenced.
+        char const* m_last_line_end = m_ptr - 1;
         int m_line = 1;
 
         TokenType load_text();
@@ -98,7 +103,7 @@ namespace vkgen::xml {
                 static_cast<int>(m_last_line_end + 1 - m_data.data()) };
         }
 
-        Lexer(const std::string& data, const char* path) : file_path(path), m_data(data) { m_buffer.reserve(1024) /* FIXME: proper data handling ?*/; };
+        Lexer(const std::string& data, const char* path) : file_path(path), m_data(data) { m_buffer.reserve(1024); };
     };
 
     /**

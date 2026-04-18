@@ -10,6 +10,7 @@
  */
 
 #include "arena.hpp"
+
 #include <cstring>
 
 using namespace vkgen;
@@ -18,13 +19,15 @@ void* Arena::allocate(size_t size, size_t alignment) {
     size_t space = remaining;
     void* ptr = current;
 
-    // Align
+    // Round ptr up to the next multiple of alignment. Works because alignment is a power of two:
+    // (alignment - 1) has all low bits set; ~(alignment - 1) masks them off.
     std::uintptr_t aligned = (reinterpret_cast<std::uintptr_t>(ptr) + (alignment - 1)) & ~(alignment - 1);
     size_t padding = aligned - reinterpret_cast<std::uintptr_t>(ptr);
 
     if (padding + size > space) {
+        // New block must fit worst-case padding on top of size, so include `alignment` in the request.
         allocateBlock(std::max(DEFAULT_BLOCK_SIZE, size + alignment));
-        return allocate(size, alignment); // try again in new block
+        return allocate(size, alignment); // retry in the fresh block
     }
 
     current = reinterpret_cast<char*>(aligned + size);

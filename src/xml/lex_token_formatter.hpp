@@ -1,7 +1,7 @@
 /**
- * @file lex_token_formater.hpp
+ * @file lex_token_formatter.hpp
  * @author Jaroslav Hucel (xhucel00@vutbr.cz)
- * @brief Separate implemementations of std::formatters, so they don't pollute the global namespace
+ * @brief Separate implementations of std::formatters, so they don't pollute the global namespace
  * @date Created: 13. 10. 2025
  * @date Modified: 13. 10. 2025
  *
@@ -23,3 +23,6 @@ struct std::formatter<vkgen::xml::Lexer::TokenType> {
         return std::format_to(ctx.out(), "{}", vkgen::xml::token_to_string(token));
     }
 };
+
+// Formats a "Expected <exp> but got '<value>'!" message.
+#define EXPECT_FMT(exp, ...) std::format("Expected " exp " but got '{}'!", __VA_ARGS__)

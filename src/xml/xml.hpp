@@ -1,5 +1,5 @@
 /**
- *@file xml.hpp
+ * @file xml.hpp
  * @author Jaroslav Hucel (xhucel00@vutbr.cz)
  * @brief Definitions of xml data structures
  *
@@ -11,12 +11,12 @@
 
 #pragma once
 
-#include "../debug_macros.h"
 #include "../arena.hpp"
-#include <variant>
-#include <ranges>
+
 #include <optional>
+#include <ranges>
 #include <stdexcept>
+#include <variant>
 
 namespace vkgen::xml {
     using sv = std::string_view;
@@ -31,16 +31,15 @@ namespace vkgen::xml {
     };
 
     struct Attribute {
-        sv name; // TODO: replace with interned string
+        sv name;
         sv value;
-        bool value_is_interned; // TODO: implement :)
     };
 
     struct Node;
 
 
     struct Element {
-        sv tag; // TODO: replace with interned string
+        sv tag;
         vec<Attribute> attrs;
         vec<Node*> children;
 
@@ -77,7 +76,7 @@ namespace vkgen::xml {
             std::optional<sv> attr_value;
         };
 
-        std::string data; // Holds the copy of the file data // TODO: do we need to replace it with string view?
+        std::string data; // Holds the copy of the file data
         Node* root;
         Header* header;
         Arena arena; // All nodes are allocated in the arena
@@ -87,8 +86,8 @@ namespace vkgen::xml {
 
         vec<Node*> getChildren(Node* node = nullptr, bool recursive = false) const noexcept;
         vec<Node*> getChildrenByTag(sv tag, Node* node = nullptr, bool recursive = false) const noexcept;
-        vec<Node*> getChidlrenByAttrName(sv name, Node* node = nullptr, bool recursive = false) const noexcept;
-        vec<Node*> getChidlrenByAttrValue(std::optional<sv> value, Node* node = nullptr, bool recursive = false) const noexcept;
+        vec<Node*> getChildrenByAttrName(sv name, Node* node = nullptr, bool recursive = false) const noexcept;
+        vec<Node*> getChildrenByAttrValue(std::optional<sv> value, Node* node = nullptr, bool recursive = false) const noexcept;
 
         vec<Node*> getChildrenByFilter(const Filter& filter, Node* node = nullptr, bool recursive = false) const noexcept;
         vec<Node*> getChildrenByChildrenFilter(const Filter& filter, Node* node = nullptr) const noexcept;

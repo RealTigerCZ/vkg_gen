@@ -1,7 +1,7 @@
 /**
  * @file parser.cpp
  * @author Jaroslav Hucel (xhucel00@vutbr.cz)
- * @brief TODO:
+ * @brief Builds an XML DOM from the token stream produced by Lexer.
  * @date Created: 12. 10. 2025
  * @date Modified: 11. 04. 2026
  *
@@ -9,23 +9,23 @@
  */
 
 #include "parser.hpp"
+
+#include "../debug_macros.h"
+#include "lex_token_formatter.hpp"
 #include "lexer.hpp"
-#include "lex_token_formater.hpp"
 
-#include <fstream>
+#include <algorithm>
+#include <cassert>
 #include <cstring>
-#include <stack>
-
-#include <assert.h>
+#include <format>
+#include <fstream>
 #include <iostream>
 #include <sstream>
-#include <algorithm>
+#include <stack>
 
 
 #define DEBUG_HERE(...) std::cout << __FILE__ << ":" << __LINE__ << ": " << __VA_ARGS__ << std::endl;
 #define HERE() std::cout << __FILE__ << ":" << __LINE__ << std::endl;
-
-#define EXPECT_FMT(exp, ...) std::format("Expected " exp " but got '{}'!", __VA_ARGS__)
 
 namespace vkgen::xml {
     Dom Parser::parse(const std::string& path) {
@@ -50,9 +50,9 @@ namespace vkgen::xml {
 
         load_header(lexer, dom);
 
+        // TODO: Silently skip any whitespace/comment text that appears before the root tag
         TokenType token = lexer.next(Expected::Text);
         if (token == TokenType::Text) {
-            std::cout << "TODO: skipping text before root tag: '" << lexer.get_value() << '\'' << std::endl;
             token = lexer.next(Expected::Text);
         }
 
@@ -66,7 +66,7 @@ namespace vkgen::xml {
 
         dom.root = dom.arena.make<Node>();
         auto& root = dom.root->asElement();
-        root.tag = lexer.get_and_save_value(dom.arena); // FIXME: replace with interned string
+        root.tag = lexer.get_and_save_value(dom.arena);
 
         std::stack<Node*> stack({ dom.root });
         if (load_attr(lexer, root.attrs, dom)) {
@@ -81,7 +81,6 @@ namespace vkgen::xml {
             TokenType token = lexer.next(next);
             if (stack.empty()) {
                 if (token == TokenType::Text) {
-                    std::cout << "TODO: skipping text before root tag: '" << lexer.get_value() << '\'' << std::endl;
                     token = lexer.next(Expected::Text);
                 }
 
@@ -127,7 +126,7 @@ namespace vkgen::xml {
             case TokenType::Text: {
                     if (lexer.get_value().empty() || std::ranges::all_of(lexer.get_value(), isspace))
                         break;
-                    Node* text = dom.arena.make<Node>(Node::Text{ lexer.get_and_save_value(dom.arena) }); // FIXME: replace with interned string
+                    Node* text = dom.arena.make<Node>(Node::Text{ lexer.get_and_save_value(dom.arena) });
                     stack.top()->asElement().children.push_back(text);
                     break;
                 }
@@ -221,9 +220,8 @@ namespace vkgen::xml {
         using TokenType = Lexer::TokenType;
 
 
-        sv name; // TODO: replace with interned string
+        sv name;
         sv value;
-        bool value_is_interned = false; //FIXME:
 
         while (true) {
             TokenType token = lexer.next(Expected::Attribute);
@@ -250,9 +248,8 @@ namespace vkgen::xml {
                 throw ParserError{ lexer, EXPECT_FMT("attribute value (STR)", token) };
 
             value = lexer.get_and_save_value(dom.arena);
-            value_is_interned = false; // TODO: replace with interned string
 
-            attrs.emplace_back(Attribute{ name, value, value_is_interned });
+            attrs.emplace_back(Attribute{ name, value });
         }
     }
 

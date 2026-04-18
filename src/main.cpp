@@ -1,21 +1,20 @@
 /**
  * @file main.cpp
  * @author Jaroslav Hucel (xhucel00@vutbr.cz)
- * @brief TODO:
+ * @brief Entry point; loads config, parses vk.xml, and runs the generator.
  * @date Created: 30. 07. 2025
  * @date Modified: 18. 04. 2026
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
 
-#include <iostream>
-#include "xml/parser.hpp"
-#include "xml/lexer.hpp"
-#include "generator/generator.hpp"
 #include "config.hpp"
-#include <fstream>
+#include "generator/generator.hpp"
+#include "xml/parser.hpp"
+
 #include <cstring>
-#include <unordered_map>
+#include <fstream>
+#include <iostream>
 
 
 static std::ofstream open_or_throw(const std::string& path, std::ios::openmode mode) {

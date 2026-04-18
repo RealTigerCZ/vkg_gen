@@ -1,8 +1,8 @@
 /**
  * @file arena.hpp
  * @author Jaroslav Hucel (xhucel00@vutbr.cz)
- * @brief Simple arena memory alocator, that allocates memory in blocks, so it's more cache friendly (because xml is full of small data)
- *        and whole xml can be freed at once. This approach is not ideal if you need to change xml at runtime (its not possible to deallocate memory).
+ * @brief Simple arena memory allocator that allocates memory in blocks, making it cache-friendly for XML's many small nodes
+ *        and allowing the whole XML to be freed at once. Not suitable if you need to modify the XML at runtime (individual deallocation is not supported).
  *
  * @date Created: 12. 10. 2025
  * @date Modified: 1. 11. 2025
@@ -12,9 +12,9 @@
 
 #pragma once
 
-#include <string_view>
-#include <string>
 #include <memory>
+#include <string>
+#include <string_view>
 #include <vector>
 
 namespace vkgen {

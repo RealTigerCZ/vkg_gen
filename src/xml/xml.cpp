@@ -9,13 +9,12 @@
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
 #include "xml.hpp"
-#include <sstream>
-#include <algorithm>
-#include <ranges>
-#include <queue>
-#include <functional>
 
 #include "../debug_macros.h"
+
+#include <algorithm>
+#include <queue>
+#include <sstream>
 
 namespace vkgen::xml {
     static void free_node(Node* node) {
@@ -58,9 +57,8 @@ namespace vkgen::xml {
         auto& elem = node->asElement();
         if (!recursive) return elem.children;
 
-        // FIXME: do we need recursive search? and if yes, how should it work
-        // 1: search every node below and return all matches
-        // 2: search every branch and return first matches in them
+        // Recursive mode: BFS over all descendants and collect every node
+        // (elements and text). See TASKS — recursive-search semantics unresolved.
         std::vector<Node*> result;
         std::queue<Node*> queue;
         queue.push(node);
@@ -95,13 +93,12 @@ namespace vkgen::xml {
             return result;
         }
 
-        // FIXME: do we need recursive search? and if yes, how should it work
-        // 1: search every node below and return all matches
-        // 2: search every branch and return first matches in them
-
+        // Recursive path unresolved — TASK: 180426_07.
+        NOT_IMPLEMENTED();
+        return {};
     };
 
-    vec<Node*> Dom::getChidlrenByAttrName(sv name, Node* node, bool recursive) const noexcept {
+    vec<Node*> Dom::getChildrenByAttrName(sv name, Node* node, bool recursive) const noexcept {
         if (node == nullptr) node = root;
         if (!node->isElement()) return {};
         if (name.empty()) return getChildren(node, recursive);
@@ -120,12 +117,12 @@ namespace vkgen::xml {
             return result;
         }
 
-        // FIXME: do we need recursive search? and if yes, how should it work
-        // 1: search every node below and return all matches
-        // 2: search every branch and return first matches in them
+        // Recursive path unresolved — TASK: 180426_07.
+        NOT_IMPLEMENTED();
+        return {};
     }
 
-    vec<Node*> Dom::getChidlrenByAttrValue(std::optional<sv> value, Node* node, bool recursive) const noexcept {
+    vec<Node*> Dom::getChildrenByAttrValue(std::optional<sv> value, Node* node, bool recursive) const noexcept {
         if (node == nullptr) node = root;
         if (!node->isElement()) return {};
         if (!value.has_value()) return getChildren(node, recursive);
@@ -145,9 +142,9 @@ namespace vkgen::xml {
             return result;
         }
 
-        // FIXME: do we need recursive search? and if yes, how should it work
-        // 1: search every node below and return all matches
-        // 2: search every branch and return first matches in them
+        // Recursive path unresolved — TASK: 180426_07.
+        NOT_IMPLEMENTED();
+        return {};
     }
 
 
@@ -174,7 +171,7 @@ namespace vkgen::xml {
             };
 
 
-        const auto find_attrs = !filter.attr_value.has_value() && !filter.attr_name.empty() ? [](const Element& elem, const Filter& filter) {return true;} :
+        const auto find_attrs = !filter.attr_value.has_value() && !filter.attr_name.empty() ? [](const Element&, const Filter&) {return true;} :
             filter.attr_value.has_value() ? filter.attr_name.empty() ? only_attr_value : both_atrrs : only_attr_name;
 
         auto& elem = node->asElement();
@@ -197,6 +194,7 @@ namespace vkgen::xml {
     };
 
     vec<Node*> Dom::getChildrenByChildrenFilter(const Filter& filter, Node* node) const noexcept {
+        UNUSED(filter); UNUSED(node);
         NOT_IMPLEMENTED();
         return {};
     };
@@ -206,27 +204,27 @@ namespace vkgen::xml {
 
 
     auto Dom::filterByAttr(sv name, sv value, Node* node, bool recursive) const noexcept {
-
+        UNUSED(name); UNUSED(value); UNUSED(node); UNUSED(recursive);
     };
 
     auto Dom::filterByFilter(const Filter& filter, Node* node, bool recursive) const noexcept {
-
+        UNUSED(filter); UNUSED(node); UNUSED(recursive);
     };
 
     auto Dom::filterByTag(auto nodes, sv tag) const noexcept {
-
+        UNUSED(nodes); UNUSED(tag);
     };
 
     auto Dom::filterByAttr(auto nodes, sv name, sv value) const noexcept {
-
+        UNUSED(nodes); UNUSED(name); UNUSED(value);
     };
 
     auto Dom::filterByFilter(auto nodes, const Filter& filter) const noexcept {
-
+        UNUSED(nodes); UNUSED(filter);
     };
 
     auto Dom::filterByChildrenFilter(auto nodes, const Filter& filter) const noexcept {
-
+        UNUSED(nodes); UNUSED(filter);
     };
 
 

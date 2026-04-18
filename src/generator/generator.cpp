@@ -9,25 +9,27 @@
  */
 
 
-#include <concepts>
-#include <string_view>
-#include <ranges>
-#include <algorithm>
-#include <fstream>
-#include <iostream>
-#include <cassert>
-#include <cstring>
-#include <sstream>
-#include <format>
-
-#include "../xml/xml.hpp"
-#include "../arena.hpp"
-#include "boilerplate.hpp"
 #include "generator.hpp"
 
+#include "../arena.hpp"
+#include "../xml/xml.hpp"
+#include "boilerplate.hpp"
 
- //FIXME:
-using namespace vkgen::xml;
+#include <algorithm>
+#include <cassert>
+#include <concepts>
+#include <cstring>
+#include <format>
+#include <fstream>
+#include <iostream>
+#include <ranges>
+#include <sstream>
+#include <string_view>
+
+
+using vkgen::xml::Attribute;
+using vkgen::xml::Element;
+using vkgen::xml::Node;
 
 using namespace vkgen::Generator;
 
@@ -248,9 +250,10 @@ std::string_view to_string(Extension ext) {
     case Extension::Shady: return "SHADY";
     case Extension::Fredemmott: return "FREDEMMOTT";
     case Extension::Mtk: return "MTK";
+    case Extension::None: break;
     }
-
-    throw my_error("Invalid extension");
+    UNREACHABLE_QUIET();
+    return "Unknown";
 }
 
 bool vkgen::Generator::bool_from_string(std::string_view s) {
@@ -284,8 +287,6 @@ Member::ExternSync externsync_from_string(std::string_view s) {
 
     throw my_error("Invalid externsync value: '" + std::string(s) + "'");
 }
-
-
 
 
 Type::Category Type::category_from_string(std::string_view s) const {
@@ -550,7 +551,7 @@ Type::~Type() {
     }
 }
 
-// TASK: 090126_03
+// TASK: 090126_03, prototype helper function, when othe code fails
 void _gen_arbitrary_C_code_in_type(const vkgen::xml::Element& elem, std::ofstream& file) {
     bool last_was_element = false;
     for (Node* child : elem.children) {
@@ -670,9 +671,10 @@ std::string_view to_string_type(TypeEnum::Bitwidth b) {
     case TypeEnum::Bitwidth::_16: return "uint16_t";
     case TypeEnum::Bitwidth::_32: return "uint32_t";
     case TypeEnum::Bitwidth::_64: return "uint64_t";
+    case TypeEnum::Bitwidth::None: break;
     }
-    // TODO: UNREACHABLE
-    throw my_error{ "Unknown bitwidth" };
+    UNREACHABLE_QUIET();
+    return "Unknown";
 }
 
 std::string_view to_string(TypeEnum::Bitwidth b) {
@@ -683,8 +685,8 @@ std::string_view to_string(TypeEnum::Bitwidth b) {
     case TypeEnum::Bitwidth::_64: return "64";
     case TypeEnum::Bitwidth::None: return "None";
     }
-    // TODO: UNREACHABLE
-    throw my_error{ "Unknown bitwidth" };
+    UNREACHABLE_QUIET();
+    return "Unknown";
 }
 std::string_view to_string(TypeEnum::Type t) {
     switch (t) {
@@ -693,8 +695,8 @@ std::string_view to_string(TypeEnum::Type t) {
     case TypeEnum::Type::Bitmask: return "bitmask";
     case TypeEnum::Type::Constants: return "constants";
     }
-    //TODO: UNREACHABLE
-    throw my_error{ "Unknown type" };
+    UNREACHABLE_QUIET();
+    return "Unknown";
 }
 
 uint8_t bitpos_from_string(std::string_view s) {
@@ -740,6 +742,7 @@ Member::LimitType Member::limit_type_from_string(std::string_view s) {
 
 Member::Member(const vkgen::xml::Element& e, vkgen::Arena& arena, ParentType parent_type, bool is_standalone_comment) :
     is_standalone_comment(is_standalone_comment) {
+    UNUSED(parent_type);
     if (is_standalone_comment) {
         assert(e.tag == "comment");
         comment = e.children[0]->asText();
@@ -1013,7 +1016,7 @@ void vkgen::Generator::Generator::parse_commands(vkgen::xml::Dom& dom) {
                 helper_test(std::cout, child) << std::endl;
                 continue;
             };
-            //FIXME: aliased commands
+            // TASK: 180426_08 — revisit aliased-command path below.
             if (std::ranges::find(cmd.attrs, "alias", &Attribute::name) != cmd.attrs.end()) {
                 CommandAlias ca = CommandAlias::from_xml(cmd, dom.arena);
                 //std::cout << "- " << ca.name << std::endl;
@@ -1223,7 +1226,6 @@ void Generator::generate_enum(TypeEnum& e, std::ofstream& file) {
 
         } else {
             throw my_error("TODO: internal error");
-            assert(false);
         }
 
         file << "," << LineComment{ item.comment, false, config.generate_comments } << '\n';
@@ -3263,7 +3265,6 @@ void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& so
     NameTranslator::keep_av1_vp9 = config.apply_av1_and_vp9_naming_exceptions;
     ProtectGuard::FilterBetaExtensions = config.beta_extensions == BetaExtensions::GenerateWithoutProtectMacro;
 
-#if 1
     // ==================== Parsing ====================
     parse_platforms(dom);
     parse_types(dom);
@@ -3769,62 +3770,6 @@ void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& so
 
     if (!config.namespace_name.empty())
         source << "\n} // namespace " << config.namespace_name << "\n";
-
-#else
-    //auto unions_filter = has_tag("type") && has_attr("category", "union");
-    //auto types = dom.getChildrenByTag("types")[0]->asElement();
-//
-    //for (const auto& child : types.children | std::views::filter(unions_filter)) {
-    //    std::cout << "<type ";
-    //    for (auto& attr : child->asElement().attrs) {
-    //        std::cout << attr.name << "='" << attr.value << "', ";
-    //    }
-    //    std::cout << ">\n";
-//
-    //};
-
-    //auto extension_filter = has_tag("extension");
-    //auto extensions = dom.getChildrenByTag("extensions")[0]->asElement();
-    //for (Node* child : extensions.children | std::views::filter(extension_filter)) {
-    //    auto& ch = child->asElement();
-    //    std::cout << ch.get_attr_value("name") << " = " << ch.get_attr_value("number") << ",\n";
-    //}
-    using Element = vkg_gen::xml::Element;
-
-    //auto asElementConstTransform = std::views::transform([](const Node* n) ->const Element& { return n->asElement(); });
-    auto feature_filter = has_tag("feature") && [](const Node* n) { return n->isElement() && n->asElement().get_attr_value("name").contains("VK_VERSION"); };
-
-
-    auto asElementTransform = std::views::transform([](Node* n) -> Element& { return n->asElement(); });
-    auto it = std::ranges::find_if(dom.root->asElement().children, has_tag("extensions"));
-    Element& extensionsTag = (*it)->asElement();
-
-    //parse_enums(dom);
-
-    for (Element& extension : extensionsTag.children | std::views::filter(has_tag("extension")) | asElementTransform) {
-        for (Element& require : extension.children | std::views::filter(has_tag("require")) | asElementTransform) {
-            for (Element& enum_ : require.children | std::views::filter(has_tag("enum") && has_attr_name("offset") && !has_attr_name("extnumber")) | asElementTransform) {
-                std::cout << "Found enum extension with offset and without extnumber: " << "<enum ";
-                for (auto& attr : enum_.attrs) {
-                    std::cout << attr.name << "='" << attr.value << "', ";
-                }
-                std::cout << ">\n";
-            }
-
-            //for (Element& enum_ : require.children | std::views::filter(has_tag("enum") && has_attr_name("offset")) | asElementTransform) {
-            //    TypeEnum& parent = enums.find(enum_.get_attr_value("extends"))->second;
-            //    if (parent.type != TypeEnum::Type::Normal) {
-            //        std::cout << "Found enum extension with offset on enum(" << to_string(parent.type) << "): " << "<enum ";
-            //        for (auto& attr : enum_.attrs) {
-            //            std::cout << attr.name << "='" << attr.value << "', ";
-            //        }
-            //        std::cout << ">\n";
-//
-            //    }
-            //}
-        }
-    }
-#endif
 };
 
 CommandParameter CommandParameter::from_xml(const xml::Element& elem, vkgen::Arena& arena) {
@@ -3921,7 +3866,7 @@ Command Command::from_xml(const xml::Element& elem, vkgen::Arena& arena) {
     for (Node* child : proto->asElement().children) {
         if (child->isText()) {
 
-            cmd.declatarion += child->asText();
+            cmd.declaration += child->asText();
             continue;
         }
         auto& ch = child->asElement();
@@ -3929,7 +3874,7 @@ Command Command::from_xml(const xml::Element& elem, vkgen::Arena& arena) {
             if (!cmd.name.empty())
                 throw my_error{ "Command can only have one name!" };
             cmd.name = ch.children[0]->asText();
-            cmd.declatarion += cmd.name;
+            cmd.declaration += cmd.name;
         } else if (ch.tag == "type") {
             if (cmd.type.empty()) {
                 cmd.type = ch.children[0]->asText();
@@ -3937,7 +3882,7 @@ Command Command::from_xml(const xml::Element& elem, vkgen::Arena& arena) {
                 // TASK: 090126_08 - THIS CAN HAPPEN
                 std::cout << "TODO: Duplicate type in member: " << std::string(cmd.name) << std::endl;
             }
-            cmd.declatarion += ch.children[0]->asText();
+            cmd.declaration += ch.children[0]->asText();
         } else
             throw my_error{ "Unknown child element for command: " + std::string(child->asElement().tag) };
     }
@@ -3971,6 +3916,7 @@ Command Command::from_xml(const xml::Element& elem, vkgen::Arena& arena) {
 }
 
 CommandAlias vkgen::Generator::CommandAlias::from_xml(const xml::Element& elem, vkgen::Arena& arena) {
+    UNUSED(arena);
     CommandAlias ca;
 
     for (const Attribute& attr : elem.attrs) {
@@ -4803,6 +4749,7 @@ TypeParam::State vkgen::Generator::TypeParam::parse_string(sv text, State state)
             return State::AfterBitSelect;
         throw my_error{ "Can't have anything after bitselect (:<num>)!" };
     }
+    UNREACHABLE();
 }
 
 ApiType vkgen::Generator::ApiType::from_string(sv str) {

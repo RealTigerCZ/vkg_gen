@@ -10,12 +10,13 @@
  */
 
 #include "config.hpp"
+
+#include <algorithm>
+#include <cstring>
 #include <fstream>
 #include <iostream>
-#include <stdexcept>
-#include <cstring>
-#include <algorithm>
 #include <ranges>
+#include <stdexcept>
 
 ConfigError::ConfigError(const std::string& path, int line, const std::string& message)
     : my_error(path + ":" + std::to_string(line) + ": " + message) {}

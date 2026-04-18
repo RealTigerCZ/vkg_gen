@@ -10,13 +10,12 @@
  */
 
 #pragma once
+#include "debug_macros.h"
+
 #include <cstdint>
-#include <stdexcept>
 #include <string>
 #include <string_view>
-#include <vector>
 #include <unordered_set>
-#include "debug_macros.h"
 
 class ConfigError : public my_error {
 public:
@@ -104,7 +103,7 @@ struct Config {
     bool generate_enum_numbers = true;  // false tries to remove all unnecessary enum numbers
     bool generate_c_type_keywords = false; // C requires (struct|union|enum) before type name, C++ doesn't
     bool apply_av1_and_vp9_naming_exceptions = true; // AV1 and VP9 would be translated to "Av1" and "Vp9" in C++
-    bool generate_command_aliases = true; // false means skipping aliases for commands, taht usually only adds extension suffix
+    bool generate_command_aliases = true; // false means skipping aliases for commands, that usually only adds extension suffix
 
     Compact compact = Compact::Normal;
     LogLevel log_level = LogLevel::Warning;
@@ -120,7 +119,6 @@ struct Config {
     bool generate_extension_defined_macro = false;
     bool generate_extension_name_macro = false;
     bool generate_extension_version_macro = false;
-    //bool protect_extension = false;
 
     bool header_only = false;
     std::string header_only_guard = "VKG_IMPLEMENTATION";

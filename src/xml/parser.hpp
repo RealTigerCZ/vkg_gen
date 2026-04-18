@@ -1,7 +1,7 @@
 /**
  * @file parser.hpp
  * @author Jaroslav Hucel (xhucel00@vutbr.cz)
- * @brief TODO:
+ * @brief Builds an XML DOM from the token stream produced by Lexer.
  * @date Created: 12. 10. 2025
  * @date Modified: 1. 11. 2025
  *
@@ -17,7 +17,7 @@ namespace vkgen::xml {
     class Lexer;
 
     class Parser {
-        const char* file_path;
+        [[maybe_unused]] const char* file_path;
 
         void parse(Dom& dom, Lexer& lexer);
         bool load_attr(Lexer& lexer, vec<Attribute>& attrs, Dom& dom);

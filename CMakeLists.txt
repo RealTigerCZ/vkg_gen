@@ -42,7 +42,7 @@ if(MSVC)
     )
 else()
     # Always applied to GCC/Clang
-    target_compile_options(${APP_NAME} PRIVATE -Wall -Wextra)
+    target_compile_options(${APP_NAME} PRIVATE -Wall -Wextra -Wno-missing-field-initializers)
 
     if (SANITIZE)
         # SANITIZE overrides standard profiles to force Debug + Sanitizer flags

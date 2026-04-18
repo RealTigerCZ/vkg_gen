@@ -11,13 +11,14 @@
 
 
 #include "lexer.hpp"
-#include <assert.h>
-#include <unordered_map>
-#include <sstream>
-#include <iostream>
-#include <algorithm>
 
 #include "../arena.hpp"
+#include "../debug_macros.h"
+
+#include <algorithm>
+#include <cassert>
+#include <iostream>
+#include <unordered_map>
 
 namespace vkgen::xml {
     Lexer::TokenType Lexer::next(Expected expected) {
@@ -297,7 +298,8 @@ namespace vkgen::xml {
         case Type::String:           return "STR";
         }
 
-        UNREACHABLE();
+        UNREACHABLE_QUIET();
+        return "UNKNOWN";
     }
 
     std::ostream& operator<<(std::ostream& os, Lexer::TokenType type) {
