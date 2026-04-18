@@ -50,18 +50,18 @@ namespace vkgen::xml {
 
         // Returns the next UTF-8 code point as a view. Leading-byte prefix determines the
         // sequence length (1-4 bytes); assumes well-formed input.
-        static sv next_utf8_char(const char* p) noexcept {
+        static std::string_view next_utf8_char(const char* p) noexcept {
             unsigned char c = *p;
             size_t len = 1;
             if (c >= 0xF0) len = 4;
             else if (c >= 0xE0) len = 3;
             else if (c >= 0xC0) len = 2;
-            return sv(p, len);
+            return std::string_view(p, len);
         };
 
     private:
         std::vector<char> m_buffer;
-        sv m_last_value;
+        std::string_view m_last_value;
 
         const char* file_path;
         const std::string& m_data;
@@ -90,13 +90,13 @@ namespace vkgen::xml {
          *
          * @note This value will be **unvalidated** after calling lexer::next() or deleting the lexer.
          */
-        sv get_value() const noexcept { return m_last_value; }
+        std::string_view get_value() const noexcept { return m_last_value; }
         Position get_pos() const noexcept { return { m_line, static_cast<int>(m_ptr - m_last_line_end) }; }
 
         int get_token_start() const noexcept { return static_cast<int>(m_token_start - m_data.data()); }
         int get_token_end() const noexcept { return static_cast<int>(m_ptr - m_data.data()); }
 
-        sv get_and_save_value(Arena& arena);
+        std::string_view get_and_save_value(Arena& arena);
 
         ErrorLoc get_err_loc() const noexcept {
             return { m_data, get_pos(), file_path, static_cast<int>(m_ptr - m_data.data()),
@@ -119,6 +119,6 @@ namespace vkgen::xml {
     };
 
 
-    sv token_to_string(Lexer::TokenType type) noexcept;
+    std::string_view token_to_string(Lexer::TokenType type) noexcept;
 } // namespace vkgen::xml
 

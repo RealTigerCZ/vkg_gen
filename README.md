@@ -110,6 +110,13 @@ The `examples/` directory contains sample applications that use the generated wr
 - [ ] P3-1: Refactor lexers data handling
 - [ ] P3-2: Update parser to work more closely with generator
 - [ ] P3-3: Better error handling and reporting
+- [ ] P3-4: Proper testing pipeline
+  - [ ] P3-4a: Test compiling with many compilers and configurations (also test for warnings)
+  - [ ] P3-4b: Test running vkgen with different configs
+  - [ ] P3-4c: Test compiling Release, RelWithDebInfo and Debug
+  - [ ] P3-4d: Test running vkgen with memory, address, and undefined behavior sanitizers
+  - [ ] P3-4e: Test the actual generated code (compiling, running, ...)
+  - [ ] P3-4f: Add "blackbox" tests for vkgen
 
 ## Testing
 

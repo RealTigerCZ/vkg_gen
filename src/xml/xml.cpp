@@ -17,6 +17,8 @@
 #include <sstream>
 
 namespace vkgen::xml {
+    using sv = std::string_view;
+
     static void free_node(Node* node) {
         if (node->isElement()) {
             auto& elem = node->asElement();
@@ -204,7 +206,7 @@ namespace vkgen::xml {
 
 
     auto Dom::filterByAttr(sv name, sv value, Node* node, bool recursive) const noexcept {
-        UNUSED(name); UNUSED(value); UNUSED(node); UNUSED(recursive);
+        UNUSED(name); UNUSED(value); UNUSED(node); UNUSED(recursive); NOT_IMPLEMENTED();
     };
 
     auto Dom::filterByFilter(const Filter& filter, Node* node, bool recursive) const noexcept {
@@ -212,19 +214,19 @@ namespace vkgen::xml {
     };
 
     auto Dom::filterByTag(auto nodes, sv tag) const noexcept {
-        UNUSED(nodes); UNUSED(tag);
+        UNUSED(nodes); UNUSED(tag); NOT_IMPLEMENTED();
     };
 
     auto Dom::filterByAttr(auto nodes, sv name, sv value) const noexcept {
-        UNUSED(nodes); UNUSED(name); UNUSED(value);
+        UNUSED(nodes); UNUSED(name); UNUSED(value); NOT_IMPLEMENTED();
     };
 
     auto Dom::filterByFilter(auto nodes, const Filter& filter) const noexcept {
-        UNUSED(nodes); UNUSED(filter);
+        UNUSED(nodes); UNUSED(filter); NOT_IMPLEMENTED();
     };
 
     auto Dom::filterByChildrenFilter(auto nodes, const Filter& filter) const noexcept {
-        UNUSED(nodes); UNUSED(filter);
+        UNUSED(nodes); UNUSED(filter); NOT_IMPLEMENTED();
     };
 
 

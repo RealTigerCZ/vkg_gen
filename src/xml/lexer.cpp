@@ -21,6 +21,8 @@
 #include <unordered_map>
 
 namespace vkgen::xml {
+    using sv = std::string_view;
+
     Lexer::TokenType Lexer::next(Expected expected) {
         auto token = _next(expected); // FIXME: refactor
         if (m_buffer.size() == 0)

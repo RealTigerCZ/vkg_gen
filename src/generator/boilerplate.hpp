@@ -14,7 +14,7 @@
 #include <string_view>
 
 namespace boilerplate {
-    using namespace std::string_view_literals;
+    using namespace std::string_view_literals; // for ""sv string literals
 
     // author: PCJohn (peciva at fit.vut.cz)
     static constexpr std::array HANDLE_DEFINITION = {
@@ -47,7 +47,7 @@ namespace boilerplate {
         "class Flags {\n"sv,
         "    public:\n\n"sv,
 
-        "    using ValueType = __underlying_type(BitType);\n"sv,
+        "    using ValueType = __underlying_type(BitType);\n"sv, // This is a change from the original code, this compiler intrinsics is supported by GCC, Clang and MSVC
 
         "   protected:\n"sv,
         "       ValueType _value;\n"sv,
@@ -86,6 +86,7 @@ namespace boilerplate {
         "   explicit constexpr operator ValueType() const noexcept { return _value; }\n"sv,
         "};\n\n"sv,
 
+        // Code below is not from the original author
         "// These specializations are used for dummy flags, that don't have any bits set defined\n"sv,
         "template <>\n"sv,
         "class Flags<uint32_t> {\n"sv,
@@ -103,6 +104,7 @@ namespace boilerplate {
         "    constexpr operator uint64_t() const noexcept { return _value; }\n"sv,
         "};\n\n"sv,
 
+        // Original author: PCJohn (peciva at fit.vut.cz)
         "template <typename BitType>\n"sv,
         "constexpr Flags<BitType> operator|(BitType lhs, BitType rhs) noexcept { return Flags<BitType>(lhs) | rhs; }\n"sv,
         "template <typename BitType>\n"sv,
@@ -261,11 +263,13 @@ namespace boilerplate {
         "};\n\n"
         "class VkgError : public Error { public: using Error::Error; };\n\n"sv;
 
+    // author: PCJohn (peciva at fit.vut.cz)
     static constexpr std::string_view PROC_ADDR_HELPERS =
         "template<typename Qual> inline Qual getGlobalProcAddr(const char* name) noexcept { return reinterpret_cast<Qual>(funcs.vkGetInstanceProcAddr(nullptr, name)); }\n"
         "template<typename Qual> inline Qual getInstanceProcAddr(const char* name) noexcept { return reinterpret_cast<Qual>(funcs.vkGetInstanceProcAddr(detail::_instance.handle(), name)); }\n"
         "template<typename Qual> inline Qual getDeviceProcAddr(const char* name) noexcept { return reinterpret_cast<Qual>(funcs.vkGetDeviceProcAddr(detail::_device.handle(), name)); }\n\n"sv;
 
+    // author: PCJohn (peciva at fit.vut.cz)
     static constexpr std::string_view PROCESS_RESULT_TEMPLATE =
         "namespace detail {\n"
         "    template<typename Qual> void processResult(Result r, Qual& handle, const char* functionName) {"
@@ -275,7 +279,7 @@ namespace boilerplate {
 
     static constexpr std::string_view CPP_IMPL =
         "#include <dlfcn.h>\n"
-        //"#include <assert.h>\n"
+        "#include <assert.h>\n"
         "\n"
         "void* detail::_library = nullptr;\n"
         "Instance detail::_instance = nullptr;\n"
@@ -284,6 +288,8 @@ namespace boilerplate {
         "uint32_t detail::_instanceVersion = 0;\n"
         "const AllocationCallbacks* detail::_allocator = nullptr;\n"
         "Funcs detail::_funcs;\n\n"
+
+        // author: PCJohn (peciva at fit.vut.cz)
         "Error::Error(const char* msgHeader, const char* msgBody) noexcept {\n"
         "    size_t l1 = strlen(msgHeader); size_t l2 = strlen(msgBody);\n"
         "    _msg = reinterpret_cast<char*>(malloc(l1 + l2 + 1));\n"
@@ -293,10 +299,12 @@ namespace boilerplate {
         "    if (funcName) { size_t n = strlen(funcName) + 1; _msg = reinterpret_cast<char*>(malloc(n)); if (_msg) strncpy(_msg, funcName, n); }\n"
         "}\n\n"sv;
 
+
+    // This code is modified. original author: PCJohn (peciva at fit.vut.cz)
     static constexpr std::string_view LOAD_UNLOAD_LIB_IMPL =
         "void loadLib_throw(const char* libPath) {\n"
         "    detail::_library = dlopen(libPath, RTLD_NOW);\n"
-        "    if (!detail::_library) throw VkgError((\"Failed to load Vulkan library: \" + std::string(dlerror())).data());\n" // TODO: only for debugging
+        "    if (!detail::_library) throw VkgError(\"Failed to load Vulkan library\");\n"
         "    funcs.vkGetInstanceProcAddr = (PFN_vkGetInstanceProcAddr)(dlsym(detail::_library, \"vkGetInstanceProcAddr\"));\n"
         "    if (!funcs.vkGetInstanceProcAddr) throw VkgError(\"Failed to load vkGetInstanceProcAddr\");\n"
         "    funcs.vkCreateInstance = getGlobalProcAddr<PFN_vkCreateInstance>(\"vkCreateInstance\");\n"
@@ -339,6 +347,7 @@ namespace boilerplate {
         "    }\n"
         "}\n"sv;
 
+    // This code is modified. original author: PCJohn (peciva at fit.vut.cz)
     static constexpr std::string_view INIT_INSTANCE_DEVICE_IMPL =
         "void initInstance_throw(const InstanceCreateInfo& createInfo) {\n"
         "    assert(detail::_library && \"vk::loadLib() must be called before vk::initInstance().\");\n"
@@ -388,6 +397,7 @@ namespace boilerplate {
         "    initDevicePFNs();\n"
         "}\n\n"sv;
 
+    // author: PCJohn (peciva at fit.vut.cz)
     static constexpr std::string_view CUSTOM_VECTOR_DECL = ""
         "      template<typename Type>\n"
         "class iterator {\n"
@@ -421,7 +431,6 @@ namespace boilerplate {
         "};\n"
         "\n"
         "// vector class\n"
-        "// author: PCJohn (peciva at fit.vut.cz)\n"
         "template<typename Type>\n"
         "class vector {\n"
         "protected:\n"
@@ -490,6 +499,7 @@ namespace boilerplate {
         "    struct native_type<T, true> { using type = typename T::HandleType; };\n"
         "};\n";
 
+    // author: PCJohn (peciva at fit.vut.cz)
     static constexpr std::string_view CUSTOM_VECTOR_IMPL = ""
         "template<typename Type>\n"
         "vector<Type>::vector(const vector & other)\n"

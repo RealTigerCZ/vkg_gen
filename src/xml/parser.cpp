@@ -28,6 +28,8 @@
 #define HERE() std::cout << __FILE__ << ":" << __LINE__ << std::endl;
 
 namespace vkgen::xml {
+    using sv = std::string_view;
+
     Dom Parser::parse(const std::string& path) {
         std::ifstream file{ path, std::ios::in };
         if (!file.is_open()) {
@@ -148,12 +150,12 @@ namespace vkgen::xml {
                     throw ParserError{ lexer, ss.str(), 0 };
                 }
 
-            case TokenType::Identifier: // unreachable from Expected::Text, only in Expected::Tag
-            case TokenType::XmlTagEnd: // unreachable from Expected::Text, only in Expected::Header
-            case TokenType::GreaterThan:// unreachable from Expected::Text, only in Expected::Attribute
+            case TokenType::Identifier:       // unreachable from Expected::Text, only in Expected::Tag
+            case TokenType::XmlTagEnd:        // unreachable from Expected::Text, only in Expected::Header
+            case TokenType::GreaterThan:      // unreachable from Expected::Text, only in Expected::Attribute
             case TokenType::SlashGreaterThan: // unreachable from Expected::Text, only in Expected::Attribute
-            case TokenType::Equals: // unreachable from Expected::Text, only in Expected::Attribute
-            case TokenType::String: // unreachable from Expected::Text, only in Expected::Attribute
+            case TokenType::Equals:           // unreachable from Expected::Text, only in Expected::Attribute
+            case TokenType::String:           // unreachable from Expected::Text, only in Expected::Attribute
                 UNREACHABLE();
             }
         }

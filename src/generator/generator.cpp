@@ -33,13 +33,15 @@ using vkgen::xml::Node;
 
 using namespace vkgen::Generator;
 
+using sv = std::string_view;
+
 // Enum items that must be excluded from generated enum bodies and from to_cstr
 // switches. They either shadow a corrected value (duplicate case labels) or are
 // aliases that map to the same translated name as another item.
 static const std::unordered_set<sv> skip_enum_items = {
     // Shadow correct values (Normal enums)
-    "VK_COLORSPACE_SRGB_NONLINEAR_KHR",       // should be COLOR_SPACE
-    "VK_STENCIL_FRONT_AND_BACK",              // missing _FACE_
+    "VK_COLORSPACE_SRGB_NONLINEAR_KHR",            // should be COLOR_SPACE
+    "VK_STENCIL_FRONT_AND_BACK",                   // missing _FACE_
     "VK_STRUCTURE_TYPE_SURFACE_CAPABILITIES2_EXT", // alias collides with _CAPABILITIES_2_EXT
 
     // Missing "_BIT", aliased to corrected bitmask values — would duplicate
@@ -163,6 +165,7 @@ inline constexpr auto has_attr_name(std::string_view n) noexcept { return HasAtt
 inline constexpr auto has_attr_value(std::string_view v) noexcept { return HasAttrValue{ v }; }
 
 #endif // CONCEPT_FILTERING
+
 namespace vkgen::xml {
 
     // TASK: 090126_03
@@ -184,7 +187,7 @@ std::ostream& helper_test(std::ostream& os, const vkgen::xml::Node* node) {
     return os << node->asElement();
 }
 
-// Helper for emitting grouped #if defined() / #endif guards during output
+// Helper for emitting grouped #if defined() / #endif guards during output TODO: concider moving the declaration into header file
 struct ProtectGuard {
     static inline bool FilterBetaExtensions = true;
     sv current = {};
@@ -1183,7 +1186,7 @@ void Generator::generate_enum(TypeEnum& e, std::ofstream& file) {
     ProtectGuard guard{ .file = file };
     for (const TypeEnum::EnumItem& item : e.items) {
         if (item.is_standalone_comment) {
-            file << StandaloneComment{ item.comment, config.generate_comments };
+            file << StandaloneComment{ item.comment };
             continue;
         }
 
@@ -1228,7 +1231,7 @@ void Generator::generate_enum(TypeEnum& e, std::ofstream& file) {
             throw my_error("TODO: internal error");
         }
 
-        file << "," << LineComment{ item.comment, false, config.generate_comments } << '\n';
+        file << "," << LineComment{ item.comment, false } << '\n';
     }
     guard.close();
     file << "};\n\n";
@@ -1270,7 +1273,7 @@ void Generator::generate_to_cstr_def(TypeEnum& e, std::ofstream& file) {
 
 void vkgen::Generator::Generator::generate_member(Member& member, std::ofstream& file, sv struct_union, sv parent_name) {
     if (member.is_standalone_comment) {
-        file << StandaloneComment{ member.comment, config.generate_comments };
+        file << StandaloneComment{ member.comment };
         return;
     }
 
@@ -1284,10 +1287,10 @@ void vkgen::Generator::Generator::generate_member(Member& member, std::ofstream&
         TypeEnum::Bitwidth width = enums.find(types.find(member.type_param.type)->second.bitvalues)->second.bitwidth;
         sv old_type = member.type_param.type;
         member.type_param.type = to_string_type(width);
-        file << "    " << member.type_param.stringify() << ';' << LineComment{ member.type_param.comment, false, config.generate_comments } << "// class Flags<> can't be subscribted with ':' \n";
+        file << "    " << member.type_param.stringify() << ';' << LineComment{ member.type_param.comment, false } << "// class Flags<> can't be subscribted with ':' \n";
         member.type_param.type = old_type;
     } else {
-        file << "    " << member.type_param.stringify() << ';' << LineComment{ member.type_param.comment, false, config.generate_comments } << '\n';
+        file << "    " << member.type_param.stringify() << ';' << LineComment{ member.type_param.comment, false } << '\n';
     }
 
 }
@@ -1299,7 +1302,7 @@ void Generator::generate_struct_union(const Type& type, std::ofstream& file, sv 
     // TODO: if (config.verbose)
     // std::cout << "Generating " << struct_union << ": " << type.name << std::endl;
 
-    file << LineComment{ type.comment, true, config.generate_comments };
+    file << LineComment{ type.comment, true };
 
     if (!type.alias.empty()) {
         file << "using " << NameTranslator::from_type_name(type.name) << Deprecate{ type.deprecated } << "= "
@@ -1327,7 +1330,7 @@ void Generator::generate_union(const Type& s, std::ofstream& file) {
 void Generator::generate_bitmask(const Type& bitmask, std::ofstream& file) {
     assert(bitmask.category == Type::Category::Bitmask);
 
-    file << LineComment{ bitmask.comment, true, config.generate_comments };
+    file << LineComment{ bitmask.comment, true };
 
     file << "using " << NameTranslator::from_type_name(bitmask.name) << Deprecate{ bitmask.deprecated } << "= ";
     if (!bitmask.alias.empty()) {
@@ -1382,7 +1385,7 @@ void Generator::generate_handle(const Type& h, std::ofstream& file, TypeEnum& ob
         file << "VK_DEFINE_HANDLE(" << h.name << ")\n";
     else
         file << "using " << NameTranslator::from_type_name(h.name) << Deprecate{ h.deprecated } << "= "
-        << "Handle<struct " << NameTranslator::from_enum_value(h.handle->objtypeenum, enum_transformed, false) << "_T*>" << ";" << LineComment{ h.comment, false, config.generate_comments } << '\n';
+        << "Handle<struct " << NameTranslator::from_enum_value(h.handle->objtypeenum, enum_transformed, false) << "_T*>" << ";" << LineComment{ h.comment, false } << '\n';
 }
 
 // Generate error classes from Result enum values
@@ -3262,6 +3265,8 @@ void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& so
     // TASK: 250226_01 Handle config in generator properly
     this->config = config;
     Deprecate::enabled = config.deprecation_behavior == DeprecationBehavior::GenerateWithDeprecationWarning;
+    LineComment::enabled = config.generate_comments;
+    StandaloneComment::enabled = config.generate_comments;
     NameTranslator::keep_av1_vp9 = config.apply_av1_and_vp9_naming_exceptions;
     ProtectGuard::FilterBetaExtensions = config.beta_extensions == BetaExtensions::GenerateWithoutProtectMacro;
 
@@ -3690,9 +3695,6 @@ void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& so
         header << "\n} // namespace " << config.namespace_name << "\n";
 
     source << "#include \"" << config.header_path << "\"\n";
-    // TODO: This is only for testing
-    source << "#include <iostream>\n"
-        << "#define assert(x) if (!(x)) std::cerr << \"Assertion failed: \" << #x << std::endl; \n";
 
     if (!config.namespace_name.empty())
         source << "namespace " << config.namespace_name << " {\n\n";

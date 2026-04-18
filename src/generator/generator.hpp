@@ -22,37 +22,33 @@
 #define CONCEPT_FILTERING
 
 namespace vkgen::Generator {
-    // CHECK: vulkan spec
     constexpr int BITPOS_MAX = 64 - 1;
 
-    // TASK: 090126_02
-    using sv = std::string_view;
-
     struct Platform {
-        sv name; // Expected short C99 identifier compatible name
-        sv protect = {}; // C99 preprocessor token, starting with VK_USE_PLATFORM_
-        sv comment = {};
+        std::string_view name; // Expected short C99 identifier compatible name
+        std::string_view protect = {}; // C99 preprocessor token, starting with VK_USE_PLATFORM_
+        std::string_view comment = {};
 
         static Platform from_xml(const xml::Element& elem);
     };
 
     struct Platforms {
-        sv comment = {};
+        std::string_view comment = {};
         std::vector<Platform> platforms = {};
 
         static Platforms from_xml(const xml::Element& elem);
     };
 
     struct Tag {
-        sv name;
-        sv author;
-        sv contact;
+        std::string_view name;
+        std::string_view author;
+        std::string_view contact;
 
         static Tag from_xml(const xml::Element& elem) { UNUSED(elem); NOT_IMPLEMENTED(); };
     };
 
     struct Tags {
-        sv comment = {};
+        std::string_view comment = {};
         std::vector<Tag> tags = {};
 
         static Tags from_xml(const xml::Element& elem) { UNUSED(elem); NOT_IMPLEMENTED(); };
@@ -81,7 +77,7 @@ namespace vkgen::Generator {
 
         bool is_vulkan() const { return (underlying_type)value & (underlying_type)Vulkan; }
 
-        static ApiType from_string(sv str);
+        static ApiType from_string(std::string_view str);
     private:
         Value value;
     };
@@ -89,13 +85,13 @@ namespace vkgen::Generator {
     struct HandleInfo;
     struct TypeHandle {
         // Name of the enum class containing VK_OBJECT_TYPE_*
-        static constexpr sv obj_enum_name = "VkObjectType";
+        static constexpr std::string_view obj_enum_name = "VkObjectType";
 
-        sv parent; // Notes another type with the 'handle'
+        std::string_view parent; // Notes another type with the 'handle'
         // category that acts as a parent object for
         // this type.
 
-        sv objtypeenum; // name of VK_OBJECT_TYPE_* API enumerant which
+        std::string_view objtypeenum; // name of VK_OBJECT_TYPE_* API enumerant which
         // corresponds to this type. Should be present
 
         HandleInfo* info = nullptr; // FIXME: TASK: 310326_01 Currently we create this info in the cache_handles function into array, that then is cleared, THIS IS A BIG HACK and needs refactoring
@@ -104,35 +100,35 @@ namespace vkgen::Generator {
     struct TypeEnum {
 
         struct ValueNormal {
-            sv value;
+            std::string_view value;
         };
 
         struct ValueBitmask {
             bool is_bitfield = false;
             union {
                 uint8_t bitpos = 0;
-                sv value;
+                std::string_view value;
             };
         };
 
         struct ValueConstant {
-            sv value;
-            sv type;
+            std::string_view value;
+            std::string_view type;
         };
 
         struct EnumItem {
-            sv name;
-            sv comment;
+            std::string_view name;
+            std::string_view comment;
 
             union {
                 ValueNormal normal = {};
                 ValueBitmask bitmask;
                 ValueConstant constant;
-                sv alias;
+                std::string_view alias;
             };
 
-            sv protect;
-            sv deprecated;
+            std::string_view protect;
+            std::string_view deprecated;
             ApiType api;
             bool is_alias = false;
             bool is_standalone_comment = false;
@@ -157,21 +153,19 @@ namespace vkgen::Generator {
             _64
         };
 
-        sv name;
-        sv comment;
-        sv deprecated;
-        sv protect; // platform protection macro (e.g., VK_USE_PLATFORM_WIN32_KHR)
+        std::string_view name;
+        std::string_view comment;
+        std::string_view deprecated;
+        std::string_view protect; // platform protection macro (e.g., VK_USE_PLATFORM_WIN32_KHR), can contain complex expressions
         Type type = Type::None;
         Bitwidth bitwidth = Bitwidth::None;
-        // TODO: what about <unused>?
-        std::vector<EnumItem> items;
+        std::vector<EnumItem> items; // TASK: 180426_02
 
-        // TODO: change to static from_xml(...)
         TypeEnum(const vkgen::xml::Element& elem, vkgen::Arena& arena);
 
     private:
-        Type type_from_string(sv s);
-        Bitwidth bitwidth_from_string(sv s);
+        Type type_from_string(std::string_view s);
+        Bitwidth bitwidth_from_string(std::string_view s);
     };
 
 
@@ -213,10 +207,10 @@ namespace vkgen::Generator {
             ArrayExtension(uint8_t b) : type(Type::BitSelect) { bitpos = b; }
         };
 
-        sv type;
-        sv name;
+        std::string_view type;
+        std::string_view name;
         PreQualifier pre_qual = PreQualifier::None;
-        sv comment = {}; // TODO: this comment is in the moment not generated
+        std::string_view comment = {}; // TODO: this comment is in the moment not generated
         std::vector<PostQualifier> post_quals;
         std::vector<ArrayExtension> array_extensions;
 
@@ -234,13 +228,13 @@ namespace vkgen::Generator {
         bool is_const() const;
 
     private:
-        static uint64_t get_size(sv str);
-        State parse_string(sv text, State state);
+        static uint64_t get_size(std::string_view str);
+        State parse_string(std::string_view text, State state);
     };
 
-    void trim_leading_ws(sv& s);
-    void trim_trailing_ws(sv& s);
-    void trim_ws(sv& s);
+    void trim_leading_ws(std::string_view& s);
+    void trim_trailing_ws(std::string_view& s);
+    void trim_ws(std::string_view& s);
 
 
     struct Member {
@@ -274,18 +268,18 @@ namespace vkgen::Generator {
         // another member of that struct, 'null-terminated' for a string,
         // '1' to indicate it is just a pointer (used for nested pointers),
         // or a latex equation (prefixed with 'latexmath:')
-        sv len;
+        std::string_view len;
 
         // if len has latexmath equations, this contains equivalent C99
         // expressions separated by commas.
-        sv altlen;
+        std::string_view altlen;
 
         // if the member is an array, stride specifies the name of
         // another member containing the byte stride between consecutive
         // elements in the array.The array is assumed to be tightly packed
         // if omitted.
-        sv stride;
-        sv deprecated; // denotes that this member is deprecated, and why
+        std::string_view stride;
+        std::string_view deprecated; // denotes that this member is deprecated, and why
 
         // denotes that this member should be externally synchronized when accessed by Vulkan
         ExternSync externsync;
@@ -293,14 +287,14 @@ namespace vkgen::Generator {
 
         // for a union member, identifies a separate enum member that
         // selects which of the union's members are valid
-        sv selector;
+        std::string_view selector;
 
 
         // for a member of a union, identifies one or more commad-separated
         // enum values indicating that member is valid
-        sv selection;
+        std::string_view selection;
         bool noautovalidity; // tag stating that no automatic validity language should be generated
-        sv values; // comma-separated list of legal values, usually used only for sType enums
+        std::string_view values; // comma-separated list of legal values, usually used only for sType enums
 
         // Only applicable for members of VkPhysicalDeviceProperties and
         // VkPhysicalDeviceProperties2, their substructures, and extensions.
@@ -311,16 +305,16 @@ namespace vkgen::Generator {
         // a uint64_t value. Specifies the name of another member which is
         // a VkObjectType or VkDebugReportObjectTypeEXT value specifying
         // the type of object the handle references.
-        sv objecttype;
+        std::string_view objecttype;
 
         // Only applicable for members representing a Boolean API
         // feature. Specifies that the feature has a link in the
         // specification that does not match the name of the feature.
         // Typically for features in extensions that were later promoted but
         // with changes.
-        sv featurelink;
+        std::string_view featurelink;
 
-        sv comment;
+        std::string_view comment;
         bool is_standalone_comment = false;
 
         enum class ParentType : uint8_t {
@@ -342,7 +336,7 @@ namespace vkgen::Generator {
 
         bool allow_duplicate = false; // pNext can include multiple structures of this type.
 
-        sv struct_extends; // Lists parent structures which this structure may extend
+        std::string_view struct_extends; // Lists parent structures which this structure may extend
         // via the pNext chain of the parent. When present it
         // suppresses generation of automatic validity for the
         // pNext member of that structure, and instead the
@@ -352,15 +346,15 @@ namespace vkgen::Generator {
         std::vector<Member> members;
     };
 
-    // TODO: TypeUnion
+    // TASK: 180426_04
     using TypeUnion = TypeStruct;
 
     struct TypeRef {
         bool is_const = false;
-        sv type;
+        std::string_view type;
         std::vector<TypeParam::PostQualifier> post_quals;
 
-        static TypeRef from_string(sv text);
+        static TypeRef from_string(std::string_view text);
         std::string stringify() const;
     };
 
@@ -391,16 +385,16 @@ namespace vkgen::Generator {
                  // <type>...</type>, tag <type> may be multiple imbedded <type> tags
         };
 
-        sv name; // name attribute or present it <name>...</name>, always must be present
+        std::string_view name; // name attribute or present it <name>...</name>, always must be present
         ApiType api; // api attribute, matches a <feature> api attribute, if present
-        sv alias; // alias attribute
+        std::string_view alias; // alias attribute
         union {
-            sv requires_ = {}; // requires attribute, pointing to another type
-            sv bitvalues; // Bitmask only: FlagBits enum name. Populated from XML `requires` (old-style) or `bitvalues` (new-style) attr.
+            std::string_view requires_ = {}; // requires attribute, pointing to another type
+            std::string_view bitvalues; // Bitmask only: FlagBits enum name. Populated from XML `requires` (old-style) or `bitvalues` (new-style) attr.
         };
-        sv comment; // comment attribute
-        sv deprecated; // reason for deprecation if present, can also have values "true" or "false"
-        sv protect; // platform protection macro, set internally (not from XML)
+        std::string_view comment; // comment attribute
+        std::string_view deprecated; // reason for deprecation if present, can also have values "true" or "false"
+        std::string_view protect; // platform protection macro, set internally (not from XML)
         Category category = Category::None;
         State state = State::NotUsed;
         union {
@@ -412,7 +406,6 @@ namespace vkgen::Generator {
 
         const xml::Element& elem;
 
-        // TODO: change to static from_xml(...)
         Type(const xml::Element& elem, vkgen::Arena& arena);
         Type(Type&& other) noexcept;
         Type& operator=(Type&&) = delete;
@@ -421,7 +414,7 @@ namespace vkgen::Generator {
         ~Type();
 
     private:
-        Category category_from_string(sv s) const;
+        Category category_from_string(std::string_view s) const;
         void parse_struct(const xml::Element& elem, Arena& arena);
         void parse_union(const xml::Element& elem, Arena& arena);
         void parse_funcpointer(const xml::Element& elem, Arena& arena);
@@ -431,15 +424,15 @@ namespace vkgen::Generator {
     public:
         ApiType api = ApiType::Any;
         // TASK: 090126_07
-        sv len = {};
-        sv altlen = {};
-        sv stride = {};
-        sv optional = {}; // can be comma separated, if not present, it is false, value should be provided for every indirection
-        sv selector = {}; // only if parameter is union
-        sv noautovalidity = {}; // optional
-        sv externsync = {}; // optional
-        sv objecttype = {}; // optional
-        sv validstructs = {}; // optional
+        std::string_view len = {};
+        std::string_view altlen = {};
+        std::string_view stride = {};
+        std::string_view optional = {}; // can be comma separated, if not present, it is false, value should be provided for every indirection
+        std::string_view selector = {}; // only if parameter is union
+        std::string_view noautovalidity = {}; // optional
+        std::string_view externsync = {}; // optional
+        std::string_view objecttype = {}; // optional
+        std::string_view validstructs = {}; // optional
 
         TypeParam type_param;
 
@@ -449,10 +442,10 @@ namespace vkgen::Generator {
 
 
     struct  CommandAlias {
-        sv name;
-        sv alias;
+        std::string_view name;
+        std::string_view alias;
         ApiType api = ApiType::Any; // comma separated list, optional
-        sv comment = {}; // optional
+        std::string_view comment = {}; // optional
 
         static CommandAlias from_xml(const xml::Element& elem, vkgen::Arena& arena);
     };
@@ -467,26 +460,26 @@ namespace vkgen::Generator {
         };
 
         // TASK: 090126_06
-        sv tasks = {}; // comma separated list, optional
-        sv queues = {}; // comma separated list, optional
-        sv success_codes = {}; // comma separated list, optional
-        sv error_codes = {}; // comma separated list, optional
+        std::string_view tasks = {}; // comma separated list, optional
+        std::string_view queues = {}; // comma separated list, optional
+        std::string_view success_codes = {}; // comma separated list, optional
+        std::string_view error_codes = {}; // comma separated list, optional
         Scope render_pass = Scope::None; // optional
         Scope video_encoding = Scope::None; // optional
-        sv cmd_buffer_level = {}; // comma separated list, optional
-        sv conditional_rendering = {}; // required for vkCmd* commands.Not allowed for other commands. Values true/false
+        std::string_view cmd_buffer_level = {}; // comma separated list, optional
+        std::string_view conditional_rendering = {}; // required for vkCmd* commands.Not allowed for other commands. Values true/false
         bool allow_no_queues = false; // optional, default false
-        sv export_ = {}; // comma separated list, optional
+        std::string_view export_ = {}; // comma separated list, optional
         ApiType api = {}; // comma separated list, optional
-        sv description = {};
+        std::string_view description = {};
 
         xml::Element* implicit_extern_sync_params = nullptr;
 
-        sv comment = {};
-        sv protect; // platform protection macro, set internally (not from XML)
+        std::string_view comment = {};
+        std::string_view protect; // platform protection macro, set internally (not from XML)
 
-        sv name;
-        sv type; // TODO: link with types? dependencies?
+        std::string_view name;
+        std::string_view type;
 
         // TODO: the return type and parameters can contain arbitrary C code
         std::string declaration;
@@ -497,8 +490,8 @@ namespace vkgen::Generator {
     };
 
     struct DefineExt {
-        sv name;
-        sv value;
+        std::string_view name;
+        std::string_view value;
         xml::Element& elem;
     };
 
@@ -561,7 +554,7 @@ namespace vkgen::Generator {
         };
         Pattern pattern;
         int implicit_param_idx = -1;     // device/instance to substitute with global
-        sv implicit_global;              // implicit parameter replacement: "detail::_device" or "detail::_instance"
+        std::string_view implicit_global;              // implicit parameter replacement: "detail::_device" or "detail::_instance"
         int output_param_idx = -1;       // handle or struct output
         int allocator_param_idx = -1;    // VkAllocationCallbacks*
         int count_param_idx = -1;        // for enumerate
@@ -601,10 +594,10 @@ namespace vkgen::Generator {
         };
         OutputMode output = OutputMode::Skip;
         ArrayMode array = ArrayMode::Span;
-        sv output_trailing_decl; // full decl, e.g. "vector<Pipeline>& pPipelines" (Trailing only)
-        sv output_trailing_name; // forwarded in emit_forward_param_names (Trailing only)
-        sv output_expr;          // call_args: expression at output slot (overrides default &h / reinterpret_cast)
-        sv singular_param_name;  // ArrayMode::Singular: replaces the plural array name
+        std::string_view output_trailing_decl; // full decl, e.g. "vector<Pipeline>& pPipelines" (Trailing only)
+        std::string_view output_trailing_name; // forwarded in emit_forward_param_names (Trailing only)
+        std::string_view output_expr;          // call_args: expression at output slot (overrides default &h / reinterpret_cast)
+        std::string_view singular_param_name;  // ArrayMode::Singular: replaces the plural array name
         int skip_idx = -1;
     };
 
@@ -643,20 +636,20 @@ namespace vkgen::Generator {
 
         NameTranslator(std::string&& new_name) : new_name(std::move(new_name)) {}
 
-        static TransformedEnumName transform_enum_name(sv name, bool is_bitmask);
-        static NameTranslator from_enum_value(sv value, const TransformedEnumName& enum_class_transformed, bool is_bitmask);
-        static NameTranslator from_type_name(sv name); // enums, structs, unions
-        static NameTranslator from_constexpr_value(sv value_name);
-        static NameTranslator from_command_name(sv name); // vkCreateBuffer -> createBuffer
-        static NameTranslator from_input_array_name(sv name); // pViewports -> viewports
-        static std::pair<std::string, std::string> unique_command_name(sv name); // vkCreateBuffer -> createBufferUnique, createBuffer
+        static TransformedEnumName transform_enum_name(std::string_view name, bool is_bitmask);
+        static NameTranslator from_enum_value(std::string_view value, const TransformedEnumName& enum_class_transformed, bool is_bitmask);
+        static NameTranslator from_type_name(std::string_view name); // enums, structs, unions
+        static NameTranslator from_constexpr_value(std::string_view value_name);
+        static NameTranslator from_command_name(std::string_view name); // vkCreateBuffer -> createBuffer
+        static NameTranslator from_input_array_name(std::string_view name); // pViewports -> viewports
+        static std::pair<std::string, std::string> unique_command_name(std::string_view name); // vkCreateBuffer -> createBufferUnique, createBuffer
         // Returns the singular form, preserving any trailing all-uppercase extension suffix
-        static std::string singularize(sv name);
+        static std::string singularize(std::string_view name);
 
     protected:
         static void transform_from_upper_constant(std::string& name, size_t start_pos, bool first_is_upper);
-        static Extension get_and_remove_extension_constant(sv& name);
-        static Extension get_and_remove_extension_name(sv& name);
+        static Extension get_and_remove_extension_constant(std::string_view& name);
+        static Extension get_and_remove_extension_name(std::string_view& name);
     };
 
     template <typename Type>
@@ -666,13 +659,13 @@ namespace vkgen::Generator {
         template <NameIndexable Type>
         class NameIndex {
             std::vector<Type*> names;
-            std::unordered_map<sv, std::size_t> nameIndex;
+            std::unordered_map<std::string_view, std::size_t> nameIndex;
 
         public:
-            bool contains(sv name) const { return nameIndex.find(name) != nameIndex.end(); }
+            bool contains(std::string_view name) const { return nameIndex.find(name) != nameIndex.end(); }
             void add(Type* type);
             void add_without_check(Type* type);
-            void remove(sv name);
+            void remove(std::string_view name);
             const std::vector<Type*>& get() const { return names; };
         };
 
@@ -682,25 +675,25 @@ namespace vkgen::Generator {
         // Currently expecting only one Tags tag
         Tags tags;
 
-        // CHECK: use unordered map
+        // CHECK: Consider using unordered map, for faster lookup. Maybe even std::flat_map? Currently it does not seem that we have some performance problems.
         // Index of all the types defined in the <types> tags (with the category="enum" included)
-        std::map<sv, Type> types = {};
+        std::map<std::string_view, Type> types = {};
         // Index of all the enums defined in the <enums> tags
-        std::map<sv, TypeEnum> enums = {};
+        std::map<std::string_view, TypeEnum> enums = {};
         // Index of all the commands defined in the <commands> tags
-        std::map<sv, Command> commands = {};
-        std::map<sv, CommandAlias> command_aliases = {};
+        std::map<std::string_view, Command> commands = {};
+        std::map<std::string_view, CommandAlias> command_aliases = {};
 
         NameIndex<Type> required_types;
         NameIndex<TypeEnum> required_enums;
-        // TODO: think about splitting Alias and Commands
+        // TODO: concider splitting Alias and Commands
         NameIndex<Command> required_commands;
         NameIndex<CommandAlias> required_commands_aliases;
 
-        std::unordered_map<sv, sv> platform_to_protect; // platform name → protect macro
-        std::unordered_set<sv> included_platforms;
+        std::unordered_map<std::string_view, std::string_view> platform_to_protect; // platform name → protect macro
+        std::unordered_set<std::string_view> included_platforms;
 
-        std::unordered_map<sv, xml::Element*> extension_name_to_element; // TASK: 110426_01
+        std::unordered_map<std::string_view, xml::Element*> extension_name_to_element; // TASK: 110426_01
         std::unordered_set<xml::Element*> processed_extensions;
 
         Config config;
@@ -712,7 +705,7 @@ namespace vkgen::Generator {
         void parse_types(vkgen::xml::Dom& dom);
         void parse_enums(vkgen::xml::Dom& dom);
         void parse_commands(vkgen::xml::Dom& dom);
-        bool is_handle(sv type);
+        bool is_handle(std::string_view type);
         void cache_handles(std::vector<HandleInfo>& handles);
 
 
@@ -720,8 +713,8 @@ namespace vkgen::Generator {
         void generate_enum_alias(const Type& enum_, std::ofstream& file);
         void generate_to_cstr_decl(TypeEnum& enum_, std::ofstream& file);
         void generate_to_cstr_def(TypeEnum& enum_, std::ofstream& file);
-        void generate_member(Member& member, std::ofstream& file, sv struct_union, sv parent_name);
-        void generate_struct_union(const Type& type, std::ofstream& file, sv struct_union);
+        void generate_member(Member& member, std::ofstream& file, std::string_view struct_union, std::string_view parent_name);
+        void generate_struct_union(const Type& type, std::ofstream& file, std::string_view struct_union);
         void generate_struct(const Type& struct_, std::ofstream& file);
         void generate_union(const Type& union_, std::ofstream& file);
         void generate_bitmask(const Type& bitmask, std::ofstream& file);
@@ -737,7 +730,7 @@ namespace vkgen::Generator {
 
         CommandClassification classify_command(const Command& cmd);
         void detect_input_arrays(const Command& cmd, CommandClassification& cc);
-        bool has_pnext(sv struct_type_name);
+        bool has_pnext(std::string_view struct_type_name);
 
         bool should_emit_throw() const;
         bool should_emit_nothrow() const;
@@ -782,28 +775,35 @@ namespace vkgen::Generator {
 
 
         bool is_device_level_command(const Command& cmd) const;
-        std::pair<bool, bool> is_handle_or_const_ptr_struct_argument(const CommandParameter& param);
 
-        NameTranslator get_translated_type_name(sv name);
+        struct HandleOrConstPtrStructArgument {
+            bool is_handle = false;
+            bool is_const_ptr_struct = false;
+        };
+
+        HandleOrConstPtrStructArgument is_handle_or_const_ptr_struct_argument(const CommandParameter& param);
+
+        NameTranslator get_translated_type_name(std::string_view name);
 
         // Wrapper around add_required_type
-        void add_required_type(sv name);
-        void add_required_type(sv name, std::vector<Type*>& required_types);
-        void add_required_enum(sv name);
-        void add_required_command(sv name);
+        void add_required_type(std::string_view name);
+        void add_required_type(std::string_view name, std::vector<Type*>& required_types);
+        void add_required_enum(std::string_view name);
+        void add_required_command(std::string_view name);
 
-        void add_required_version_feature(sv name, vkgen::xml::Dom& dom);
 
-        void extend_enum(sv extends, vkgen::xml::Element& elem, vkgen::Arena& arena, uint16_t block_ext_number = 0, sv protect = {});
+        void extend_enum(std::string_view extends, vkgen::xml::Element& elem, vkgen::Arena& arena, uint16_t block_ext_number = 0, std::string_view protect = {});
 
+        void add_required_version_feature(std::string_view name, vkgen::xml::Dom& dom);
         void add_extension_prototype(xml::Element& ext, xml::Dom& dom);
-        void add_extension_with_deps(xml::Element& ext, xml::Dom& dom, sv required_by = {});
+        void add_extension_with_deps(xml::Element& ext, xml::Dom& dom, std::string_view required_by = {});
 
     public:
         Generator() {}
         void generate(vkgen::xml::Dom& dom, std::ofstream& header, std::ofstream& source, Config& config);
 
-        // TODO:
+        // TODO: In future, these should be parsed to Generator structures and not used at all.
+        //       Or they should be moved to some cache structure.
         xml::Node* Types;
         xml::Node* Enums;
         xml::Node* Commands;
@@ -818,18 +818,17 @@ namespace vkgen::Generator {
 
     struct Deprecate {
         static inline bool enabled;
-        sv msg;
-        bool generate = true;
+        std::string_view msg;
     };
     struct LineComment {
-        sv comment;
+        static inline bool enabled;
+        std::string_view comment;
         bool alone = true;
-        bool generate = true;
     };
 
     struct StandaloneComment {
-        sv comment;
-        bool generate = true;
+        static inline bool enabled;
+        std::string_view comment;
     };
 
     template <typename Qual>
@@ -858,14 +857,14 @@ namespace vkgen::Generator {
     }
 
     inline std::ostream& operator<<(std::ostream& os, Deprecate d) {
-        if (d.generate && d.enabled && !d.msg.empty()) {
+        if (Deprecate::enabled && !d.msg.empty()) {
             return os << " [[deprecated(\"" << d.msg << "\")]] ";
         }
         return os << ' ';
     };
 
     inline std::ostream& operator<<(std::ostream& os, LineComment c) {
-        if (c.generate && !c.comment.empty()) {
+        if (LineComment::enabled && !c.comment.empty()) {
             if (c.alone)
                 os << "// " << c.comment << '\n';
             else
@@ -875,7 +874,7 @@ namespace vkgen::Generator {
     };
 
     inline std::ostream& operator<<(std::ostream& os, StandaloneComment c) {
-        if (c.generate && !c.comment.empty()) {
+        if (StandaloneComment::enabled && !c.comment.empty()) {
             os << "/* " << c.comment << " */\n";
         }
         return os;
@@ -899,7 +898,7 @@ namespace vkgen::Generator {
     }
 
     template<NameIndexable Type>
-    inline void Generator::NameIndex<Type>::remove(sv name) {
+    inline void Generator::NameIndex<Type>::remove(std::string_view name) {
         auto it = nameIndex.find(name);
         if (it != nameIndex.end()) {
             names[it->second] = nullptr;
@@ -921,7 +920,7 @@ namespace vkgen::Generator {
         return config.exception_behavior == ExceptionBehavior::BothWithDefaultThrow;
     }
 
-    inline std::pair<bool, bool> Generator::is_handle_or_const_ptr_struct_argument(const CommandParameter& param) {
+    inline Generator::HandleOrConstPtrStructArgument Generator::is_handle_or_const_ptr_struct_argument(const CommandParameter& param) {
         Type::Category cat = types.at(param.type_param.type).category;
         bool param_is_handle = config.generate_handle_class && cat == Type::Category::Handle;
         bool is_const_struct_ptr = param.type_param.is_const()

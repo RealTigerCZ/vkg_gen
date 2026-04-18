@@ -19,31 +19,29 @@
 #include <variant>
 
 namespace vkgen::xml {
-    using sv = std::string_view;
-
     template <typename T>
     using vec = std::vector<T>;
 
     struct Header {
-        sv version;
-        sv encoding;
-        sv standalone;
+        std::string_view version;
+        std::string_view encoding;
+        std::string_view standalone;
     };
 
     struct Attribute {
-        sv name;
-        sv value;
+        std::string_view name;
+        std::string_view value;
     };
 
     struct Node;
 
 
     struct Element {
-        sv tag;
+        std::string_view tag;
         vec<Attribute> attrs;
         vec<Node*> children;
 
-        sv get_attr_value(sv name) const {
+        std::string_view get_attr_value(std::string_view name) const {
             auto it = std::ranges::find(attrs, name, &Attribute::name);
             if (it == attrs.end())
                 return {};
@@ -52,7 +50,7 @@ namespace vkgen::xml {
     };
 
     struct Node {
-        using Text = sv;
+        using Text = std::string_view;
         using Data = std::variant<Element, Text>;
 
         Data data;
@@ -71,9 +69,9 @@ namespace vkgen::xml {
     class Dom {
     public:
         struct Filter {
-            sv tag;
-            sv attr_name;
-            std::optional<sv> attr_value;
+            std::string_view tag;
+            std::string_view attr_name;
+            std::optional<std::string_view> attr_value;
         };
 
         std::string data; // Holds the copy of the file data
@@ -85,9 +83,9 @@ namespace vkgen::xml {
         ~Dom();
 
         vec<Node*> getChildren(Node* node = nullptr, bool recursive = false) const noexcept;
-        vec<Node*> getChildrenByTag(sv tag, Node* node = nullptr, bool recursive = false) const noexcept;
-        vec<Node*> getChildrenByAttrName(sv name, Node* node = nullptr, bool recursive = false) const noexcept;
-        vec<Node*> getChildrenByAttrValue(std::optional<sv> value, Node* node = nullptr, bool recursive = false) const noexcept;
+        vec<Node*> getChildrenByTag(std::string_view tag, Node* node = nullptr, bool recursive = false) const noexcept;
+        vec<Node*> getChildrenByAttrName(std::string_view name, Node* node = nullptr, bool recursive = false) const noexcept;
+        vec<Node*> getChildrenByAttrValue(std::optional<std::string_view> value, Node* node = nullptr, bool recursive = false) const noexcept;
 
         vec<Node*> getChildrenByFilter(const Filter& filter, Node* node = nullptr, bool recursive = false) const noexcept;
         vec<Node*> getChildrenByChildrenFilter(const Filter& filter, Node* node = nullptr) const noexcept;
@@ -99,18 +97,18 @@ namespace vkgen::xml {
                 | std::views::filter([](Node* n) { return n->isElement(); });
         }
 
-        //        auto filterByTag(sv tag, Node* node = nullptr, bool recursive = false) const noexcept;
-        auto filterByTag(sv tag, Node* node) const noexcept {
+        //        auto filterByTag(std::string_view tag, Node* node = nullptr, bool recursive = false) const noexcept;
+        auto filterByTag(std::string_view tag, Node* node) const noexcept {
             if (node == nullptr) node = root;
 
             return children(node)
                 | std::views::filter([&tag](Node* n) { return n->asElement().tag == tag; });
 
         };
-        auto filterByAttr(sv name, sv value, Node* node = nullptr, bool recursive = false) const noexcept;
+        auto filterByAttr(std::string_view name, std::string_view value, Node* node = nullptr, bool recursive = false) const noexcept;
         auto filterByFilter(const Filter& filter, Node* node = nullptr, bool recursive = false) const noexcept;
-        auto filterByTag(auto nodes, sv tag) const noexcept;
-        auto filterByAttr(auto nodes, sv name, sv value) const noexcept;
+        auto filterByTag(auto nodes, std::string_view tag) const noexcept;
+        auto filterByAttr(auto nodes, std::string_view name, std::string_view value) const noexcept;
         auto filterByFilter(auto nodes, const Filter& filter) const noexcept;
         auto filterByChildrenFilter(auto nodes, const Filter& filter) const noexcept;
 
