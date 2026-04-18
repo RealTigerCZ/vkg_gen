@@ -555,6 +555,7 @@ namespace vkg_gen::Generator {
             Void,           // void return, no error checking
             ResultVoid,     // VkResult return, no output data
             ResultCreate,   // VkResult return, creates handle via out-param
+            ResultCreateArray, // VkResult return, creates N handles; output array's len references a uint32_t count param
             VoidOutParam,   // void return, fills struct via out-param
             Enumerate,      // two-call enumerate pattern
             ResultOutParam, // VkResult + non-handle out-param
@@ -585,6 +586,28 @@ namespace vkg_gen::Generator {
                 if (input_arrays[k].array_idx == idx) return true;
             return false;
         }
+    };
+
+    // Options controlling how generate_wrapper_params / generate_call_args /
+    // emit_forward_param_names treat the output slot and input-array pairs.
+    // Used to share one implementation between the ResultCreate plain/vector/singular wrapper patterns.
+    struct WrapperEmitOptions {
+        enum class OutputMode {
+            Skip,       // output absent from signature; caller uses a local var ('_throw' bodies)
+            InPlace,    // output at its index as `Type& name` (existing _noThrow for ResultCreate)
+            Trailing,   // output appended at end of signature via output_trailing_decl (vector / singular _noThrow)
+        };
+        enum class ArrayMode {
+            Span,       // span<T> param; at call: count → .size(), array → .data()
+            Singular,   // const T& param; at call: count → "1", array → "&singular_param_name"
+        };
+        OutputMode output = OutputMode::Skip;
+        ArrayMode array = ArrayMode::Span;
+        sv output_trailing_decl; // full decl, e.g. "vector<Pipeline>& pPipelines" (Trailing only)
+        sv output_trailing_name; // forwarded in emit_forward_param_names (Trailing only)
+        sv output_expr;          // call_args: expression at output slot (overrides default &h / reinterpret_cast)
+        sv singular_param_name;  // ArrayMode::Singular: replaces the plural array name
+        int skip_idx = -1;
     };
 
     struct HandleInfo {
@@ -629,6 +652,8 @@ namespace vkg_gen::Generator {
         static NameTranslator from_command_name(sv name); // vkCreateBuffer -> createBuffer
         static NameTranslator from_input_array_name(sv name); // pViewports -> viewports
         static std::pair<std::string, std::string> unique_command_name(sv name); // vkCreateBuffer -> createBufferUnique, createBuffer
+        // Returns the singular form, preserving any trailing all-uppercase extension suffix
+        static std::string singularize(sv name);
 
     protected:
         static void transform_from_upper_constant(std::string& name, size_t start_pos, bool first_is_upper);
@@ -724,19 +749,26 @@ namespace vkg_gen::Generator {
         // Emits comma-separated param names for forwarding calls. skip_idx: extra index to skip (PD param)
         void emit_forward_param_names(const Command& cmd, const CommandClassification& cc,
             std::ofstream& file, bool include_nothrow_output = false, int skip_idx = -1);
+        void emit_forward_param_names(const Command& cmd, const CommandClassification& cc,
+            std::ofstream& file, const WrapperEmitOptions& opts);
         // Emits "(params, vector<ElemType>& v)" for enumerate _noThrow signatures. skip_idx for PD overloads.
         void emit_enumerate_nothrow_params(const Command& cmd, const CommandClassification& cc,
             std::ofstream& file, int skip_idx = -1);
         // Generates entire parameter list
         void generate_wrapper_params(const Command& cmd, const CommandClassification& cc,
             std::ofstream& file, bool for_nothrow_output = false, int skip_idx = -1);
+        void generate_wrapper_params(const Command& cmd, const CommandClassification& cc,
+            std::ofstream& file, const WrapperEmitOptions& opts);
         // Generates the argument list for a wrapper function call
         void generate_call_args(const Command& cmd, const CommandClassification& cc,
             std::ofstream& file, bool for_nothrow = false);
+        void generate_call_args(const Command& cmd, const CommandClassification& cc,
+            std::ofstream& file, const WrapperEmitOptions& opts);
 
         void generate_wrapper_void(const Command& cmd, const CommandClassification& cc, std::ofstream& file);
         void generate_wrapper_result_void(const Command& cmd, const CommandClassification& cc, std::ofstream& file);
         void generate_wrapper_result_create(const Command& cmd, const CommandClassification& cc, std::ofstream& file);
+        void generate_wrapper_result_create_array(const Command& cmd, const CommandClassification& cc, std::ofstream& file);
         void generate_wrapper_void_outparam(const Command& cmd, const CommandClassification& cc, std::ofstream& file);
         void generate_wrapper_result_outparam(const Command& cmd, const CommandClassification& cc, std::ofstream& file);
 

@@ -415,7 +415,7 @@ private:
         pipelineInfo.layout = pipelineLayout;
         pipelineInfo.renderPass = renderPass;
 
-        graphicsPipeline = vk::createGraphicsPipelines(nullptr, 1, pipelineInfo);
+        graphicsPipeline = vk::createGraphicsPipeline(nullptr, pipelineInfo);
     }
 
     void createFramebuffers() {

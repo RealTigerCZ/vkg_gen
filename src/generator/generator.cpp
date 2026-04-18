@@ -1598,6 +1598,41 @@ CommandClassification Generator::classify_command(const Command& cmd) {
                 cc.output_param_idx = last_idx;
                 if (cmd.type == "VkResult") {
                     cc.pattern = CommandClassification::Pattern::ResultCreate;
+                    // Detect array-create: output's len references a uint32_t count param in same command
+                    sv len = last.len;
+                    if (!len.empty() && !len.starts_with("latexmath:") && len.find(',') == sv::npos) {
+                        int cnt_idx = -1;
+                        for (int i = 0; i < (int)cmd.parameters.size(); ++i) {
+                            auto& p = cmd.parameters[i];
+                            if (p.type_param.name == len
+                                && p.type_param.type == "uint32_t"
+                                && p.type_param.post_quals.empty()) {
+                                cnt_idx = i;
+                                break;
+                            }
+                        }
+                        if (cnt_idx >= 0) {
+                            // Find the matching input array (const T* with same len) to render as span
+                            int in_arr_idx = -1;
+                            for (int j = 0; j < (int)cmd.parameters.size(); ++j) {
+                                if (j == last_idx) continue;
+                                auto& p = cmd.parameters[j];
+                                if (p.len != len) continue;
+                                if (!p.type_param.is_const()) continue;
+                                if (p.type_param.post_quals.empty()) continue;
+                                if (!bool(p.type_param.post_quals[0] & TypeParam::PostQualifier::Pointer)) continue;
+                                if (p.type_param.type == "void") continue;
+                                in_arr_idx = j;
+                                break;
+                            }
+                            if (in_arr_idx >= 0
+                                && cc.input_array_count < CommandClassification::max_input_arrays) {
+                                cc.input_arrays[cc.input_array_count++] = { cnt_idx, in_arr_idx };
+                            }
+                            cc.count_param_idx = cnt_idx;
+                            cc.pattern = CommandClassification::Pattern::ResultCreateArray;
+                        }
+                    }
                 } else {
                     assert(cmd.type == "void");
                     cc.pattern = CommandClassification::Pattern::VoidOutParam;
@@ -1710,23 +1745,43 @@ void Generator::emit_wrapper_param(const CommandParameter& param, std::ofstream&
 // Emits comma-separated parameter names for forwarding calls.
 void Generator::emit_forward_param_names(const Command& cmd, const CommandClassification& cc,
     std::ofstream& file, bool include_nothrow_output, int skip_idx) {
+    WrapperEmitOptions opts;
+    opts.output = include_nothrow_output ? WrapperEmitOptions::OutputMode::InPlace
+        : WrapperEmitOptions::OutputMode::Skip;
+    opts.skip_idx = skip_idx;
+    emit_forward_param_names(cmd, cc, file, opts);
+}
+
+void Generator::emit_forward_param_names(const Command& cmd, const CommandClassification& cc,
+    std::ofstream& file, const WrapperEmitOptions& opts) {
+    using OM = WrapperEmitOptions::OutputMode;
+    using AM = WrapperEmitOptions::ArrayMode;
 
     bool first = true;
+    auto sep = [&]() { if (first) first = false; else file << ", "; };
+
     for (int i = 0; i < (int)cmd.parameters.size(); ++i) {
         if (i == cc.implicit_param_idx) continue;
-        if (i == cc.output_param_idx && !include_nothrow_output) continue;
+        if (i == cc.output_param_idx && opts.output != OM::InPlace) continue;
         if (i == cc.count_param_idx || i == cc.array_param_idx) continue;
-        if (i == skip_idx) continue;
+        if (i == opts.skip_idx) continue;
         if (i == cc.allocator_param_idx) continue;
         if (cc.is_input_count(i)) continue;
         auto& param = cmd.parameters[i];
         if (!param.api.is_vulkan()) continue;
-        if (first) first = false;
-        else file << ", ";
-        if (cc.is_input_array(i))
-            file << NameTranslator::from_input_array_name(param.type_param.name).new_name;
-        else
+        sep();
+        if (cc.is_input_array(i)) {
+            if (opts.array == AM::Singular)
+                file << opts.singular_param_name;
+            else
+                file << NameTranslator::from_input_array_name(param.type_param.name).new_name;
+        } else {
             file << param.type_param.name;
+        }
+    }
+    if (opts.output == OM::Trailing && !opts.output_trailing_name.empty()) {
+        sep();
+        file << opts.output_trailing_name;
     }
 }
 
@@ -1756,41 +1811,58 @@ void Generator::emit_enumerate_nothrow_params(const Command& cmd, const CommandC
 // Writes wrapper parameter list for C++ command wrappers.
 void Generator::generate_wrapper_params(const Command& cmd, const CommandClassification& cc,
     std::ofstream& file, bool for_nothrow_output, int skip_idx) {
+    WrapperEmitOptions opts;
+    opts.output = for_nothrow_output ? WrapperEmitOptions::OutputMode::InPlace
+        : WrapperEmitOptions::OutputMode::Skip;
+    opts.skip_idx = skip_idx;
+    generate_wrapper_params(cmd, cc, file, opts);
+}
+
+void Generator::generate_wrapper_params(const Command& cmd, const CommandClassification& cc,
+    std::ofstream& file, const WrapperEmitOptions& opts) {
+    using OM = WrapperEmitOptions::OutputMode;
+    using AM = WrapperEmitOptions::ArrayMode;
+
     file << "(";
     bool first = true;
+    auto sep = [&]() { if (first) first = false; else file << ", "; };
+
     for (int i = 0; i < (int)cmd.parameters.size(); ++i) {
-        if (i == cc.implicit_param_idx || i == skip_idx) continue;
-        if (i == cc.output_param_idx && !for_nothrow_output) continue;
+        if (i == cc.implicit_param_idx || i == opts.skip_idx) continue;
+        if (i == cc.output_param_idx && opts.output != OM::InPlace) continue;
         if (i == cc.count_param_idx || i == cc.array_param_idx) continue;
         if (cc.is_input_count(i)) continue;
-
         if (i == cc.allocator_param_idx) continue;
 
         auto& param = cmd.parameters[i];
-        if (!param.api.is_vulkan()) {
-            continue;
-        }
+        if (!param.api.is_vulkan()) continue;
 
-        if (first) first = false;
-        else file << ", ";
+        sep();
 
-        // Output param for _noThrow: Handle& or Struct&
-        if (i == cc.output_param_idx && for_nothrow_output) {
+        // Output param InPlace (_noThrow for ResultCreate / ResultOutParam)
+        if (i == cc.output_param_idx && opts.output == OM::InPlace) {
             sv type = param.type_param.type;
             if (type.starts_with("Vk")) type.remove_prefix(2);
             file << type << "& " << param.type_param.name;
             continue;
         }
 
-        // Input array param: const T* pName → span<T> name
+        // Input array param: span<T> pName → const T& name (Singular) or const span<T> name (Span)
         if (cc.is_input_array(i)) {
             sv type = param.type_param.type;
             if (type.starts_with("Vk")) type.remove_prefix(2);
-            file << "const span<" << type << "> " << NameTranslator::from_input_array_name(param.type_param.name).new_name;
+            if (opts.array == AM::Singular)
+                file << "const " << type << "& " << opts.singular_param_name;
+            else
+                file << "const span<" << type << "> " << NameTranslator::from_input_array_name(param.type_param.name).new_name;
             continue;
         }
 
         emit_wrapper_param(param, file);
+    }
+    if (opts.output == OM::Trailing && !opts.output_trailing_decl.empty()) {
+        sep();
+        file << opts.output_trailing_decl;
     }
     file << ")";
 }
@@ -1798,47 +1870,57 @@ void Generator::generate_wrapper_params(const Command& cmd, const CommandClassif
 // Writes call arguments for the funcs.vkXxx(...) invocation.
 void Generator::generate_call_args(const Command& cmd, const CommandClassification& cc,
     std::ofstream& file, bool for_nothrow) {
+    WrapperEmitOptions opts;
+    opts.output = for_nothrow ? WrapperEmitOptions::OutputMode::InPlace
+        : WrapperEmitOptions::OutputMode::Skip;
+    generate_call_args(cmd, cc, file, opts);
+}
+
+void Generator::generate_call_args(const Command& cmd, const CommandClassification& cc,
+    std::ofstream& file, const WrapperEmitOptions& opts) {
+    using OM = WrapperEmitOptions::OutputMode;
+    using AM = WrapperEmitOptions::ArrayMode;
+
     file << "(";
     bool first = true;
+    auto sep = [&]() { if (first) first = false; else file << ", "; };
+
     for (int i = 0; i < (int)cmd.parameters.size(); ++i) {
         auto& param = cmd.parameters[i];
-        if (!param.api.is_vulkan()) {
-            continue;
-        }
+        if (!param.api.is_vulkan()) continue;
 
-        if (first) first = false;
-        else file << ", ";
+        sep();
 
-        if (i == cc.implicit_param_idx) {
-            file << cc.implicit_global << ".handle()";
-            continue;
-        }
-        if (i == cc.allocator_param_idx) {
-            file << "detail::_allocator";
-            continue;
-        }
+        if (i == cc.implicit_param_idx) { file << cc.implicit_global << ".handle()"; continue; }
+        if (i == cc.allocator_param_idx) { file << "detail::_allocator"; continue; }
 
-        // Input array pairs: count → .size(), array → .data()
+        // Input array pairs
         bool handled_input_array = false;
         for (int k = 0; k < cc.input_array_count; ++k) {
             if (i == cc.input_arrays[k].count_idx) {
-                auto vec_name = NameTranslator::from_input_array_name(cmd.parameters[cc.input_arrays[k].array_idx].type_param.name).new_name;
-                file << vec_name << ".size()";
-                handled_input_array = true;
-                break;
+                if (opts.array == AM::Singular) file << "1";
+                else {
+                    auto vec_name = NameTranslator::from_input_array_name(cmd.parameters[cc.input_arrays[k].array_idx].type_param.name).new_name;
+                    file << vec_name << ".size()";
+                }
+                handled_input_array = true; break;
             }
             if (i == cc.input_arrays[k].array_idx) {
-                auto vec_name = NameTranslator::from_input_array_name(cmd.parameters[cc.input_arrays[k].array_idx].type_param.name).new_name;
-                file << vec_name << ".data()";
-                handled_input_array = true;
-                break;
+                if (opts.array == AM::Singular) file << "&" << opts.singular_param_name;
+                else {
+                    auto vec_name = NameTranslator::from_input_array_name(cmd.parameters[cc.input_arrays[k].array_idx].type_param.name).new_name;
+                    file << vec_name << ".data()";
+                }
+                handled_input_array = true; break;
             }
         }
         if (handled_input_array) continue;
 
         if (i == cc.output_param_idx) {
-            if (for_nothrow) {
-                // _noThrow: output goes through reinterpret_cast
+            if (!opts.output_expr.empty()) {
+                file << opts.output_expr;
+            } else if (opts.output == OM::InPlace) {
+                // _noThrow: output through reinterpret_cast or &name
                 bool out_is_handle = is_handle(param.type_param.type);
                 if (out_is_handle) {
                     sv type = param.type_param.type;
@@ -1848,7 +1930,7 @@ void Generator::generate_call_args(const Command& cmd, const CommandClassificati
                     file << "&" << param.type_param.name;
                 }
             } else {
-                // _throw: output goes through &h (local variable)
+                // Default _throw: local var `h`
                 file << "&h";
             }
             continue;
@@ -1857,7 +1939,6 @@ void Generator::generate_call_args(const Command& cmd, const CommandClassificati
         auto [param_is_handle, is_const_struct_ptr] = is_handle_or_const_ptr_struct_argument(param);
 
         if (is_const_struct_ptr) {
-            // Wrapper takes by reference, PFN takes by pointer
             file << "&" << param.type_param.name;
         } else if (param_is_handle) {
             bool is_pointer = !param.type_param.post_quals.empty()
@@ -1967,6 +2048,237 @@ void Generator::generate_wrapper_result_create(const Command& cmd, const Command
             emit_forward_param_names(cmd, cc, file, true);
         }
         file << "); }\n";
+    }
+}
+
+// Pattern 3b: VkResult → creates N handles into output array sharing a count param.
+// Emits vector<T> and vector<UniqueT> wrappers (throw/noThrow/default gated), plus
+// singular convenience overloads (createGraphicsPipelines → createGraphicsPipeline) when the
+// command has an input array of create-infos. Input array is rendered as `const span<T>`
+// (plural) or `const T&` (singular); count param is dropped.
+void Generator::generate_wrapper_result_create_array(const Command& cmd, const CommandClassification& cc, std::ofstream& file) {
+    using OM = WrapperEmitOptions::OutputMode;
+    using AM = WrapperEmitOptions::ArrayMode;
+    assert(cc.pattern == CommandClassification::Pattern::ResultCreateArray);
+    assert(cc.output_param_idx >= 0 && cc.count_param_idx >= 0);
+
+    const auto [unique_name, name] = NameTranslator::unique_command_name(cmd.name);
+    auto& out_param = cmd.parameters[cc.output_param_idx];
+    sv out_type_sv = out_param.type_param.type;
+    if (out_type_sv.starts_with("Vk")) out_type_sv.remove_prefix(2);
+
+    std::string out_type(out_type_sv);
+    std::string unique_type = "Unique" + out_type;
+    std::string out_name(out_param.type_param.name);
+
+    std::string size_expr;
+    if (cc.input_array_count > 0) {
+        auto& arr_param = cmd.parameters[cc.input_arrays[0].array_idx];
+        size_expr = std::string(NameTranslator::from_input_array_name(arr_param.type_param.name).new_name) + ".size()";
+    } else {
+        size_expr = std::string(cmd.parameters[cc.count_param_idx].type_param.name);
+    }
+
+    sv destroy_cmd_name;
+    if (auto it = types.find(out_param.type_param.type); it != types.end()
+        && it->second.handle && it->second.handle->info
+        && it->second.handle->info->destroy_command)
+        destroy_cmd_name = it->second.handle->info->destroy_command->name;
+
+    // Helper struct for output variants
+    struct Variant {
+        sv fn_name;           // e.g. "createGraphicsPipelines" or "createGraphicsPipeline"
+        sv return_throw;      // e.g. "vector<Pipeline>" or "Pipeline"
+        sv trailing_decl;     // noThrow output decl, e.g. "vector<Pipeline>& pPipelines"
+        sv trailing_name;     // noThrow forward name, e.g. "pPipelines" or "pipeline"
+        sv call_output_expr;  // expression written at output slot (empty → default "&h")
+        AM array_mode;        // Span (plural) or Singular
+        sv singular;          // singular_param_name (Singular only)
+    };
+
+    // Emits the _throw/_noThrow-shorthand default wrapper.
+    auto emit_default_forward = [&](const Variant& v) {
+        sv target = default_is_throw() ? "_throw" : "_noThrow";
+        if (default_is_throw()) {
+            file << "inline " << v.return_throw << " " << v.fn_name;
+            generate_wrapper_params(cmd, cc, file,
+                WrapperEmitOptions{ .array = v.array_mode, .singular_param_name = v.singular });
+            file << " { return " << v.fn_name << target << "(";
+            emit_forward_param_names(cmd, cc, file,
+                WrapperEmitOptions{ .array = v.array_mode, .singular_param_name = v.singular });
+        } else {
+            file << "inline Result " << v.fn_name;
+            generate_wrapper_params(cmd, cc, file,
+                WrapperEmitOptions{ .output = OM::Trailing, .array = v.array_mode,
+                                   .output_trailing_decl = v.trailing_decl, .singular_param_name = v.singular });
+            file << " noexcept { return " << v.fn_name << target << "(";
+            emit_forward_param_names(cmd, cc, file,
+                WrapperEmitOptions{ .output = OM::Trailing, .array = v.array_mode,
+                                   .output_trailing_name = v.trailing_name, .singular_param_name = v.singular });
+        }
+        file << "); }\n";
+        };
+
+    std::string plural_out_expr = "reinterpret_cast<" + out_type + "::HandleType*>(" + out_name + ".data())";
+
+    // ---- vector<T> ----
+    {
+        std::string ret = "vector<" + out_type + ">";
+        std::string trailing = "vector<" + out_type + ">& " + out_name;
+        Variant v{
+            .fn_name = name,
+            .return_throw = ret,
+            .trailing_decl = trailing,
+            .trailing_name = out_name,
+            .call_output_expr = plural_out_expr,
+            .array_mode = AM::Span,
+            .singular = {},
+        };
+        if (should_emit_throw()) {
+            sv suffix = should_emit_default() ? "_throw" : "";
+            file << "inline " << v.return_throw << " " << v.fn_name << suffix;
+            generate_wrapper_params(cmd, cc, file, WrapperEmitOptions{ .array = v.array_mode });
+            file << " { " << v.return_throw << " " << out_name << "; if (!" << out_name << ".alloc_noThrow(" << size_expr
+                << ")) throw OutOfHostMemoryError(\"" << v.fn_name << suffix << "(): Out of host memory.\"); Result r = funcs." << cmd.name;
+            generate_call_args(cmd, cc, file, WrapperEmitOptions{ .array = v.array_mode, .output_expr = v.call_output_expr });
+            file << "; if (r != Result::eSuccess) { ";
+            if (!destroy_cmd_name.empty())
+                file << "for (size_t i = 0; i < " << size_expr << "; i++) funcs." << destroy_cmd_name << "("
+                << cc.implicit_global << ".handle(), " << out_name << "[i].handle(), detail::_allocator); ";
+            file << "throwResultException(r, \"" << cmd.name << "\"); } return " << out_name << "; }\n";
+        }
+        if (should_emit_nothrow()) {
+            sv suffix = should_emit_default() ? "_noThrow" : "";
+            file << "inline Result " << v.fn_name << suffix;
+            generate_wrapper_params(cmd, cc, file,
+                WrapperEmitOptions{ .output = OM::Trailing, .array = v.array_mode, .output_trailing_decl = v.trailing_decl });
+            file << " noexcept { if (!" << out_name << ".alloc_noThrow(" << size_expr
+                << ")) return Result::eErrorOutOfHostMemory; return funcs." << cmd.name;
+            generate_call_args(cmd, cc, file, WrapperEmitOptions{ .array = v.array_mode, .output_expr = v.call_output_expr });
+            file << "; }\n";
+        }
+        if (should_emit_default()) emit_default_forward(v);
+    }
+
+    // ---- vector<UniqueT> ----
+    {
+        std::string ret = "vector<" + unique_type + ">";
+        std::string trailing = "vector<" + unique_type + ">& " + out_name;
+        Variant v{
+            .fn_name = unique_name,
+            .return_throw = ret,
+            .trailing_decl = trailing,
+            .trailing_name = out_name,
+            .call_output_expr = plural_out_expr,
+            .array_mode = AM::Span,
+            .singular = {},
+        };
+        if (should_emit_throw()) {
+            sv suffix = should_emit_default() ? "_throw" : "";
+            file << "inline " << v.return_throw << " " << v.fn_name << suffix;
+            generate_wrapper_params(cmd, cc, file, WrapperEmitOptions{ .array = v.array_mode });
+            file << " { " << v.return_throw << " " << out_name << "; if (!" << out_name << ".alloc_noThrow(" << size_expr
+                << ")) throw OutOfHostMemoryError(\"" << v.fn_name << suffix << "(): Out of host memory.\"); Result r = funcs." << cmd.name;
+            generate_call_args(cmd, cc, file, WrapperEmitOptions{ .array = v.array_mode, .output_expr = v.call_output_expr });
+            file << "; if (r != Result::eSuccess) throwResultException(r, \"" << cmd.name << "\"); return " << out_name << "; }\n";
+        }
+        if (should_emit_nothrow()) {
+            sv suffix = should_emit_default() ? "_noThrow" : "";
+            file << "inline Result " << v.fn_name << suffix;
+            generate_wrapper_params(cmd, cc, file,
+                WrapperEmitOptions{ .output = OM::Trailing, .array = v.array_mode, .output_trailing_decl = v.trailing_decl });
+            file << " noexcept { for (uint32_t i = 0; i < " << size_expr << "; i++) " << out_name
+                << "[i].reset(); if (!" << out_name << ".alloc_noThrow(" << size_expr
+                << ")) return Result::eErrorOutOfHostMemory; return funcs." << cmd.name;
+            generate_call_args(cmd, cc, file, WrapperEmitOptions{ .array = v.array_mode, .output_expr = v.call_output_expr });
+            file << "; }\n";
+        }
+        if (should_emit_default()) emit_default_forward(v);
+    }
+
+    // ---- Singular convenience overloads ----
+    if (cc.input_array_count == 0) return;
+    std::string singular_name = NameTranslator::singularize(name);
+    if (singular_name == name) return;
+
+    std::string singular_unique_name = singular_name + "Unique";
+    auto& arr_param = cmd.parameters[cc.input_arrays[0].array_idx];
+    std::string singular_param_name = NameTranslator::singularize(
+        NameTranslator::from_input_array_name(arr_param.type_param.name).new_name);
+    std::string out_ref_name = NameTranslator::singularize(
+        NameTranslator::from_input_array_name(out_name).new_name);
+    std::string singular_out_expr = "reinterpret_cast<" + out_type + "::HandleType*>(&" + out_ref_name + ")";
+
+    // ---- Singular T ----
+    {
+        std::string trailing = out_type + "& " + out_ref_name;
+        Variant v{
+            .fn_name = singular_name,
+            .return_throw = out_type,
+            .trailing_decl = trailing,
+            .trailing_name = out_ref_name,
+            .call_output_expr = singular_out_expr, // only used in the noThrow body; throw uses default "&h"
+            .array_mode = AM::Singular,
+            .singular = singular_param_name,
+        };
+        if (should_emit_throw()) {
+            sv suffix = should_emit_default() ? "_throw" : "";
+            file << "inline " << v.return_throw << " " << v.fn_name << suffix;
+            generate_wrapper_params(cmd, cc, file,
+                WrapperEmitOptions{ .array = v.array_mode, .singular_param_name = v.singular });
+            file << " { " << v.return_throw << "::HandleType h; Result r = funcs." << cmd.name;
+            generate_call_args(cmd, cc, file,
+                WrapperEmitOptions{ .array = v.array_mode, .singular_param_name = v.singular });
+            file << "; detail::processResult(r, h, \"" << cmd.name << "\"); return h; }\n";
+        }
+        if (should_emit_nothrow()) {
+            sv suffix = should_emit_default() ? "_noThrow" : "";
+            file << "inline Result " << v.fn_name << suffix;
+            generate_wrapper_params(cmd, cc, file,
+                WrapperEmitOptions{ .output = OM::Trailing, .array = v.array_mode,
+                                   .output_trailing_decl = v.trailing_decl, .singular_param_name = v.singular });
+            file << " noexcept { return funcs." << cmd.name;
+            generate_call_args(cmd, cc, file,
+                WrapperEmitOptions{ .array = v.array_mode, .output_expr = v.call_output_expr, .singular_param_name = v.singular });
+            file << "; }\n";
+        }
+        if (should_emit_default()) emit_default_forward(v);
+    }
+
+    // ---- Singular UniqueT ----
+    {
+        std::string trailing = unique_type + "& " + out_ref_name;
+        Variant v{
+            .fn_name = singular_unique_name,
+            .return_throw = unique_type,
+            .trailing_decl = trailing,
+            .trailing_name = out_ref_name,
+            .call_output_expr = singular_out_expr,
+            .array_mode = AM::Singular,
+            .singular = singular_param_name,
+        };
+        if (should_emit_throw()) {
+            sv suffix = should_emit_default() ? "_throw" : "";
+            file << "inline " << v.return_throw << " " << v.fn_name << suffix;
+            generate_wrapper_params(cmd, cc, file,
+                WrapperEmitOptions{ .array = v.array_mode, .singular_param_name = v.singular });
+            file << " { return " << v.return_throw << "(" << singular_name << suffix << "(";
+            emit_forward_param_names(cmd, cc, file,
+                WrapperEmitOptions{ .array = v.array_mode, .singular_param_name = v.singular });
+            file << ")); }\n";
+        }
+        if (should_emit_nothrow()) {
+            sv suffix = should_emit_default() ? "_noThrow" : "";
+            file << "inline Result " << v.fn_name << suffix;
+            generate_wrapper_params(cmd, cc, file,
+                WrapperEmitOptions{ .output = OM::Trailing, .array = v.array_mode,
+                                   .output_trailing_decl = v.trailing_decl, .singular_param_name = v.singular });
+            file << " noexcept { " << out_ref_name << ".reset(); return funcs." << cmd.name;
+            generate_call_args(cmd, cc, file,
+                WrapperEmitOptions{ .array = v.array_mode, .output_expr = v.call_output_expr, .singular_param_name = v.singular });
+            file << "; }\n";
+        }
+        if (should_emit_default()) emit_default_forward(v);
     }
 }
 
@@ -3171,7 +3483,9 @@ void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& so
 
         auto cc = classify_command(*cmd);
         // For ResultCreate: check if output handle has a destroy() overload
-        if (cc.pattern == CommandClassification::Pattern::ResultCreate && cc.output_param_idx >= 0) {
+        if ((cc.pattern == CommandClassification::Pattern::ResultCreate
+            || cc.pattern == CommandClassification::Pattern::ResultCreateArray)
+            && cc.output_param_idx >= 0) {
             // Check if any destroy command targets this handle type
             // by looking at the handles vector
             sv out_type = cmd->parameters[cc.output_param_idx].type_param.type;
@@ -3193,6 +3507,9 @@ void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& so
             generate_wrapper_result_create(*cmd, cc, header);
             if (cc.output_has_destroy)
                 generate_unique_handle_create(*cmd, cc, header);
+            break;
+        case CommandClassification::Pattern::ResultCreateArray:
+            generate_wrapper_result_create_array(*cmd, cc, header);
             break;
         case CommandClassification::Pattern::VoidOutParam:
             generate_wrapper_void_outparam(*cmd, cc, header);
@@ -3222,16 +3539,90 @@ void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& so
             if (ca == nullptr) continue;
             // Skip aliases that point to destroy commands (already have destroy() overloads)
             if (destroy_commands.contains(ca->alias)) continue;
+
+            std::string alias_base = NameTranslator::from_command_name(ca->name).new_name;
+            std::string target_base = NameTranslator::from_command_name(ca->alias).new_name;
+
+            auto emit_alias = [&](sv a_base, sv t_base, sv a_suffix, sv t_suffix) {
+                header << "inline constexpr auto& " << a_base << a_suffix
+                    << " = " << t_base << t_suffix << ";\n";
+                };
+
+            // Mirrors the gating in generate_wrapper_* emitters so every generated
+            // target symbol gets a matching alias and none reference missing ones.
+            auto emit_throw_nothrow_default = [&](sv a_base, sv t_base, sv a_pfx, sv t_pfx) {
+                if (should_emit_throw())
+                    emit_alias(a_base, t_base,
+                        std::string(a_pfx) + (should_emit_default() ? "_throw" : ""),
+                        std::string(t_pfx) + (should_emit_default() ? "_throw" : ""));
+                if (should_emit_nothrow())
+                    emit_alias(a_base, t_base,
+                        std::string(a_pfx) + (should_emit_default() ? "_noThrow" : ""),
+                        std::string(t_pfx) + (should_emit_default() ? "_noThrow" : ""));
+                if (should_emit_default())
+                    emit_alias(a_base, t_base, a_pfx, t_pfx);
+                };
+
+            // Fall back to shorthand-only alias when target command isn't in the map.
+            auto it = commands.find(ca->alias);
+            if (it == commands.end()) {
+                emit_alias(alias_base, target_base, "", "");
+                continue;
+            }
+            auto& target_cmd = it->second;
+
             // Cant generate aliases where target is overloaded (PhysicalDevice overloads make constexpr auto& ambiguous)
-            if (auto it = commands.find(ca->alias); it != commands.end()) {
-                auto& target_cmd = it->second;
-                if (!target_cmd.parameters.empty() && target_cmd.parameters[0].type_param.type == "VkPhysicalDevice") {
-                    generate_physical_device_overload_alias(*ca, header);
-                    continue;
+            if (!target_cmd.parameters.empty() && target_cmd.parameters[0].type_param.type == "VkPhysicalDevice") {
+                generate_physical_device_overload_alias(*ca, header);
+                continue;
+            }
+
+            CommandClassification cc = classify_command(target_cmd);
+            if ((cc.pattern == CommandClassification::Pattern::ResultCreate
+                || cc.pattern == CommandClassification::Pattern::ResultCreateArray)
+                && cc.output_param_idx >= 0) {
+                sv out_type = target_cmd.parameters[cc.output_param_idx].type_param.type;
+                for (const auto& h : handles) {
+                    if (h.type.name == out_type && h.is_destroyable()) {
+                        cc.output_has_destroy = true;
+                        break;
+                    }
                 }
             }
-            header << "inline constexpr auto& " << NameTranslator::from_command_name(ca->name)
-                << " = " << NameTranslator::from_command_name(ca->alias) << ";\n";
+
+            using Pattern = CommandClassification::Pattern;
+            switch (cc.pattern) {
+            case Pattern::Void:
+            case Pattern::VoidOutParam:
+            case Pattern::Other:
+                emit_alias(alias_base, target_base, "", "");
+                break;
+            case Pattern::ResultVoid:
+            case Pattern::ResultOutParam:
+            case Pattern::Enumerate:
+                emit_throw_nothrow_default(alias_base, target_base, "", "");
+                break;
+            case Pattern::ResultCreate:
+                emit_throw_nothrow_default(alias_base, target_base, "", "");
+                if (cc.output_has_destroy)
+                    emit_throw_nothrow_default(alias_base, target_base, "Unique", "Unique");
+                break;
+            case Pattern::ResultCreateArray: {
+                    auto emit_both_forms = [&](sv a, sv t) {
+                        emit_throw_nothrow_default(a, t, "", "");
+                        emit_throw_nothrow_default(a, t, "Unique", "Unique");
+                        };
+                    emit_both_forms(alias_base, target_base);
+                    // Singular convenience overloads: createGraphicsPipelines -> createGraphicsPipeline
+                    if (cc.input_array_count > 0) {
+                        std::string singular_alias = NameTranslator::singularize(alias_base);
+                        std::string singular_target = NameTranslator::singularize(target_base);
+                        if (singular_alias != alias_base && singular_target != target_base)
+                            emit_both_forms(singular_alias, singular_target);
+                    }
+                    break;
+                }
+            }
         }
     }
 
@@ -3698,6 +4089,28 @@ NameTranslator vkg_gen::Generator::NameTranslator::from_input_array_name(sv name
         return NameTranslator(std::move(new_name));
     }
     return NameTranslator(std::string(name));
+}
+
+std::string vkg_gen::Generator::NameTranslator::singularize(sv name) {
+    // Split off any trailing all-uppercase extension suffix (KHR/EXT/NV/...)
+    size_t suffix_start = name.size();
+    while (suffix_start > 0 && std::isupper(static_cast<unsigned char>(name[suffix_start - 1])))
+        --suffix_start;
+    sv stem = name.substr(0, suffix_start);
+    sv suffix = name.substr(suffix_start);
+
+    if (stem.size() >= 3 && stem.ends_with("ies")) {
+        std::string out(stem.substr(0, stem.size() - 3));
+        out += 'y';
+        out += suffix;
+        return out;
+    }
+    if (!stem.empty() && stem.back() == 's') {
+        std::string out(stem.substr(0, stem.size() - 1));
+        out += suffix;
+        return out;
+    }
+    return std::string(name);
 }
 
 std::pair<std::string, std::string> vkg_gen::Generator::NameTranslator::unique_command_name(sv name) {
