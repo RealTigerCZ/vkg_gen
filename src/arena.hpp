@@ -17,7 +17,7 @@
 #include <memory>
 #include <vector>
 
-namespace vkg_gen {
+namespace vkgen {
     class Arena {
         static constexpr size_t DEFAULT_BLOCK_SIZE = 64 * 1024; // 64 KB blocks
         std::vector<std::unique_ptr<char[]>> blocks;

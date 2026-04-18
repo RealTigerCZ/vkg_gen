@@ -18,7 +18,7 @@
 #include <optional>
 #include <stdexcept>
 
-namespace vkg_gen::xml {
+namespace vkgen::xml {
     using sv = std::string_view;
 
     template <typename T>

@@ -1,6 +1,6 @@
 # Generated vkg source code
-out.cpp
-out.hpp
+vkg.cpp
+vkg.hpp
 # Compiled shaders
 *.spv
 # Object files

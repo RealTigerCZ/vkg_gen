@@ -13,13 +13,13 @@
 #include <format>
 
 template <>
-struct std::formatter<vkg_gen::xml::Lexer::TokenType> {
-    using TokenType = vkg_gen::xml::Lexer::TokenType;
+struct std::formatter<vkgen::xml::Lexer::TokenType> {
+    using TokenType = vkgen::xml::Lexer::TokenType;
     constexpr auto parse(std::format_parse_context& ctx) {
         return ctx.begin();
     }
 
     auto format(const TokenType& token, std::format_context& ctx) const {
-        return std::format_to(ctx.out(), "{}", vkg_gen::xml::token_to_string(token));
+        return std::format_to(ctx.out(), "{}", vkgen::xml::token_to_string(token));
     }
 };

@@ -3,7 +3,7 @@
  * @author Jaroslav Hucel (xhucel00@vutbr.cz)
  * @brief Pregenerated boilerplate code for the generator.
  * @date Created: 23. 03. 2026
- * @date Modified: 10. 04. 2026
+ * @date Modified: 18. 04. 2026
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -110,7 +110,8 @@ namespace boilerplate {
     };
 
 
-    // FIXME:
+    // TODO: Types added by this includes are not in vk.xml,
+    //       In future we should add support for loading other xml with these definitions
     static constexpr std::string_view VIDEO_INCLUDES =
         "#include \"vk_video/vulkan_video_codec_av1std_decode.h\"\n"
         "#include \"vk_video/vulkan_video_codec_h265std_decode.h\"\n"
@@ -185,11 +186,22 @@ namespace boilerplate {
         "    extern Device _device;\n"
         "    extern uint32_t _instanceVersion;\n"
         "}\n\n"
+
         "inline void* library() { return detail::_library; }\n"
         "inline Instance instance() { return detail::_instance; }\n"
         "inline PhysicalDevice physicalDevice() { return detail::_physicalDevice; }\n"
         "inline Device device() { return detail::_device; }\n"
         "inline uint32_t enumerateInstanceVersion() { return detail::_instanceVersion; }\n\n"sv;
+
+    // author: PCJohn (peciva at fit.vut.cz)
+    static constexpr std::string_view IS_EXTENSION_SUPPORTED_DEF =
+        "inline bool isExtensionSupported(const vector<ExtensionProperties>& extensionList, const char* extensionName) noexcept {\n"
+        "    for (size_t i = 0, c = extensionList.size(); i < c; i++)\n"
+        "        if (strcmp(extensionList[i].extensionName, extensionName) == 0)\n"
+        "            return true;\n"
+        "    return false;\n"
+        "}\n"sv;
+
 
     // author: PCJohn (peciva at fit.vut.cz)
     static constexpr std::string_view INIT_DECLARATIONS =

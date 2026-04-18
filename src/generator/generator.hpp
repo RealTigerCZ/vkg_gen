@@ -21,7 +21,7 @@
  // TASK: 090126_01
 #define CONCEPT_FILTERING
 
-namespace vkg_gen::Generator {
+namespace vkgen::Generator {
     // CHECK: vulkan spec
     constexpr int BITPOS_MAX = 64 - 1;
 
@@ -139,7 +139,7 @@ namespace vkg_gen::Generator {
             bool is_standalone_comment = false; //TODO:
             uint16_t ext_number = 0;
 
-            static EnumItem from_xml(const vkg_gen::xml::Element& elem, vkg_gen::Arena& arena, TypeEnum* parent, bool is_standalone_comment = false, bool extend_parent = false, uint16_t ext_number = 0);
+            static EnumItem from_xml(const vkgen::xml::Element& elem, vkgen::Arena& arena, TypeEnum* parent, bool is_standalone_comment = false, bool extend_parent = false, uint16_t ext_number = 0);
         };
 
 
@@ -168,7 +168,7 @@ namespace vkg_gen::Generator {
         std::vector<EnumItem> items;
 
         // TODO: change to static from_xml(...)
-        TypeEnum(const vkg_gen::xml::Element& elem, vkg_gen::Arena& arena);
+        TypeEnum(const vkgen::xml::Element& elem, vkgen::Arena& arena);
 
     private:
         Type type_from_string(sv s);
@@ -230,7 +230,7 @@ namespace vkg_gen::Generator {
             AfterBitSelect
         };
 
-        static TypeParam from_xml(const xml::Element& elem, vkg_gen::Arena& arena);
+        static TypeParam from_xml(const xml::Element& elem, vkgen::Arena& arena);
         // TODO: replace this with operator<<
         std::string stringify() const;
         bool is_const() const;
@@ -330,7 +330,7 @@ namespace vkg_gen::Generator {
             Union
         };
 
-        Member(const vkg_gen::xml::Element& elem, vkg_gen::Arena& arena, ParentType parent_type, bool is_standalone_comment = false);
+        Member(const vkgen::xml::Element& elem, vkgen::Arena& arena, ParentType parent_type, bool is_standalone_comment = false);
 
         LimitType limit_type_from_string(std::string_view s);
     };
@@ -415,7 +415,7 @@ namespace vkg_gen::Generator {
         const xml::Element& elem;
 
         // TODO: change to static from_xml(...)
-        Type(const xml::Element& elem, vkg_gen::Arena& arena);
+        Type(const xml::Element& elem, vkgen::Arena& arena);
         Type(Type&& other) noexcept;
         Type& operator=(Type&&) = delete;
         Type(const Type&) = delete;
@@ -445,7 +445,7 @@ namespace vkg_gen::Generator {
 
         TypeParam type_param;
 
-        static CommandParameter from_xml(const xml::Element& elem, vkg_gen::Arena& arena);
+        static CommandParameter from_xml(const xml::Element& elem, vkgen::Arena& arena);
 
     };
 
@@ -456,7 +456,7 @@ namespace vkg_gen::Generator {
         ApiType api = ApiType::Any; // comma separated list, optional
         sv comment = {}; // optional
 
-        static CommandAlias from_xml(const xml::Element& elem, vkg_gen::Arena& arena);
+        static CommandAlias from_xml(const xml::Element& elem, vkgen::Arena& arena);
     };
 
     class Command {
@@ -495,7 +495,7 @@ namespace vkg_gen::Generator {
 
         std::vector<CommandParameter> parameters = {};
 
-        static Command from_xml(const xml::Element& elem, vkg_gen::Arena& arena);
+        static Command from_xml(const xml::Element& elem, vkgen::Arena& arena);
     };
 
     struct DefineExt {
@@ -710,10 +710,10 @@ namespace vkg_gen::Generator {
         // TASK: 100126_01
         std::vector<DefineExt> required_defines;
 
-        void parse_platforms(vkg_gen::xml::Dom& dom);
-        void parse_types(vkg_gen::xml::Dom& dom);
-        void parse_enums(vkg_gen::xml::Dom& dom);
-        void parse_commands(vkg_gen::xml::Dom& dom);
+        void parse_platforms(vkgen::xml::Dom& dom);
+        void parse_types(vkgen::xml::Dom& dom);
+        void parse_enums(vkgen::xml::Dom& dom);
+        void parse_commands(vkgen::xml::Dom& dom);
         bool is_handle(sv type);
         void cache_handles(std::vector<HandleInfo>& handles);
 
@@ -794,16 +794,16 @@ namespace vkg_gen::Generator {
         void add_required_enum(sv name);
         void add_required_command(sv name);
 
-        void add_required_version_feature(sv name, vkg_gen::xml::Dom& dom);
+        void add_required_version_feature(sv name, vkgen::xml::Dom& dom);
 
-        void extend_enum(sv extends, vkg_gen::xml::Element& elem, vkg_gen::Arena& arena, uint16_t block_ext_number = 0, sv protect = {});
+        void extend_enum(sv extends, vkgen::xml::Element& elem, vkgen::Arena& arena, uint16_t block_ext_number = 0, sv protect = {});
 
         void add_extension_prototype(xml::Element& ext, xml::Dom& dom);
         void add_extension_with_deps(xml::Element& ext, xml::Dom& dom, sv required_by = {});
 
     public:
         Generator() {}
-        void generate(vkg_gen::xml::Dom& dom, std::ofstream& header, std::ofstream& source, Config& config);
+        void generate(vkgen::xml::Dom& dom, std::ofstream& header, std::ofstream& source, Config& config);
 
         // TODO:
         xml::Node* Types;
@@ -934,15 +934,15 @@ namespace vkg_gen::Generator {
         return { param_is_handle, is_const_struct_ptr };
     }
 
-} // namespace vkg_gen::Generator
+} // namespace vkgen::Generator
 
 
 
 #if 0
-void generate_types(vkg_gen::xml::Dom& dom, std::ofstream& file);
-void generate_base_types(const vkg_gen::xml::Dom& dom, std::ofstream& file);
-void generate_enums(const vkg_gen::xml::Dom& dom, std::ofstream& file);
-void generate_API_constants(const vkg_gen::xml::Dom& dom, std::ofstream& file);
+void generate_types(vkgen::xml::Dom& dom, std::ofstream& file);
+void generate_base_types(const vkgen::xml::Dom& dom, std::ofstream& file);
+void generate_enums(const vkgen::xml::Dom& dom, std::ofstream& file);
+void generate_API_constants(const vkgen::xml::Dom& dom, std::ofstream& file);
 #endif
 
 

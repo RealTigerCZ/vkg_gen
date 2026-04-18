@@ -19,7 +19,7 @@
 
 #include "../arena.hpp"
 
-namespace vkg_gen::xml {
+namespace vkgen::xml {
     Lexer::TokenType Lexer::next(Expected expected) {
         auto token = _next(expected); // FIXME: refactor
         if (m_buffer.size() == 0)
@@ -310,7 +310,7 @@ namespace vkg_gen::xml {
 } // namespace vkg_gen::xml
 
 
-namespace vkg_gen {
+namespace vkgen {
     using sv = std::string_view;
     sv xml::Lexer::get_and_save_value(Arena& arena) {
         return arena.storeString(get_value());

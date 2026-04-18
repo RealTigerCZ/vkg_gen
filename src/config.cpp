@@ -244,7 +244,7 @@ static constexpr std::string_view DEFAULT_CONFIG =
 "# false tries to remove all unnecessary enum numbers\n"
 "generate_enum_numbers = true\n"
 "# C requires (struct | union | enum) before type name, C++ doesn't\n"
-"generate_c_type_keywords = true\n"
+"generate_c_type_keywords = false\n"
 "# AV1 and VP9 would be translated to \"Av1\" and \"Vp9\" in C++\n"
 "apply_av1_and_vp9_naming_exceptions = true\n"
 "# false means skipping aliases for commands(they usually only add extension suffix)\n"
@@ -255,7 +255,7 @@ static constexpr std::string_view DEFAULT_CONFIG =
 "# None, Error, Warning, All\n"
 "log_level = Warning\n"
 "# GenerateWithDeprecationWarning, GenerateWithoutDeprecationWarning, DontGenerateDeprecatedTypes\n"
-"deprecation_behavior = GenerateWithDeprecationWarning\n"
+"deprecation_behavior = GenerateWithoutDeprecationWarning\n"
 "# DontGenerate, GenerateWithoutProtectMacro, Generate\n"
 "beta_extensions = GenerateWithoutProtectMacro\n"
 "# ThrowOnly, NoThrowOnly, BothWithDefaultThrow, BothWithDefaultNoThrow, BothWithoutDefault\n"
@@ -276,8 +276,8 @@ static constexpr std::string_view DEFAULT_CONFIG =
 "\n"
 "# If provided with empty string, namespace wont be generated, commenting this out will generate default namespace\n"
 "namespace = vk\n"
-"header_path = out.hpp\n"
-"source_path = out.cpp\n"
+"header_path = vkg.hpp\n"
+"source_path = vkg.cpp\n"
 "xml_path = vk.xml\n";
 
 
@@ -299,4 +299,59 @@ void print_usage(const char* program_name) {
         << "  --ext <name>      Enable extension, can be specified multiple times, can contain comma-separated list (overrides config)\n\n"
         << "  --create-config <path>   Creates a config file at the given path with default values.\n\n"
         << "  --help            Show this help\n";
+}
+
+CliResult handle_cli(Config& config, int argc, char* argv[]) {
+    std::string config_path;
+    for (int i = 1; i < argc; ++i) {
+        if (std::strcmp(argv[i], "--config") == 0) {
+            if (i + 1 >= argc) {
+                std::cerr << "Error: --config requires a path argument\n";
+                return CliResult::ReturnError;
+            }
+            config_path = argv[++i];
+        }
+    }
+
+    if (!config_path.empty())
+        config.load_from_file(config_path);
+
+    for (int i = 1; i < argc; ++i) {
+        if (std::strcmp(argv[i], "--config") == 0) {
+            ++i; // already handled
+        } else if (std::strcmp(argv[i], "--xml") == 0) {
+            if (i + 1 >= argc) throw ConfigError("--xml requires a path argument");
+            config.xml_path = argv[++i];
+        } else if (std::strcmp(argv[i], "--header") == 0) {
+            if (i + 1 >= argc) throw ConfigError("--header requires a path argument");
+            config.header_path = argv[++i];
+        } else if (std::strcmp(argv[i], "--source") == 0) {
+            if (i + 1 >= argc) throw ConfigError("--source requires a path argument");
+            config.source_path = argv[++i];
+        } else if (std::strcmp(argv[i], "--version") == 0) {
+            if (i + 1 >= argc) throw ConfigError("--version requires a version argument (e.g. 1.3)");
+            const char* v = argv[++i];
+            if (!parse_vulkan_version({ v, v + std::strlen(v) }, config.target_version))
+                throw ConfigError("Invalid Vulkan version: " + std::string(v) + " (expected 1.0 - 1.4)");
+        } else if (std::strcmp(argv[i], "--help") == 0 || std::strcmp(argv[i], "-h") == 0) {
+            print_usage(argv[0]);
+            return CliResult::ReturnSuccess;
+        } else if (std::strcmp(argv[i], "--ext") == 0) {
+            if (i + 1 >= argc) throw ConfigError("--ext requires a path argument");
+            std::string err = config.parse_extensions(argv[++i]);
+            if (!err.empty())
+                throw ConfigError("Invalid extension: " + err);
+        } else if (std::strcmp(argv[i], "--create-config") == 0) {
+            if (i + 1 >= argc) throw ConfigError("--create-config requires a path argument");
+            if (argc != 3) throw ConfigError("--create-config must be the only argument");
+            config.save_to_file(argv[++i]);
+            std::cout << "Created config file at '" << argv[i] << "'\n";
+            return CliResult::ReturnSuccess;
+        } else {
+            std::cerr << "Error: Unknown argument: " << argv[i] << std::endl;
+            print_usage(argv[0]);
+            return CliResult::ReturnError;
+        }
+    }
+    return CliResult::Ok;
 }

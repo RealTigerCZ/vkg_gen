@@ -32,15 +32,15 @@ cmake .. -G Ninja -DSANITIZE=ON
 ## Usage
 
 ```
-./vkg_gen [options]
+./vkgen [options]
 ```
 
-Run `./vkg_gen --help` for a full list of options. Key flags:
+Run `./vkgen --help` for a full list of options. Key flags:
 
 - `--config <path>` — load a config file (key=value format)
 - `--create-config <path>` — generate a default config file
 - `--xml <path>` — path to `vk.xml` (default: `vk.xml`)
-- `--header <path>` / `--source <path>` — output file paths (default: `out.hpp` / `out.cpp`)
+- `--header <path>` / `--source <path>` — output file paths (default: `vkg.hpp` / `vkg.cpp`)
 - `--version <1.X>` — target Vulkan version (e.g. `1.3`)
 - `--ext <list>` — comma-separated extension list
 
@@ -89,8 +89,13 @@ The `examples/` directory contains sample applications that use the generated wr
 - [ ] P1-5: Dead code cleanup
 - [ ] P1-6: MSVC compatibility of generated code
 - [ ] P1-7: Shared-count input arrays (one count → multiple arrays)
+  - [x] P1-7a: Shared-count input arrays for creating multiple handles
+  - [ ] P1-7b: Other share-count input arrays
 - [ ] P1-8: Complex `len` expressions (latexmath, commas)
 - [x] P1-9: ~~Handle arrays in input array conversion~~ (resolved by `span<T>`)
+- [ ] P1-10: Other original vulkan convinience functions
+  - [x] P1-10a: `to_cstr(<enum>)`
+  - [ ] P1-10b: TODO:
 
 ### P2 — After MVP
 
@@ -112,7 +117,7 @@ The `tests/compiling/` directory contains scripts to verify the generator compil
 It is supposed to be used as an reference to see, what was tested.
 
 If you want to run tests on your local machine, you need also need to have `Docker` installed.
-The reference output (out.cpp and out.hpp) and testing file (out_comp.cpp) are expected to be provided in the `tests/compiling/golden/` directory.
+The reference output (vkg.cpp and vkg.hpp) and testing file (vkg_comp.cpp) are expected to be provided in the `tests/compiling/golden/` directory.
 
 **Local tests** — builds and runs the generator in Debug, Release, and RelWithDebInfo, then diffs output against golden files:
 

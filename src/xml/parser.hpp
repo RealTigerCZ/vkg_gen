@@ -13,7 +13,7 @@
 
 
 
-namespace vkg_gen::xml {
+namespace vkgen::xml {
     class Lexer;
 
     class Parser {

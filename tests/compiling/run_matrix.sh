@@ -97,21 +97,21 @@ docker run --rm -v "$ROOT_DIR:/workspace" -w /workspace/tests/compiling vkg_gen_
             cd $BUILD_DIR
 
             if [[ "$CXX_BIN" == *"aarch64"* ]]; then
-                qemu-aarch64 -L /usr/aarch64-linux-gnu/ ./vkg_gen
+                qemu-aarch64 -L /usr/aarch64-linux-gnu/ ./vkgen
             else
-                ./vkg_gen
+                ./vkgen
             fi
 
-            diff -q out.hpp ../golden/out.hpp || exit 1
-            diff -q out.cpp ../golden/out.cpp || exit 1
+            diff -q vkg.hpp ../golden/vkg.hpp || exit 1
+            diff -q vkg.cpp ../golden/vkg.cpp || exit 1
 
             echo -e "${CYAN}🧪 Validating compilation of generated files...${NC}"
 
             # Copy the test program into CMAKE_BINARY_DIR
-            cp ../golden/out_comp.cpp .
+            cp ../golden/vkg_comp.cpp .
 
             # Trigger the custom CMake target
-            ninja out_comp || exit 1
+            ninja vkg_comp || exit 1
 
             echo -e "${YELLOW}⚠️ Skipping running out_comp for $CXX_BIN.${NC} because loading vulkan in docker doesnt work right now!"
 

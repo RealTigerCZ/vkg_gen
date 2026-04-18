@@ -1,7 +1,7 @@
-// Test example using the generated vk:: wrapper (out.hpp / out.cpp)
+// Test example using the generated vk:: wrapper (vkg.hpp / vkg.cpp)
 // Read README.md for more info
 
-#include "out.hpp"
+#include "vkg.hpp"
 
 // Provide C Vulkan types so GLFW exposes its Vulkan surface creation functions
 typedef vk::Instance::HandleType VkInstance;

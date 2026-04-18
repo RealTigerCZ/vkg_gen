@@ -84,16 +84,16 @@ for CONFIG in "${CONFIGS[@]}"; do
         cd "$BUILD_DIR"
 
         # 4. Execute Generator
-        ./vkg_gen
+        ./vkgen
 
         # 5. Verify against Golden Outputs (relative to BUILD_DIR)
-        diff -q out.hpp ../golden/out.hpp
-        diff -q out.cpp ../golden/out.cpp
+        diff -q vkg.hpp ../golden/vkg.hpp
+        diff -q vkg.cpp ../golden/vkg.cpp
 
         # 6. Execute Test Program
-        cp ../golden/out_comp.cpp .
-        ninja out_comp -j $NINJA_JOBS
-        ./out
+        cp ../golden/vkg_comp.cpp .
+        ninja vkg_comp -j $NINJA_JOBS
+        ./vkg_comp
 
     ) > "$LOG_FILE" 2>&1; then
         echo -e "${GREEN}✅ $CONFIG Passed!${NC}"

@@ -16,11 +16,11 @@
 
 #include <iostream>
 
-namespace vkg_gen {
+namespace vkgen {
     class Arena;
 }
 
-namespace vkg_gen::xml {
+namespace vkgen::xml {
     class LexerError;
 
     class Lexer {
@@ -115,5 +115,5 @@ namespace vkg_gen::xml {
 
 
     sv token_to_string(Lexer::TokenType type) noexcept;
-} // namespace vkg_gen::xml
+} // namespace vkgen::xml
 

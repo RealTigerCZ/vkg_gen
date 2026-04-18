@@ -27,7 +27,7 @@
 
 #define EXPECT_FMT(exp, ...) std::format("Expected " exp " but got '{}'!", __VA_ARGS__)
 
-namespace vkg_gen::xml {
+namespace vkgen::xml {
     Dom Parser::parse(const std::string& path) {
         std::ifstream file{ path, std::ios::in };
         if (!file.is_open()) {
@@ -259,4 +259,4 @@ namespace vkg_gen::xml {
     ParserError::ParserError(const Lexer& lexer, const std::string& msg, int len) :
         Error(lexer.get_err_loc(), msg, "parsing", len == USE_TOKEN_LEN ? lexer.get_value().size() : len, true) {};
 
-} // namespace vkg_gen::xml
+} // namespace vkgen::xml

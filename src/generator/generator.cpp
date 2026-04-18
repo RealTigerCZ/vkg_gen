@@ -27,9 +27,9 @@
 
 
  //FIXME:
-using namespace vkg_gen::xml;
+using namespace vkgen::xml;
 
-using namespace vkg_gen::Generator;
+using namespace vkgen::Generator;
 
 // Enum items that must be excluded from generated enum bodies and from to_cstr
 // switches. They either shadow a corrected value (duplicate case labels) or are
@@ -161,7 +161,7 @@ inline constexpr auto has_attr_name(std::string_view n) noexcept { return HasAtt
 inline constexpr auto has_attr_value(std::string_view v) noexcept { return HasAttrValue{ v }; }
 
 #endif // CONCEPT_FILTERING
-namespace vkg_gen::xml {
+namespace vkgen::xml {
 
     // TASK: 090126_03
     std::ostream& operator<<(std::ostream& os, const Element& elem) {
@@ -174,7 +174,7 @@ namespace vkg_gen::xml {
 }
 
 // TASK: 090126_03
-std::ostream& helper_test(std::ostream& os, const vkg_gen::xml::Node* node) {
+std::ostream& helper_test(std::ostream& os, const vkgen::xml::Node* node) {
     if (!node) return os << "(NULL)";
     if (!node->isElement())
         return os << "(TEXT: " << node->asText() << ")";
@@ -253,7 +253,7 @@ std::string_view to_string(Extension ext) {
     throw my_error("Invalid extension");
 }
 
-bool vkg_gen::Generator::bool_from_string(std::string_view s) {
+bool vkgen::Generator::bool_from_string(std::string_view s) {
     if (s == "true")
         return true;
     if (s == "false")
@@ -267,7 +267,7 @@ bool vkg_gen::Generator::bool_from_string(std::string_view s) {
     throw my_error("Invalid boolean value: '" + std::string(s) + "'");
 }
 
-Command::Scope vkg_gen::Generator::scope_from_string(std::string_view s) {
+Command::Scope vkgen::Generator::scope_from_string(std::string_view s) {
     if (s == "inside") return Command::Scope::Inside;
     if (s == "outside") return Command::Scope::Outside;
     if (s == "both") return Command::Scope::Both;
@@ -308,7 +308,7 @@ Type::Category Type::category_from_string(std::string_view s) const {
     throw my_error(err);
 }
 
-void Type::parse_struct(const vkg_gen::xml::Element& elem, vkg_gen::Arena& arena) {
+void Type::parse_struct(const vkgen::xml::Element& elem, vkgen::Arena& arena) {
     for (Node* child : elem.children) {
         if (child->isText()) {
             std::cout << "- TASK: 090126_04 - Skipping TEXT: " << child->asText() << std::endl;
@@ -329,7 +329,7 @@ void Type::parse_struct(const vkg_gen::xml::Element& elem, vkg_gen::Arena& arena
 };
 
 
-void Type::parse_union(const vkg_gen::xml::Element& elem, vkg_gen::Arena& arena) {
+void Type::parse_union(const vkgen::xml::Element& elem, vkgen::Arena& arena) {
     for (Node* child : elem.children) {
         if (child->isText()) {
             std::cout << "- TASK: 090126_04 - Skipping TEXT: " << child->asText() << std::endl;
@@ -381,7 +381,7 @@ Platforms Platforms::from_xml(const xml::Element& elem) {
     return p;
 }
 
-Type::Type(const vkg_gen::xml::Element& elem, vkg_gen::Arena& arena) : elem(elem) {
+Type::Type(const vkgen::xml::Element& elem, vkgen::Arena& arena) : elem(elem) {
     Category specific_attr = Category::None;
 
     for (const Attribute& attr : elem.attrs) {
@@ -551,7 +551,7 @@ Type::~Type() {
 }
 
 // TASK: 090126_03
-void _gen_arbitrary_C_code_in_type(const vkg_gen::xml::Element& elem, std::ofstream& file) {
+void _gen_arbitrary_C_code_in_type(const vkgen::xml::Element& elem, std::ofstream& file) {
     bool last_was_element = false;
     for (Node* child : elem.children) {
         if (child->isText()) {
@@ -610,7 +610,7 @@ TypeEnum::Bitwidth TypeEnum::bitwidth_from_string(std::string_view s) {
     throw my_error{ "Unknown bitwidth: " + std::string(s) };
 }
 
-TypeEnum::TypeEnum(const vkg_gen::xml::Element& e, vkg_gen::Arena& arena) {
+TypeEnum::TypeEnum(const vkgen::xml::Element& e, vkgen::Arena& arena) {
     for (auto& attr : e.attrs) {
         if (attr.name == "name") {
             name = attr.value;
@@ -738,7 +738,7 @@ Member::LimitType Member::limit_type_from_string(std::string_view s) {
 #undef LIMIT
 }
 
-Member::Member(const vkg_gen::xml::Element& e, vkg_gen::Arena& arena, ParentType parent_type, bool is_standalone_comment) :
+Member::Member(const vkgen::xml::Element& e, vkgen::Arena& arena, ParentType parent_type, bool is_standalone_comment) :
     is_standalone_comment(is_standalone_comment) {
     if (is_standalone_comment) {
         assert(e.tag == "comment");
@@ -798,7 +798,7 @@ Member::Member(const vkg_gen::xml::Element& e, vkg_gen::Arena& arena, ParentType
 
 }
 
-TypeEnum::EnumItem TypeEnum::EnumItem::from_xml(const vkg_gen::xml::Element& elem, vkg_gen::Arena& arena, TypeEnum* parent, bool is_standalone_comment, bool extend_parent, uint16_t block_ext_number) {
+TypeEnum::EnumItem TypeEnum::EnumItem::from_xml(const vkgen::xml::Element& elem, vkgen::Arena& arena, TypeEnum* parent, bool is_standalone_comment, bool extend_parent, uint16_t block_ext_number) {
     EnumItem item{ .name = {}, .is_standalone_comment = is_standalone_comment, .ext_number = block_ext_number };
 
     assert(!(is_standalone_comment && extend_parent));
@@ -936,7 +936,7 @@ TypeEnum::EnumItem TypeEnum::EnumItem::from_xml(const vkg_gen::xml::Element& ele
 
 
 
-void vkg_gen::Generator::Generator::parse_platforms(vkg_gen::xml::Dom& dom) {
+void vkgen::Generator::Generator::parse_platforms(vkgen::xml::Dom& dom) {
     auto& registry = dom.root->asElement();
     assert(registry.tag == "registry");
 
@@ -950,7 +950,7 @@ void vkg_gen::Generator::Generator::parse_platforms(vkg_gen::xml::Dom& dom) {
     }
 }
 
-void Generator::parse_types(vkg_gen::xml::Dom& dom) {
+void Generator::parse_types(vkgen::xml::Dom& dom) {
     auto& registry = dom.root->asElement();
     assert(registry.tag == "registry");
 
@@ -984,7 +984,7 @@ void Generator::parse_types(vkg_gen::xml::Dom& dom) {
 
 }
 
-void Generator::parse_enums(vkg_gen::xml::Dom& dom) {
+void Generator::parse_enums(vkgen::xml::Dom& dom) {
     auto& registry = dom.root->asElement();
     assert(registry.tag == "registry");
 
@@ -995,7 +995,7 @@ void Generator::parse_enums(vkg_gen::xml::Dom& dom) {
     }
 }
 
-void vkg_gen::Generator::Generator::parse_commands(vkg_gen::xml::Dom& dom) {
+void vkgen::Generator::Generator::parse_commands(vkgen::xml::Dom& dom) {
     auto& registry = dom.root->asElement();
     assert(registry.tag == "registry");
 
@@ -1028,14 +1028,14 @@ void vkg_gen::Generator::Generator::parse_commands(vkg_gen::xml::Dom& dom) {
     }
 }
 
-bool vkg_gen::Generator::Generator::is_handle(sv type) {
+bool vkgen::Generator::Generator::is_handle(sv type) {
     auto it = types.find(type);
     if (it == types.end())
         return false;
     return it->second.category == Type::Category::Handle;
 }
 
-void vkg_gen::Generator::Generator::cache_handles(std::vector<HandleInfo>& handles) {
+void vkgen::Generator::Generator::cache_handles(std::vector<HandleInfo>& handles) {
     const auto get_cmd = [&](std::string name) -> const Command* {
         auto it = commands.find(name);
         if (it == commands.end())
@@ -1266,7 +1266,7 @@ void Generator::generate_to_cstr_def(TypeEnum& e, std::ofstream& file) {
         << "    }\n}\n\n";
 }
 
-void vkg_gen::Generator::Generator::generate_member(Member& member, std::ofstream& file, sv struct_union, sv parent_name) {
+void vkgen::Generator::Generator::generate_member(Member& member, std::ofstream& file, sv struct_union, sv parent_name) {
     if (member.is_standalone_comment) {
         file << StandaloneComment{ member.comment, config.generate_comments };
         return;
@@ -1384,7 +1384,7 @@ void Generator::generate_handle(const Type& h, std::ofstream& file, TypeEnum& ob
 }
 
 // Generate error classes from Result enum values
-void vkg_gen::Generator::Generator::generate_error_classes(std::ofstream& file) {
+void vkgen::Generator::Generator::generate_error_classes(std::ofstream& file) {
     file << boilerplate::ERROR_BASE_CLASS;
     auto VkResult = enums.at("VkResult");
     auto enum_name = NameTranslator::transform_enum_name("VkResult", false);
@@ -1407,7 +1407,7 @@ void vkg_gen::Generator::Generator::generate_error_classes(std::ofstream& file) 
     file << "\n";
 }
 
-void vkg_gen::Generator::Generator::generate_throw_result_exception(std::ofstream& source) {
+void vkgen::Generator::Generator::generate_throw_result_exception(std::ofstream& source) {
     const TypeEnum& VkResult = enums.at("VkResult");
     auto enum_name = NameTranslator::transform_enum_name("VkResult", false);
     ProtectGuard guard{ .file = source };
@@ -1435,7 +1435,7 @@ void vkg_gen::Generator::Generator::generate_throw_result_exception(std::ofstrea
 }
 
 
-NameTranslator vkg_gen::Generator::Generator::get_translated_type_name(sv name) {
+NameTranslator vkgen::Generator::Generator::get_translated_type_name(sv name) {
     Type& t = types.at(name);
     switch (t.category) {
     case Type::Category::Struct:
@@ -1460,7 +1460,7 @@ NameTranslator vkg_gen::Generator::Generator::get_translated_type_name(sv name) 
 }
 
 
-std::ofstream& vkg_gen::Generator::Generator::generate_command_params(Command& cmd, std::ofstream& file, bool is_end_of_line) {
+std::ofstream& vkgen::Generator::Generator::generate_command_params(Command& cmd, std::ofstream& file, bool is_end_of_line) {
     file << "(";
     bool first = true;
     for (auto& param : cmd.parameters) {
@@ -1504,7 +1504,7 @@ void Generator::generate_command(Command& cmd, std::ofstream& file) {
 
 }
 
-void vkg_gen::Generator::Generator::generate_command_PFN(Command& cmd, std::ofstream& file) {
+void vkgen::Generator::Generator::generate_command_PFN(Command& cmd, std::ofstream& file) {
     // FIXME: cmd can have any arbitraty C code
     sv type = cmd.type;
     if (type.starts_with("Vk")) {
@@ -1514,7 +1514,7 @@ void vkg_gen::Generator::Generator::generate_command_PFN(Command& cmd, std::ofst
     generate_command_params(cmd, file);
 }
 
-void vkg_gen::Generator::Generator::generate_funcpointer(Type& type, std::ofstream& file) {
+void vkgen::Generator::Generator::generate_funcpointer(Type& type, std::ofstream& file) {
     auto& fp = *type.funcptr;
     file << "typedef " << fp.return_type.stringify();
     file << " (VKAPI_PTR* " << type.name << ")(";
@@ -1542,7 +1542,7 @@ void vkg_gen::Generator::Generator::generate_funcpointer(Type& type, std::ofstre
     file << ");\n";
 }
 
-void vkg_gen::Generator::Generator::generate_command_wrapper(Command& cmd, std::ofstream& file) {
+void vkgen::Generator::Generator::generate_command_wrapper(Command& cmd, std::ofstream& file) {
     sv type = cmd.type;
     if (type.starts_with("Vk")) {
         type.remove_prefix(2);
@@ -2756,7 +2756,7 @@ void Generator::generate_physical_device_overloads(const Command& cmd, const Com
     }
 }
 
-void vkg_gen::Generator::Generator::generate_physical_device_overload_alias(const CommandAlias& alias, std::ofstream& file) {
+void vkgen::Generator::Generator::generate_physical_device_overload_alias(const CommandAlias& alias, std::ofstream& file) {
     if (config.exception_behavior == ExceptionBehavior::BothWithoutDefault) {
 
         file << "template<typename... Args> inline auto " << NameTranslator::from_command_name(alias.name) << "_noThrow(Args&&... args) { return " << NameTranslator::from_command_name(alias.alias) << "_noThrow(detail::forward<Args>(args)...); }\n";
@@ -2847,7 +2847,7 @@ void Generator::add_required_type(sv name, std::vector<Type*>& types_stack) {
     required_types.add_without_check(type);
 }
 
-void vkg_gen::Generator::Generator::add_required_enum(sv name) {
+void vkgen::Generator::Generator::add_required_enum(sv name) {
     // FIXME: API constatnts
     static const std::unordered_set<sv> api_constants = { "VK_MAX_PHYSICAL_DEVICE_NAME_SIZE", "VK_UUID_SIZE", "VK_LUID_SIZE", "VK_MAX_EXTENSION_NAME_SIZE", "VK_MAX_DESCRIPTION_SIZE", "VK_MAX_MEMORY_TYPES", "VK_MAX_MEMORY_HEAPS", "VK_LOD_CLAMP_NONE", "VK_REMAINING_MIP_LEVELS", "VK_REMAINING_ARRAY_LAYERS", "VK_REMAINING_3D_SLICES_EXT", "VK_WHOLE_SIZE", "VK_ATTACHMENT_UNUSED", "VK_TRUE", "VK_FALSE", "VK_QUEUE_FAMILY_IGNORED", "VK_QUEUE_FAMILY_EXTERNAL", "VK_QUEUE_FAMILY_FOREIGN_EXT", "VK_SUBPASS_EXTERNAL", "VK_MAX_DEVICE_GROUP_SIZE", "VK_MAX_DRIVER_NAME_SIZE", "VK_MAX_DRIVER_INFO_SIZE", "VK_SHADER_UNUSED_KHR", "VK_MAX_GLOBAL_PRIORITY_SIZE", "VK_MAX_SHADER_MODULE_IDENTIFIER_SIZE_EXT", "VK_MAX_PIPELINE_BINARY_KEY_SIZE_KHR", "VK_MAX_VIDEO_AV1_REFERENCES_PER_FRAME_KHR", "VK_MAX_VIDEO_VP9_REFERENCES_PER_FRAME_KHR", "VK_SHADER_INDEX_UNUSED_AMDX", "VK_PARTITIONED_ACCELERATION_STRUCTURE_PARTITION_INDEX_GLOBAL_NV", "VK_MAX_PHYSICAL_DEVICE_DATA_GRAPH_OPERATION_SET_NAME_SIZE_ARM" };
 
@@ -2913,7 +2913,7 @@ void Generator::add_required_command(sv name) {
     }
 }
 
-void Generator::add_required_version_feature(sv name, vkg_gen::xml::Dom& dom) {
+void Generator::add_required_version_feature(sv name, vkgen::xml::Dom& dom) {
     // TODO: some feature map is needed
     auto it = std::ranges::find_if(dom.root->asElement().children, has_tag("feature") && has_attr("name", name));
     if (it == dom.root->asElement().children.end()) {
@@ -3041,7 +3041,7 @@ void Generator::add_required_version_feature(sv name, vkg_gen::xml::Dom& dom) {
     }
 }
 
-void Generator::extend_enum(sv extends, Element& elem, vkg_gen::Arena& arena, uint16_t block_ext_number, sv protect) {
+void Generator::extend_enum(sv extends, Element& elem, vkgen::Arena& arena, uint16_t block_ext_number, sv protect) {
 
     TypeEnum& enum_ = enums.find(extends)->second;
     auto item = TypeEnum::EnumItem::from_xml(elem, arena, &enum_, false, true, block_ext_number);
@@ -3444,6 +3444,9 @@ void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& so
     }
     header_guard.close();
 
+    // This convienience function needs types
+    header << boilerplate::IS_EXTENSION_SUPPORTED_DEF << "\n";
+
     // --- PFN typedefs ---
     for (Command* cmd : required_commands.get()) {
         if (cmd == nullptr) continue;
@@ -3824,7 +3827,7 @@ void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& so
 #endif
 };
 
-CommandParameter CommandParameter::from_xml(const xml::Element& elem, vkg_gen::Arena& arena) {
+CommandParameter CommandParameter::from_xml(const xml::Element& elem, vkgen::Arena& arena) {
     assert(elem.tag == "param");
 
     CommandParameter param;
@@ -3868,7 +3871,7 @@ CommandParameter CommandParameter::from_xml(const xml::Element& elem, vkg_gen::A
     return param;
 }
 
-Command Command::from_xml(const xml::Element& elem, vkg_gen::Arena& arena) {
+Command Command::from_xml(const xml::Element& elem, vkgen::Arena& arena) {
     Command cmd;
 
     for (const Attribute& attr : elem.attrs) {
@@ -3967,7 +3970,7 @@ Command Command::from_xml(const xml::Element& elem, vkg_gen::Arena& arena) {
     return cmd;
 }
 
-CommandAlias vkg_gen::Generator::CommandAlias::from_xml(const xml::Element& elem, vkg_gen::Arena& arena) {
+CommandAlias vkgen::Generator::CommandAlias::from_xml(const xml::Element& elem, vkgen::Arena& arena) {
     CommandAlias ca;
 
     for (const Attribute& attr : elem.attrs) {
@@ -3997,7 +4000,7 @@ CommandAlias vkg_gen::Generator::CommandAlias::from_xml(const xml::Element& elem
 }
 
 
-vkg_gen::Generator::NameTranslator::TransformedEnumName vkg_gen::Generator::NameTranslator::transform_enum_name(sv name, bool is_bitmask) {
+vkgen::Generator::NameTranslator::TransformedEnumName vkgen::Generator::NameTranslator::transform_enum_name(sv name, bool is_bitmask) {
     assert(!name.empty());
     assert(name.starts_with("Vk"));
 
@@ -4034,7 +4037,7 @@ vkg_gen::Generator::NameTranslator::TransformedEnumName vkg_gen::Generator::Name
     return { std::move(transformed), ext };
 }
 
-NameTranslator vkg_gen::Generator::NameTranslator::from_enum_value(sv value, const TransformedEnumName& enum_, bool is_bitfield) {
+NameTranslator vkgen::Generator::NameTranslator::from_enum_value(sv value, const TransformedEnumName& enum_, bool is_bitfield) {
     assert(!enum_.name.empty());
     assert(!value.empty());
 
@@ -4128,14 +4131,14 @@ NameTranslator vkg_gen::Generator::NameTranslator::from_enum_value(sv value, con
     return NameTranslator(std::move(new_name));
 }
 
-NameTranslator vkg_gen::Generator::NameTranslator::from_type_name(sv name) {
+NameTranslator vkgen::Generator::NameTranslator::from_type_name(sv name) {
     assert(!name.empty());
     assert(name.starts_with("Vk"));
 
     return NameTranslator(std::string(name.substr(2)));
 }
 
-NameTranslator vkg_gen::Generator::NameTranslator::from_command_name(sv name) {
+NameTranslator vkgen::Generator::NameTranslator::from_command_name(sv name) {
     assert(!name.empty());
     assert(name.starts_with("vk"));
 
@@ -4148,7 +4151,7 @@ NameTranslator vkg_gen::Generator::NameTranslator::from_command_name(sv name) {
 }
 
 // pViewports -> viewports, pCoverageModulationTable -> coverageModulationTable
-NameTranslator vkg_gen::Generator::NameTranslator::from_input_array_name(sv name) {
+NameTranslator vkgen::Generator::NameTranslator::from_input_array_name(sv name) {
     assert(!name.empty());
     if (name.size() > 1 && name[0] == 'p' && std::isupper(name[1])) {
         std::string new_name(name.substr(1));
@@ -4158,7 +4161,7 @@ NameTranslator vkg_gen::Generator::NameTranslator::from_input_array_name(sv name
     return NameTranslator(std::string(name));
 }
 
-std::string vkg_gen::Generator::NameTranslator::singularize(sv name) {
+std::string vkgen::Generator::NameTranslator::singularize(sv name) {
     // Split off any trailing all-uppercase extension suffix (KHR/EXT/NV/...)
     size_t suffix_start = name.size();
     while (suffix_start > 0 && std::isupper(static_cast<unsigned char>(name[suffix_start - 1])))
@@ -4180,7 +4183,7 @@ std::string vkg_gen::Generator::NameTranslator::singularize(sv name) {
     return std::string(name);
 }
 
-std::pair<std::string, std::string> vkg_gen::Generator::NameTranslator::unique_command_name(sv name) {
+std::pair<std::string, std::string> vkgen::Generator::NameTranslator::unique_command_name(sv name) {
     assert(!name.empty());
     assert(name.starts_with("vk"));
 
@@ -4198,7 +4201,7 @@ std::pair<std::string, std::string> vkg_gen::Generator::NameTranslator::unique_c
     return std::make_pair(std::move(unique_name), std::move(not_unique_name));
 }
 
-NameTranslator vkg_gen::Generator::NameTranslator::from_constexpr_value(sv value_name) {
+NameTranslator vkgen::Generator::NameTranslator::from_constexpr_value(sv value_name) {
     assert(!value_name.empty());
     assert(value_name.starts_with("VK_"));
 
@@ -4211,7 +4214,7 @@ NameTranslator vkg_gen::Generator::NameTranslator::from_constexpr_value(sv value
     return NameTranslator(std::move(new_name));
 }
 
-void vkg_gen::Generator::NameTranslator::transform_from_upper_constant(std::string& name, size_t start_pos, bool first_is_upper) {
+void vkgen::Generator::NameTranslator::transform_from_upper_constant(std::string& name, size_t start_pos, bool first_is_upper) {
     size_t j = start_pos;
     bool next_is_upper = first_is_upper;
     bool prev_was_digit = false;
@@ -4254,7 +4257,7 @@ void vkg_gen::Generator::NameTranslator::transform_from_upper_constant(std::stri
     name.resize(j);
 }
 
-Extension vkg_gen::Generator::NameTranslator::get_and_remove_extension_constant(sv& name) {
+Extension vkgen::Generator::NameTranslator::get_and_remove_extension_constant(sv& name) {
     if (name.ends_with("_IMG")) { name.remove_suffix(sizeof("IMG")); return Extension::Img; }
     if (name.ends_with("_AMD")) { name.remove_suffix(sizeof("AMD")); return Extension::Amd; }
     if (name.ends_with("_AMDX")) { name.remove_suffix(sizeof("AMDX")); return Extension::Amdx; }
@@ -4300,7 +4303,7 @@ Extension vkg_gen::Generator::NameTranslator::get_and_remove_extension_constant(
     return Extension::None;
 }
 
-Extension vkg_gen::Generator::NameTranslator::get_and_remove_extension_name(sv& name) {
+Extension vkgen::Generator::NameTranslator::get_and_remove_extension_name(sv& name) {
     if (name.ends_with("IMG")) { name.remove_suffix(sizeof("IMG") - 1); return Extension::Img; }
     if (name.ends_with("AMD")) { name.remove_suffix(sizeof("AMD") - 1); return Extension::Amd; }
     if (name.ends_with("AMDX")) { name.remove_suffix(sizeof("AMDX") - 1); return Extension::Amdx; }
@@ -4346,7 +4349,7 @@ Extension vkg_gen::Generator::NameTranslator::get_and_remove_extension_name(sv& 
     return Extension::None;
 }
 
-TypeParam vkg_gen::Generator::TypeParam::from_xml(const xml::Element& elem, vkg_gen::Arena& arena) {
+TypeParam vkgen::Generator::TypeParam::from_xml(const xml::Element& elem, vkgen::Arena& arena) {
     State state = State::AtStart;
     TypeParam param;
 
@@ -4412,7 +4415,7 @@ TypeParam vkg_gen::Generator::TypeParam::from_xml(const xml::Element& elem, vkg_
     return param;
 }
 
-void Type::parse_funcpointer(const xml::Element& elem, vkg_gen::Arena& arena) {
+void Type::parse_funcpointer(const xml::Element& elem, vkgen::Arena& arena) {
     UNUSED(arena);
 
     // The expected format:
@@ -4549,7 +4552,7 @@ void Type::parse_funcpointer(const xml::Element& elem, vkg_gen::Arena& arena) {
     }
 }
 
-std::string vkg_gen::Generator::TypeParam::stringify() const {
+std::string vkgen::Generator::TypeParam::stringify() const {
     std::stringstream ss;
     if (is_const())
         ss << "const ";
@@ -4590,7 +4593,7 @@ std::string vkg_gen::Generator::TypeParam::stringify() const {
     return ss.str();
 }
 
-TypeRef vkg_gen::Generator::TypeRef::from_string(sv text) {
+TypeRef vkgen::Generator::TypeRef::from_string(sv text) {
     TypeRef ref;
     trim_ws(text);
 
@@ -4635,7 +4638,7 @@ TypeRef vkg_gen::Generator::TypeRef::from_string(sv text) {
     return ref;
 }
 
-std::string vkg_gen::Generator::TypeRef::stringify() const {
+std::string vkgen::Generator::TypeRef::stringify() const {
     std::stringstream ss;
     if (is_const)
         ss << "const ";
@@ -4655,22 +4658,22 @@ std::string vkg_gen::Generator::TypeRef::stringify() const {
     return ss.str();
 }
 
-void vkg_gen::Generator::trim_leading_ws(sv& s) {
+void vkgen::Generator::trim_leading_ws(sv& s) {
     auto it = std::find_if_not(s.begin(), s.end(), [](unsigned char c) { return std::isspace(c); });
     s.remove_prefix(it - s.begin());
 }
 
-void vkg_gen::Generator::trim_trailing_ws(sv& s) {
+void vkgen::Generator::trim_trailing_ws(sv& s) {
     auto it = std::find_if_not(s.rbegin(), s.rend(), [](unsigned char c) { return std::isspace(c); });
     s.remove_suffix(it - s.rbegin());
 }
 
-void vkg_gen::Generator::trim_ws(sv& s) {
+void vkgen::Generator::trim_ws(sv& s) {
     trim_leading_ws(s);
     trim_trailing_ws(s);
 }
 
-uint64_t vkg_gen::Generator::TypeParam::get_size(sv str) {
+uint64_t vkgen::Generator::TypeParam::get_size(sv str) {
     uint64_t size = 0;
     for (char c : str) {
         if (c < '0' || c > '9')
@@ -4680,7 +4683,7 @@ uint64_t vkg_gen::Generator::TypeParam::get_size(sv str) {
     return size;
 }
 
-TypeParam::State vkg_gen::Generator::TypeParam::parse_string(sv text, State state) {
+TypeParam::State vkgen::Generator::TypeParam::parse_string(sv text, State state) {
     sv original = text;
     const auto check_pre_qual = [&](sv keyword, PreQualifier flag) -> bool {
         // TODO: checking like this can be unsafe (does not check if the word ends - "const" in "constexpr")
@@ -4802,7 +4805,7 @@ TypeParam::State vkg_gen::Generator::TypeParam::parse_string(sv text, State stat
     }
 }
 
-ApiType vkg_gen::Generator::ApiType::from_string(sv str) {
+ApiType vkgen::Generator::ApiType::from_string(sv str) {
     if (str.empty())
         return ApiType::Any;
 

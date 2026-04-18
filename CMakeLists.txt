@@ -2,7 +2,7 @@
 
 cmake_minimum_required(VERSION 3.15) # CHECK: try other versions later
 
-set(APP_NAME vkg_gen)
+set(APP_NAME vkgen)
 set(CMAKE_CXX_STANDARD 23)
 
 project(${APP_NAME})
@@ -70,15 +70,15 @@ else()
     endif()
 endif()
 
-# Debug target to check if out.hpp is compilable
+# Debug target to check if vkg.hpp is compilable
 if (MSVC)
-    add_custom_target(out_comp COMMAND echo "Compiling out.hpp manually with MSVC is not supported")
+    add_custom_target(vkg_comp COMMAND echo "Compiling vkg.hpp manually with MSVC is not supported")
 else()
     # This works for both GCC (GNU) and Clang
-    add_custom_target(out_comp
-        COMMAND ${CMAKE_CXX_COMPILER} -c ${CMAKE_BINARY_DIR}/out.cpp -o ${CMAKE_BINARY_DIR}/vk.o -std=c++20 -Wall -Wextra -g -pedantic -fdiagnostics-color=always
-        COMMAND ${CMAKE_CXX_COMPILER} ${CMAKE_BINARY_DIR}/out_comp.cpp -g ${CMAKE_BINARY_DIR}/vk.o -o ${CMAKE_BINARY_DIR}/out
-        COMMAND echo "" && echo "Successfully compiled test file 'out_comp.cpp' with ${CMAKE_CXX_COMPILER_ID}!"
-        COMMENT "Compiling out.hpp manually with ${CMAKE_CXX_COMPILER_ID} to check if it compiles"
+    add_custom_target(vkg_comp
+        COMMAND ${CMAKE_CXX_COMPILER} -c ${CMAKE_BINARY_DIR}/vkg.cpp -o ${CMAKE_BINARY_DIR}/vk.o -std=c++20 -Wall -Wextra -g -pedantic -fdiagnostics-color=always
+        COMMAND ${CMAKE_CXX_COMPILER} ${CMAKE_BINARY_DIR}/vkg_comp.cpp -g ${CMAKE_BINARY_DIR}/vk.o -o ${CMAKE_BINARY_DIR}/vkg_comp
+        COMMAND echo "" && echo "Successfully compiled test file 'vkg_comp.cpp' with ${CMAKE_CXX_COMPILER_ID}!"
+        COMMENT "Compiling vkg.hpp manually with ${CMAKE_CXX_COMPILER_ID} to check if it compiles"
     )
 endif()

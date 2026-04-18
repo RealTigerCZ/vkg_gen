@@ -12,7 +12,7 @@
 #include "arena.hpp"
 #include <cstring>
 
-using namespace vkg_gen;
+using namespace vkgen;
 
 void* Arena::allocate(size_t size, size_t alignment) {
     size_t space = remaining;

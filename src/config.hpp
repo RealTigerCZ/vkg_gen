@@ -102,13 +102,13 @@ struct Config {
     bool generate_handle_class = true;  // false means generate C vulkan macros
     bool generate_flags_class = true;   // false means generate C VkFlags (uint32) and VkFlags64 (uint64)
     bool generate_enum_numbers = true;  // false tries to remove all unnecessary enum numbers
-    bool generate_c_type_keywords = true; // C requires (struct|union|enum) before type name, C++ doesn't
+    bool generate_c_type_keywords = false; // C requires (struct|union|enum) before type name, C++ doesn't
     bool apply_av1_and_vp9_naming_exceptions = true; // AV1 and VP9 would be translated to "Av1" and "Vp9" in C++
     bool generate_command_aliases = true; // false means skipping aliases for commands, taht usually only adds extension suffix
 
     Compact compact = Compact::Normal;
     LogLevel log_level = LogLevel::Warning;
-    DeprecationBehavior deprecation_behavior = DeprecationBehavior::GenerateWithDeprecationWarning;
+    DeprecationBehavior deprecation_behavior = DeprecationBehavior::GenerateWithoutDeprecationWarning;
     BetaExtensions beta_extensions = BetaExtensions::GenerateWithoutProtectMacro;
     ExceptionBehavior exception_behavior = ExceptionBehavior::BothWithDefaultThrow;
     ToCstrFunction to_cstr_behavior = ToCstrFunction::InCpp;
@@ -126,8 +126,8 @@ struct Config {
     std::string header_only_guard = "VKG_IMPLEMENTATION";
 
     std::string namespace_name = "vk"; // empty means no namespace
-    std::string header_path = "out.hpp";
-    std::string source_path = "out.cpp";
+    std::string header_path = "vkg.hpp";
+    std::string source_path = "vkg.cpp";
     std::string xml_path = "vk.xml";
 
     /* Currently unsupported, maybe replaced by "converters" in future
@@ -136,10 +136,21 @@ struct Config {
         STLClassesInfo string_view = STLClassesInfo::UseStdImpl;
     */
 
+    // Future ideas for options:
+    // - bool  generate_unique_handles
+    // - PhysicalDeviceBehavior physical_device_behavior = ::AlwaysSkip, ::AlwaysRequire, ::GenerateBoth
+
     void load_from_file(const std::string& path);
     std::string parse_extensions(std::string_view value);
     void save_to_file(const std::string& path);
 };
 
+enum class CliResult : uint8_t {
+    Ok,
+    ReturnSuccess,
+    ReturnError,
+};
+
 bool parse_vulkan_version(std::string_view value, VulkanVersion& out);
+CliResult handle_cli(Config& config, int argc, char* argv[]);
 void print_usage(const char* program_name);

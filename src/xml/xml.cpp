@@ -17,7 +17,7 @@
 
 #include "../debug_macros.h"
 
-namespace vkg_gen::xml {
+namespace vkgen::xml {
     static void free_node(Node* node) {
         if (node->isElement()) {
             auto& elem = node->asElement();
