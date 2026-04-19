@@ -2,7 +2,7 @@
 
 Vulkan C++ API Generator named **vkgen** is a configurable C++ Vulkan bindings generator that reads `vk.xml` (Khronos Vulkan registry) and produces a lean `.hpp`/`.cpp` pair tailored to the selected Vulkan version and extensions.
 
-This project is developed as a bachelor's thesis at **Brno University of Technology, Faculty of Information Technology ([VUT FIT](https://www.fit.vutbr.cz))** under the supervision of **Ing. Jan Pečiva, Ph.D.** ([PCJohn](https://github.com/PCJohn)), author of the reference `vkg.h` / `vkg.cpp` (found in [VulkanTutorial](https://github.com/Vulkan-FIT/VulkanTutorial))headers that define the output style targeted by this generator.
+This project is developed as a bachelor's thesis at **Brno University of Technology, Faculty of Information Technology ([VUT FIT](https://www.fit.vutbr.cz))** under the supervision of **Ing. Jan Pečiva, Ph.D.** ([PCJohn](https://github.com/pc-john)), author of the reference `vkg.h` / `vkg.cpp` (found in [VulkanTutorial](https://github.com/Vulkan-FIT/VulkanTutorial))headers that define the output style targeted by this generator.
 
 This project is part of the [Vulkan-FIT](https://github.com/Vulkan-FIT) project.
 
