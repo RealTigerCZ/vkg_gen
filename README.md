@@ -1,5 +1,11 @@
 # Vulkan C++ API Generator
 
+Vulkan C++ API Generator named **vkgen** is a configurable C++ Vulkan bindings generator that reads `vk.xml` (Khronos Vulkan registry) and produces a lean `.hpp`/`.cpp` pair tailored to the selected Vulkan version and extensions.
+
+This project is developed as a bachelor's thesis at **Brno University of Technology, Faculty of Information Technology ([VUT FIT](https://www.fit.vutbr.cz))** under the supervision of **Ing. Jan Pečiva, Ph.D.** ([PCJohn](https://github.com/PCJohn)), author of the reference `vkg.h` / `vkg.cpp` (found in [VulkanTutorial](https://github.com/Vulkan-FIT/VulkanTutorial))headers that define the output style targeted by this generator.
+
+This project is part of the [Vulkan-FIT](https://github.com/Vulkan-FIT) project.
+
 ## Building
 
 This project is WIP. Compiling tested on Fedora 43 with `GCC 15.2.1` and `Clang 21.1.8` and Windows 11 with `MSVC 19.44.35225`. Tested generators are `ninja`, `make` and `vs2022`.
@@ -10,9 +16,11 @@ Also tested on **Ubuntu 24.04** in Docker (for more details see /tests/compiling
 - [x] aarch64-linux-gnu
 - [x] aarch64-clang++
 
+To build the generator, run:
+
 ```bash
 mkdir build && cd build
-cmake .. -G Ninja # you can also use `make`
+cmake .. -G Ninja # you can also use `make`, or `vs2022`
 ninja
 ```
 
@@ -51,6 +59,10 @@ CLI arguments override config file values. Config file overrides defaults.
 The `examples/` directory contains sample applications that use the generated wrapper:
 
 - **[rotating_triangle](examples/rotating_triangle/)** — A Vulkan rotating triangle demo using the `vk::` API. See its README for build instructions and prerequisites.
+
+### VulkanTutorial
+
+Generated `vkg.h` / `vkg.cpp` headers are compatible (with minor changes) with the examples in [VulkanTutorial](https://github.com/Vulkan-FIT/VulkanTutorial).
 
 # Limitations:
 
