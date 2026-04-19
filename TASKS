@@ -1,0 +1,112 @@
+// TASK: 090126_01
+
+- Decide if we will be using filtering nodes by the new concept and lamda like structures.
+- if not, remove it
+
+// TASK: 090126_03
+
+- Temporary helper functions
+
+// TASK: 090126_04
+
+- Text nodes in places where we expect element nodes - need to be handled
+
+// TASK: 090126_06
+
+- Decide what to do with attributes of Command class, how to handle if, if we will be parsing them and so on
+
+// TASK: 090126_07
+
+- Decide what to do with attributes of CommandAlias class, how to handle if, if we will be parsing them and so on
+
+// TASK: 090126_08
+
+- Handle mere than one type in one parameter/member.
+- It can happen for example with "VkPipelineCacheHeaderVersionOne", <member><type>uint8_t</type><name>pipelineCacheUUID</name>[<enum>VK_UUID_SIZE</enum>]</member>
+
+// TASK: 100126_01
+
+- Remove the "add_extension_prototype" function and implement handling extensions into the generator
+- Handle "defines" in extensions defined as <enum value="" name=".."></enum>
+
+// TASK: 040226_01
+
+- Commands are generated to directly link with vulkan, but some of them are only acessible in runtime.
+- Also there is still the trampoline thingy, so it would be advisable, to
+
+// TASK: 250226_01
+
+- Handle config in generator properly
+- Currently just copying what was passed to latest generate.
+
+// TASK: 210326_01
+
+- add config for generating c keywords
+- implement it
+
+// TASK: 210326_02
+
+- add_required_type does not track enum dependencies from TypeParam::array_extensions
+- struct/union members, command params, funcpointer params do not track dependencies of the <enum> tags
+- but will likely always be the special "API Constants" enum that is not handled
+
+// TASK: 220326_01 basetype dependencies and imports
+
+- handle depemdencies of basetypes and imports, so we guarantee that the basetypes are present even from platform specific headers
+
+// TASK: 230326_02 empty bitmask
+
+- some bitmasks are empty and dont have alias or bitvalues but are still used, VkPipelineCoverageReductionStateCreateFlagsNV
+- they can also have different api, ex. VkPipelineDepthStencilStateCreateFlags
+
+// FIXME: TASK: 310326_01
+
+- Handle does not own HandleInfo, it has an pointer that then goes out of scope, so its even more unsafe
+- handle info searches command (vkDestroy ...), but it should go thrugh the parent chain, to end up with VkInstance/VkDevice or other instead.
+
+TASK: 110426_01 Extensions should be parsed same as types, enums etc.
+ - currently Features are just xml::elements cached by the name atribute and parsed when generating.
+
+TASK: 180426_01 throw_nothrow config flag
+
+ - Config::exception_behavior is ignored in config.cpp when constructing Attribute parser defaults
+ - Default is hardcoded; must be respected when parsing/generating per user config
+
+TASK: 180426_02 handle <unused> enum items in generator
+
+ - generator.hpp: EnumItem path did not originally handle <unused> elements
+ - Decide whether to skip, track as range markers, or emit a sentinel
+
+TASK: 180426_03 convert EnumItem/Tag from_xml helpers to static factories
+
+ - Several from_xml methods are instance methods; convert to static for consistency with other *::from_xml factories
+ - Style-only refactor, no behaviour change expected
+
+TASK: 180426_04 implement TypeUnion
+
+ - Generator does not yet handle union types
+ - Needed for completeness of type coverage from vk.xml
+
+TASK: 180426_05 intern XML names (low priority)
+
+ - Attribute::name, Element::tag, and text nodes are currently stored as string_view into the arena
+ - Interning (hash-consing) would speed up comparisons and reduce memory, at the cost of an intern table
+ - Replaces the former Attribute::value_is_interned field and several scattered FIXMEs that were removed
+ - Low priority — measure first to confirm it's worth it
+
+TASK: 180426_06 replace stringify() with operator<< (low priority)
+
+ - TypeParam::stringify() is a method producing std::string; idiomatic C++ would be a free operator<< or std::formatter specialization
+ - Low priority — cosmetic/API-shape change, no behaviour impact
+
+TASK: 180426_08 aliased-command handling in Generator::cache_commands
+
+ - generator.cpp around line 1013: aliased commands are parsed with CommandAlias::from_xml
+   and stored in command_aliases; the original FIXME marker suggested this path needs review
+ - Verify: attribute filtering, dependency tracking, and interaction with generate_command_aliases config
+
+TASK: 180426_07 xml::Dom recursive search semantics
+
+ - getChildren / getChildrenByTag / getChildrenByAttr* have a `recursive` flag whose intended semantics are unresolved
+ - Two candidate behaviors: (1) return every descendant matching the predicate, or (2) return first match along each branch
+ - Several implementations are currently incomplete/non-returning; pick one and finish

@@ -1,0 +1,51 @@
+/**
+ * @file arena.hpp
+ * @author Jaroslav Hucel (xhucel00@vutbr.cz)
+ * @brief Simple arena memory allocator that allocates memory in blocks, making it cache-friendly for XML's many small nodes
+ *        and allowing the whole XML to be freed at once. Not suitable if you need to modify the XML at runtime (individual deallocation is not supported).
+ *
+ * @date Created: 12. 10. 2025
+ * @date Modified: 1. 11. 2025
+ *
+ * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
+ */
+
+#pragma once
+
+#include <memory>
+#include <string>
+#include <string_view>
+#include <vector>
+
+namespace vkgen {
+    class Arena {
+        static constexpr size_t DEFAULT_BLOCK_SIZE = 64 * 1024; // 64 KB blocks
+        std::vector<std::unique_ptr<char[]>> blocks;
+        char* current = nullptr;
+        size_t remaining = 0;
+
+    public:
+        Arena() = default;
+        explicit Arena(size_t initialBlockSize) {
+            allocateBlock(initialBlockSize);
+        }
+
+        void* allocate(size_t size, size_t alignment = alignof(std::max_align_t));
+
+        template<typename T, typename... Args>
+        T* make(Args&&... args) {
+            void* mem = allocate(sizeof(T), alignof(T));
+            return new (mem) T(std::forward<Args>(args)...);
+        }
+
+        void reset() noexcept;
+
+        using sv = std::string_view;
+        sv storeString(const char* str) { return storeString(sv(str)); }
+        sv storeString(const std::string& str) { return storeString(sv(str)); }
+        sv storeString(const sv& str);
+
+    private:
+        void allocateBlock(size_t size);
+    };
+}
