@@ -3,7 +3,7 @@
  * @author Jaroslav Hucel (xhucel00@vutbr.cz)
  * @brief Vulkan registry data model and code generator driver.
  * @date Created: 02. 11. 2025
- * @date Modified: 18. 04. 2026
+ * @date Modified: 26. 04. 2026
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -695,6 +695,7 @@ namespace vkgen::Generator {
 
         std::unordered_map<std::string_view, xml::Element*> extension_name_to_element; // TASK: 110426_01
         std::unordered_set<xml::Element*> processed_extensions;
+        std::unordered_set<xml::Element*> skipped_extensions;
 
         Config config;
 
@@ -793,10 +794,12 @@ namespace vkgen::Generator {
 
 
         void extend_enum(std::string_view extends, vkgen::xml::Element& elem, vkgen::Arena& arena, uint16_t block_ext_number = 0, std::string_view protect = {});
-
+        // Handles feature-feature and feature-type dependencies
         void add_required_version_feature(std::string_view name, vkgen::xml::Dom& dom);
+        // Handles extension-type dependencies, adds all types, enums and commands from this extension
         void add_extension_prototype(xml::Element& ext, xml::Dom& dom);
-        void add_extension_with_deps(xml::Element& ext, xml::Dom& dom, std::string_view required_by = {});
+        // Handles extension-extension dependencies and checks the "allowlist"
+        void add_extension_with_deps(xml::Element& ext, xml::Dom& dom);
 
     public:
         Generator() {}

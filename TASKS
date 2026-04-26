@@ -26,7 +26,6 @@
 
 // TASK: 100126_01
 
-- Remove the "add_extension_prototype" function and implement handling extensions into the generator
 - Handle "defines" in extensions defined as <enum value="" name=".."></enum>
 
 // TASK: 040226_01

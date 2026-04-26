@@ -3088,26 +3088,28 @@ int vk_version_cmp(sv token, VulkanVersion version) {
     VulkanVersion token_version;
     if (!parse_vulkan_version(token, token_version))
         throw my_error{ "Invalid version found in depends token: " + std::string(token) };
-    return (int)token_version - (int)version;
+    return  (int)version - (int)token_version;
 }
 
-// TASK: 100126_01
-// TODO: Refactor - this function currently iterates all extensions and adds all of them.
-//       It should accept a parsed extension structure and add requirements for a single extension.
-void Generator::add_extension_with_deps(Element& ext, xml::Dom& dom, sv required_by) {
+void Generator::add_extension_with_deps(Element& ext, xml::Dom& dom) {
     // Already processed? Skip (also prevents circular deps)
-    if (processed_extensions.contains(&ext))
+    if (processed_extensions.contains(&ext) || skipped_extensions.contains(&ext))
         return;
-    processed_extensions.insert(&ext);
 
     sv ext_name = ext.get_attr_value("name");
 
     // Skip beta extensions if configured
-    if (config.beta_extensions == BetaExtensions::DontGenerate && ext.get_attr_value("provisional") == "true")
+    if (config.beta_extensions == BetaExtensions::DontGenerate && ext.get_attr_value("provisional") == "true") {
+        skipped_extensions.insert(&ext);
         return;
+    }
 
-    if (config.extension_filter_mode == ExtensionFilterMode::BlackList && config.extension_names.contains(std::string(ext_name))) {
-        std::cout << "Warning: Generating blacklisted extension '" << ext_name << "' because it is required by '" << required_by << "'.\n";
+    // Direct exclusion via filter mode
+    bool listed = config.extension_names.contains(std::string(ext_name));
+    bool excluded = (config.extension_filter_mode == ExtensionFilterMode::BlackList) ? listed : !listed;
+    if (excluded) {
+        skipped_extensions.insert(&ext);
+        return;
     }
 
     sv depends = ext.get_attr_value("depends");
@@ -3138,18 +3140,21 @@ void Generator::add_extension_with_deps(Element& ext, xml::Dom& dom, sv required
                 // (already handled by add_required_version_feature call in generate())
             } else {
                 auto it = extension_name_to_element.find(token);
-                if (it != extension_name_to_element.end()) {
-                    Element& dep = *(it->second);
-                    if (!processed_extensions.contains(&dep)) {
-                        add_extension_with_deps(dep, dom, ext_name);
-                    }
-                } else {
+                if (it == extension_name_to_element.end()) {
                     throw my_error{ std::stringstream() << "Dependency '" << token << "' of extension " << ext_name << " not found in vk.xml\n" };
+                }
+                Element& dep = *(it->second);
+                add_extension_with_deps(dep, dom);
+                if (skipped_extensions.contains(&dep)) {
+                    std::cout << "Warning: Skipping extension '" << ext_name << "' because required dependency '" << token << "' is excluded.\n";
+                    skipped_extensions.insert(&ext);
+                    return;
                 }
             }
         }
     }
 
+    processed_extensions.insert(&ext);
     add_extension_prototype(ext, dom);
 }
 
@@ -3168,10 +3173,6 @@ void Generator::add_extension_prototype(Element& ext, xml::Dom& dom) {
             throw my_error{ "Unknown platform: " + std::string(ext_platform) };
         ext_protect = it->second;
     }
-
-    // Skip beta/provisional extensions if configured
-    if (config.beta_extensions == BetaExtensions::DontGenerate && ext.get_attr_value("provisional") == "true")
-        return;
 
     uint16_t ext_number = std::stoul(std::string(ext.get_attr_value("number")));
 
@@ -3304,14 +3305,13 @@ void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& so
             add_extension_with_deps(*(it->second), dom);
         }
     } else {
-        // BlackList: iterate in XML document order (ordering matters for enum dependencies)
+        // BlackList: iterate in XML document order (ordering matters for enum dependencies).
+        // Routed through add_extension_with_deps so dependency exclusions cascade.
         for (Node* ext_group : registry.children | std::views::filter(has_tag("extensions"))) {
             for (Node* ext : ext_group->asElement().children) {
                 if (ext->isText() || ext->asElement().tag != "extension")
                     continue;
-                sv name = ext->asElement().get_attr_value("name");
-                if (config.extension_names.empty() || !config.extension_names.contains(std::string(name)))
-                    add_extension_prototype(ext->asElement(), dom);
+                add_extension_with_deps(ext->asElement(), dom);
             }
         }
     }
