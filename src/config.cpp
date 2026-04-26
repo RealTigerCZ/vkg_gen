@@ -339,6 +339,7 @@ CliResult handle_cli(Config& config, int argc, char* argv[]) {
             return CliResult::ReturnSuccess;
         } else if (std::strcmp(argv[i], "--ext") == 0) {
             if (i + 1 >= argc) throw ConfigError("--ext requires a path argument");
+            config.extension_filter_mode = ExtensionFilterMode::WhiteList; // default: All extension, --ext provided: only provided extensions 
             std::string err = config.parse_extensions(argv[++i]);
             if (!err.empty())
                 throw ConfigError("Invalid extension: " + err);

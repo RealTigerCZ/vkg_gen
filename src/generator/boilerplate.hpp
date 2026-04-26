@@ -3,7 +3,7 @@
  * @author Jaroslav Hucel (xhucel00@vutbr.cz)
  * @brief Pregenerated boilerplate code for the generator.
  * @date Created: 23. 03. 2026
- * @date Modified: 18. 04. 2026
+ * @date Modified: 26. 04. 2026
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -111,22 +111,6 @@ namespace boilerplate {
         "constexpr Flags<BitType> operator|(BitType bit, const Flags<BitType>& flags) noexcept { return flags | bit; }\n"sv,
     };
 
-
-    // TODO: Types added by this includes are not in vk.xml,
-    //       In future we should add support for loading other xml with these definitions
-    static constexpr std::string_view VIDEO_INCLUDES =
-        "#include \"vk_video/vulkan_video_codec_av1std_decode.h\"\n"
-        "#include \"vk_video/vulkan_video_codec_h265std_decode.h\"\n"
-        "#include \"vk_video/vulkan_video_codec_av1std_encode.h\"\n"
-        "#include \"vk_video/vulkan_video_codec_h265std_encode.h\"\n"
-        "#include \"vk_video/vulkan_video_codec_av1std.h\"\n"
-        "#include \"vk_video/vulkan_video_codec_h265std.h\"\n"
-        "#include \"vk_video/vulkan_video_codec_h264std_decode.h\"\n"
-        "#include \"vk_video/vulkan_video_codecs_common.h\"\n"
-        "#include \"vk_video/vulkan_video_codec_h264std_encode.h\"\n"
-        "#include \"vk_video/vulkan_video_codec_vp9std_decode.h\"\n"
-        "#include \"vk_video/vulkan_video_codec_h264std.h\"\n"
-        "#include \"vk_video/vulkan_video_codec_vp9std.h\"\n"sv;
 
     // author: PCJohn (peciva at fit.vut.cz)
     static constexpr std::string_view UNIQUE_HANDLE_DEFINITION =

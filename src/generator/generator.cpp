@@ -3,7 +3,7 @@
  * @author Jaroslav Hucel (xhucel00@vutbr.cz)
  * @brief
  * @date Created: 12. 11. 2025
- * @date Modified: 18. 04. 2026
+ * @date Modified: 26. 04. 2026
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -2785,13 +2785,19 @@ void Generator::add_required_type(sv name, std::vector<Type*>& types_stack) {
         std::cout << "FIXME: Required type not found: " << name << "\n";
 
     Type* type = &types.find(name)->second;
-    if (std::ranges::find(types_stack, type) == types_stack.end())
-        types_stack.push_back(type);
-    else {
-        std::cout << "FIXME: Returning from circular dependency: " << name << "\n";
+    if (type->state != Type::State::NotUsed)
         return;
+
+    auto ts_it = std::ranges::find(types_stack, type);
+    if (ts_it != types_stack.end()) {
+        if (ts_it + 1 == types_stack.end()) // Type refers to itself, no need to recurse
+            return;
+        // Generate forward declaration
+        // generate_forward_declaration(type); // Should not generate forward declaration when adding types.
+        // type->state = Type::State::Declared; // NOt used, vulkan does not require it in the moment
     }
 
+    types_stack.push_back(type);
 
     // TODO: Write own split
     for (auto&& part : type->requires_ | std::views::split(',')) {
@@ -2850,6 +2856,7 @@ void Generator::add_required_type(sv name, std::vector<Type*>& types_stack) {
 
     types_stack.pop_back();
     required_types.add_without_check(type);
+    type->state = Type::State::Defined;
 }
 
 void vkgen::Generator::Generator::add_required_enum(sv name) {
@@ -2926,13 +2933,12 @@ void Generator::add_required_version_feature(sv name, vkgen::xml::Dom& dom) {
     }
     Element& feature = (*it)->asElement();
 
-    // TODO: check arguments of the feature.
     // attributes:
     // api - comma separated list,
     // apitype - values: 'internal' or 'public' <- default
     // name: we wont protect the feature, because we will generate specific features
     // number: major.minor
-    // depends: 😭 String containing a boolean expression of one or more API core version and extension names. The feature requires the expression in the string to be satisfied to use any functionality it defines. Supported operators include , for logical OR, ` for logical AND, and `(` `)` for grouping. `,` and ` are of equal precedence, and lower than ( ). Expressions must be evaluated left-to-right for operators of the same precedence. Terms which are core version names are true if the corresponding API version is supported. Terms which are extension names are true if the corresponding extension is enabled.
+    // depends: String containing a boolean expression of one or more API core version and extension names. The feature requires the expression in the string to be satisfied to use any functionality it defines. Supported operators include , for logical OR, ` for logical AND, and `(` `)` for grouping. `,` and ` are of equal precedence, and lower than ( ). Expressions must be evaluated left-to-right for operators of the same precedence. Terms which are core version names are true if the corresponding API version is supported. Terms which are extension names are true if the corresponding extension is enabled.
     // sortorder
     // comment
 
@@ -3082,26 +3088,28 @@ int vk_version_cmp(sv token, VulkanVersion version) {
     VulkanVersion token_version;
     if (!parse_vulkan_version(token, token_version))
         throw my_error{ "Invalid version found in depends token: " + std::string(token) };
-    return (int)token_version - (int)version;
+    return  (int)version - (int)token_version;
 }
 
-// TASK: 100126_01
-// TODO: Refactor - this function currently iterates all extensions and adds all of them.
-//       It should accept a parsed extension structure and add requirements for a single extension.
-void Generator::add_extension_with_deps(Element& ext, xml::Dom& dom, sv required_by) {
+void Generator::add_extension_with_deps(Element& ext, xml::Dom& dom) {
     // Already processed? Skip (also prevents circular deps)
-    if (processed_extensions.contains(&ext))
+    if (processed_extensions.contains(&ext) || skipped_extensions.contains(&ext))
         return;
-    processed_extensions.insert(&ext);
 
     sv ext_name = ext.get_attr_value("name");
 
     // Skip beta extensions if configured
-    if (config.beta_extensions == BetaExtensions::DontGenerate && ext.get_attr_value("provisional") == "true")
+    if (config.beta_extensions == BetaExtensions::DontGenerate && ext.get_attr_value("provisional") == "true") {
+        skipped_extensions.insert(&ext);
         return;
+    }
 
-    if (config.extension_filter_mode == ExtensionFilterMode::BlackList && config.extension_names.contains(std::string(ext_name))) {
-        std::cout << "Warning: Generating blacklisted extension '" << ext_name << "' because it is required by '" << required_by << "'.\n";
+    // Direct exclusion via filter mode
+    bool listed = config.extension_names.contains(std::string(ext_name));
+    bool excluded = (config.extension_filter_mode == ExtensionFilterMode::BlackList) ? listed : !listed;
+    if (excluded) {
+        skipped_extensions.insert(&ext);
+        return;
     }
 
     sv depends = ext.get_attr_value("depends");
@@ -3132,18 +3140,21 @@ void Generator::add_extension_with_deps(Element& ext, xml::Dom& dom, sv required
                 // (already handled by add_required_version_feature call in generate())
             } else {
                 auto it = extension_name_to_element.find(token);
-                if (it != extension_name_to_element.end()) {
-                    Element& dep = *(it->second);
-                    if (!processed_extensions.contains(&dep)) {
-                        add_extension_with_deps(dep, dom, ext_name);
-                    }
-                } else {
+                if (it == extension_name_to_element.end()) {
                     throw my_error{ std::stringstream() << "Dependency '" << token << "' of extension " << ext_name << " not found in vk.xml\n" };
+                }
+                Element& dep = *(it->second);
+                add_extension_with_deps(dep, dom);
+                if (skipped_extensions.contains(&dep)) {
+                    std::cout << "Warning: Skipping extension '" << ext_name << "' because required dependency '" << token << "' is excluded.\n";
+                    skipped_extensions.insert(&ext);
+                    return;
                 }
             }
         }
     }
 
+    processed_extensions.insert(&ext);
     add_extension_prototype(ext, dom);
 }
 
@@ -3162,10 +3173,6 @@ void Generator::add_extension_prototype(Element& ext, xml::Dom& dom) {
             throw my_error{ "Unknown platform: " + std::string(ext_platform) };
         ext_protect = it->second;
     }
-
-    // Skip beta/provisional extensions if configured
-    if (config.beta_extensions == BetaExtensions::DontGenerate && ext.get_attr_value("provisional") == "true")
-        return;
 
     uint16_t ext_number = std::stoul(std::string(ext.get_attr_value("number")));
 
@@ -3298,14 +3305,13 @@ void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& so
             add_extension_with_deps(*(it->second), dom);
         }
     } else {
-        // BlackList: iterate in XML document order (ordering matters for enum dependencies)
+        // BlackList: iterate in XML document order (ordering matters for enum dependencies).
+        // Routed through add_extension_with_deps so dependency exclusions cascade.
         for (Node* ext_group : registry.children | std::views::filter(has_tag("extensions"))) {
             for (Node* ext : ext_group->asElement().children) {
                 if (ext->isText() || ext->asElement().tag != "extension")
                     continue;
-                sv name = ext->asElement().get_attr_value("name");
-                if (config.extension_names.empty() || !config.extension_names.contains(std::string(name)))
-                    add_extension_prototype(ext->asElement(), dom);
+                add_extension_with_deps(ext->asElement(), dom);
             }
         }
     }
@@ -3322,7 +3328,13 @@ void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& so
     header << "#include <new>\n";      // needed for custom vector class
     header << "#include <stdlib.h>\n"; // needed for custom Error class - malloc/free
     header << "#include <string.h>\n"; // needed for custom Error class - strncpy/strlen
-    header << boilerplate::VIDEO_INCLUDES << "\n";
+
+    // Add missing video headers not handled by vk.xml
+    for (const auto* include : required_types.get()) {
+        if (!include || include->category != Type::Category::Include) continue;
+        if (include->name.starts_with("vk_video/"))
+            header << "#include <" << include->name << ">\n";
+    }
 
     header << "#define VKAPI_PTR\n";
     header << "#define VKAPI_CALL\n";
