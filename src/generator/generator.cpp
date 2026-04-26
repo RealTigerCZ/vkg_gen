@@ -3,7 +3,7 @@
  * @author Jaroslav Hucel (xhucel00@vutbr.cz)
  * @brief
  * @date Created: 12. 11. 2025
- * @date Modified: 18. 04. 2026
+ * @date Modified: 26. 04. 2026
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -2785,13 +2785,19 @@ void Generator::add_required_type(sv name, std::vector<Type*>& types_stack) {
         std::cout << "FIXME: Required type not found: " << name << "\n";
 
     Type* type = &types.find(name)->second;
-    if (std::ranges::find(types_stack, type) == types_stack.end())
-        types_stack.push_back(type);
-    else {
-        std::cout << "FIXME: Returning from circular dependency: " << name << "\n";
+    if (type->state != Type::State::NotUsed)
         return;
+
+    auto ts_it = std::ranges::find(types_stack, type);
+    if (ts_it != types_stack.end()) {
+        if (ts_it + 1 == types_stack.end()) // Type refers to itself, no need to recurse
+            return;
+        // Generate forward declaration
+        // generate_forward_declaration(type); // Should not generate forward declaration when adding types.
+        // type->state = Type::State::Declared; // NOt used, vulkan does not require it in the moment
     }
 
+    types_stack.push_back(type);
 
     // TODO: Write own split
     for (auto&& part : type->requires_ | std::views::split(',')) {
@@ -2850,6 +2856,7 @@ void Generator::add_required_type(sv name, std::vector<Type*>& types_stack) {
 
     types_stack.pop_back();
     required_types.add_without_check(type);
+    type->state = Type::State::Defined;
 }
 
 void vkgen::Generator::Generator::add_required_enum(sv name) {
@@ -2926,13 +2933,12 @@ void Generator::add_required_version_feature(sv name, vkgen::xml::Dom& dom) {
     }
     Element& feature = (*it)->asElement();
 
-    // TODO: check arguments of the feature.
     // attributes:
     // api - comma separated list,
     // apitype - values: 'internal' or 'public' <- default
     // name: we wont protect the feature, because we will generate specific features
     // number: major.minor
-    // depends: 😭 String containing a boolean expression of one or more API core version and extension names. The feature requires the expression in the string to be satisfied to use any functionality it defines. Supported operators include , for logical OR, ` for logical AND, and `(` `)` for grouping. `,` and ` are of equal precedence, and lower than ( ). Expressions must be evaluated left-to-right for operators of the same precedence. Terms which are core version names are true if the corresponding API version is supported. Terms which are extension names are true if the corresponding extension is enabled.
+    // depends: String containing a boolean expression of one or more API core version and extension names. The feature requires the expression in the string to be satisfied to use any functionality it defines. Supported operators include , for logical OR, ` for logical AND, and `(` `)` for grouping. `,` and ` are of equal precedence, and lower than ( ). Expressions must be evaluated left-to-right for operators of the same precedence. Terms which are core version names are true if the corresponding API version is supported. Terms which are extension names are true if the corresponding extension is enabled.
     // sortorder
     // comment
 
@@ -3322,7 +3328,13 @@ void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& so
     header << "#include <new>\n";      // needed for custom vector class
     header << "#include <stdlib.h>\n"; // needed for custom Error class - malloc/free
     header << "#include <string.h>\n"; // needed for custom Error class - strncpy/strlen
-    header << boilerplate::VIDEO_INCLUDES << "\n";
+
+    // Add missing video headers not handled by vk.xml
+    for (const auto* include : required_types.get()) {
+        if (!include || include->category != Type::Category::Include) continue;
+        if (include->name.starts_with("vk_video/"))
+            header << "#include <" << include->name << ">\n";
+    }
 
     header << "#define VKAPI_PTR\n";
     header << "#define VKAPI_CALL\n";
