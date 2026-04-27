@@ -3,7 +3,7 @@
  * @author Jaroslav Hucel (xhucel00@vutbr.cz)
  * @brief Vulkan registry data model and code generator driver.
  * @date Created: 02. 11. 2025
- * @date Modified: 26. 04. 2026
+ * @date Modified: 27. 04. 2026
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -440,6 +440,62 @@ namespace vkgen::Generator {
 
     };
 
+    // Bitset of which overload kinds a command emits. Cached on Command after classification
+    // so module export emits only the names that actually exist, without re-running the
+    // classifier or duplicating its naming logic.
+    enum class Overloads : uint8_t {
+        None = 0,
+        ThrowNoThrow = 1, // emits _throw / _noThrow (and a default forwarder when configured)
+        Unique = 2, // emits the Unique<T> form
+        Singular = 4, // emits the singular convenience overloads (createGraphicsPipeline*)
+    };
+    constexpr Overloads operator|(Overloads a, Overloads b) {
+        return static_cast<Overloads>(static_cast<uint8_t>(a) | static_cast<uint8_t>(b));
+    }
+    constexpr Overloads operator&(Overloads a, Overloads b) {
+        return static_cast<Overloads>(static_cast<uint8_t>(a) & static_cast<uint8_t>(b));
+    }
+    constexpr Overloads& operator|=(Overloads& a, Overloads b) { return a = a | b; }
+    constexpr bool has(Overloads set, Overloads bit) { return (set & bit) != Overloads::None; }
+
+    struct CommandClassification {
+        enum class Pattern : uint8_t {
+            Void,              // void return, no error checking
+            ResultVoid,        // VkResult return, no output data
+            ResultCreate,      // VkResult return, creates handle via out-param
+            ResultCreateArray, // VkResult return, creates N handles; output array's len references a uint32_t count param
+            VoidOutParam,      // void return, fills struct via out-param
+            Enumerate,         // two-call enumerate pattern
+            ResultOutParam,    // VkResult + non-handle out-param
+            Other,             // non-standard return type — pass-through
+        };
+        Pattern pattern;
+
+        int implicit_param_idx = -1;      // device/instance to substitute with global
+        std::string_view implicit_global; // implicit parameter replacement: "detail::_device" or "detail::_instance"
+        int output_param_idx = -1;        // handle or struct output
+        int allocator_param_idx = -1;     // VkAllocationCallbacks*
+        int count_param_idx = -1;         // for enumerate
+        int array_param_idx = -1;         // for enumerate
+        bool output_has_destroy = false;  // ResultCreate: output handle has destroy() overload
+
+        // Input array pairs: non-pointer uint32_t count + const T* with len referencing it (1:1 only)
+        static constexpr int max_input_arrays = 8;
+        struct InputArrayPair { int count_idx; int array_idx; };
+        InputArrayPair input_arrays[max_input_arrays] = {};
+        int input_array_count = 0;
+
+        bool is_input_count(int idx) const {
+            for (int k = 0; k < input_array_count; ++k)
+                if (input_arrays[k].count_idx == idx) return true;
+            return false;
+        }
+        bool is_input_array(int idx) const {
+            for (int k = 0; k < input_array_count; ++k)
+                if (input_arrays[k].array_idx == idx) return true;
+            return false;
+        }
+    };
 
     struct  CommandAlias {
         std::string_view name;
@@ -485,6 +541,7 @@ namespace vkgen::Generator {
         std::string declaration;
 
         std::vector<CommandParameter> parameters = {};
+        Overloads overloads = Overloads::None;
 
         static Command from_xml(const xml::Element& elem, vkgen::Arena& arena);
     };
@@ -539,44 +596,6 @@ namespace vkgen::Generator {
         Shady,
         Fredemmott,
         Mtk,
-    };
-
-    struct CommandClassification {
-        enum class Pattern : uint8_t {
-            Void,           // void return, no error checking
-            ResultVoid,     // VkResult return, no output data
-            ResultCreate,   // VkResult return, creates handle via out-param
-            ResultCreateArray, // VkResult return, creates N handles; output array's len references a uint32_t count param
-            VoidOutParam,   // void return, fills struct via out-param
-            Enumerate,      // two-call enumerate pattern
-            ResultOutParam, // VkResult + non-handle out-param
-            Other,          // non-standard return type — pass-through
-        };
-        Pattern pattern;
-        int implicit_param_idx = -1;     // device/instance to substitute with global
-        std::string_view implicit_global;              // implicit parameter replacement: "detail::_device" or "detail::_instance"
-        int output_param_idx = -1;       // handle or struct output
-        int allocator_param_idx = -1;    // VkAllocationCallbacks*
-        int count_param_idx = -1;        // for enumerate
-        int array_param_idx = -1;        // for enumerate
-        bool output_has_destroy = false; // ResultCreate: output handle has destroy() overload
-
-        // Input array pairs: non-pointer uint32_t count + const T* with len referencing it (1:1 only)
-        static constexpr int max_input_arrays = 8;
-        struct InputArrayPair { int count_idx; int array_idx; };
-        InputArrayPair input_arrays[max_input_arrays] = {};
-        int input_array_count = 0;
-
-        bool is_input_count(int idx) const {
-            for (int k = 0; k < input_array_count; ++k)
-                if (input_arrays[k].count_idx == idx) return true;
-            return false;
-        }
-        bool is_input_array(int idx) const {
-            for (int k = 0; k < input_array_count; ++k)
-                if (input_arrays[k].array_idx == idx) return true;
-            return false;
-        }
     };
 
     // Options controlling how generate_wrapper_params / generate_call_args /
@@ -646,10 +665,10 @@ namespace vkgen::Generator {
         // Returns the singular form, preserving any trailing all-uppercase extension suffix
         static std::string singularize(std::string_view name);
 
+        static Extension get_and_remove_extension_name(std::string_view& name);
     protected:
         static void transform_from_upper_constant(std::string& name, size_t start_pos, bool first_is_upper);
         static Extension get_and_remove_extension_constant(std::string_view& name);
-        static Extension get_and_remove_extension_name(std::string_view& name);
     };
 
     template <typename Type>
@@ -729,7 +748,7 @@ namespace vkgen::Generator {
         void generate_command_wrapper(Command& cmd, std::ofstream& file);
         void generate_funcpointer(Type& type, std::ofstream& file);
 
-        CommandClassification classify_command(const Command& cmd);
+        CommandClassification classify_command(Command& cmd);
         void detect_input_arrays(const Command& cmd, CommandClassification& cc);
         bool has_pnext(std::string_view struct_type_name);
 
@@ -801,9 +820,10 @@ namespace vkgen::Generator {
         // Handles extension-extension dependencies and checks the "allowlist"
         void add_extension_with_deps(xml::Element& ext, xml::Dom& dom);
 
+        void generate_modules(std::ofstream& modules, const std::vector<HandleInfo>& handles);
     public:
         Generator() {}
-        void generate(vkgen::xml::Dom& dom, std::ofstream& header, std::ofstream& source, Config& config);
+        void generate(vkgen::xml::Dom& dom, std::ofstream& header, std::ofstream& source, std::ofstream& modules, const Config& config);
 
         // TODO: In future, these should be parsed to Generator structures and not used at all.
         //       Or they should be moved to some cache structure.

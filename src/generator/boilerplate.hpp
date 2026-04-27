@@ -3,7 +3,7 @@
  * @author Jaroslav Hucel (xhucel00@vutbr.cz)
  * @brief Pregenerated boilerplate code for the generator.
  * @date Created: 23. 03. 2026
- * @date Modified: 26. 04. 2026
+ * @date Modified: 27. 04. 2026
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -212,15 +212,15 @@ namespace boilerplate {
         "void unloadLib() noexcept;\n"
         "void cleanUp() noexcept;\n\n"sv;
 
-    // author: PCJohn (peciva at fit.vut.cz)
+    // original author: PCJohn (peciva at fit.vut.cz), added inline for modules support
     static constexpr std::string_view VERSION_HELPERS =
         "constexpr uint32_t makeApiVersion(uint32_t variant, uint32_t major, uint32_t minor, uint32_t patch) { return (variant << 29) | (major << 22) | (minor << 12) | patch; }\n"
         "constexpr uint32_t makeApiVersion(uint32_t major, uint32_t minor, uint32_t patch) { return (major << 22) | (minor << 12) | patch; }\n"
-        "constexpr const uint32_t ApiVersion10 = makeApiVersion(0, 1, 0, 0);\n"
-        "constexpr const uint32_t ApiVersion11 = makeApiVersion(0, 1, 1, 0);\n"
-        "constexpr const uint32_t ApiVersion12 = makeApiVersion(0, 1, 2, 0);\n"
-        "constexpr const uint32_t ApiVersion13 = makeApiVersion(0, 1, 3, 0);\n"
-        "constexpr const uint32_t ApiVersion14 = makeApiVersion(0, 1, 4, 0);\n"
+        "inline constexpr const uint32_t ApiVersion10 = makeApiVersion(0, 1, 0, 0);\n"
+        "inline constexpr const uint32_t ApiVersion11 = makeApiVersion(0, 1, 1, 0);\n"
+        "inline constexpr const uint32_t ApiVersion12 = makeApiVersion(0, 1, 2, 0);\n"
+        "inline constexpr const uint32_t ApiVersion13 = makeApiVersion(0, 1, 3, 0);\n"
+        "inline constexpr const uint32_t ApiVersion14 = makeApiVersion(0, 1, 4, 0);\n"
         "constexpr uint32_t apiVersionVariant(uint32_t version) { return version >> 29; }\n"
         "constexpr uint32_t apiVersionMajor(uint32_t version) { return (version >> 22) & 0x7f; }\n"
         "constexpr uint32_t apiVersionMinor(uint32_t version) { return (version >> 12) & 0x3ff; }\n"
@@ -652,6 +652,52 @@ namespace boilerplate {
         "    }\n"
         "    return true;\n"
         "}\n";
+
+
+    // TODO: handle dynamically
+    static const std::array MODULE_EXPORTS = {
+        "Flags"sv,
+        "vector"sv,
+        "iterator"sv,
+        "span"sv,
+        "loadLib"sv,
+        "unloadLib"sv,
+        "cleanUp"sv,
+        "initInstance"sv,
+        "initDevice"sv,
+        "library"sv,
+        "instance"sv,
+        "physicalDevice"sv,
+        "device"sv,
+        "enumerateInstanceVersion"sv,
+        "apiVersionVariant"sv,
+        "apiVersionMajor"sv,
+        "apiVersionMinor"sv,
+        "apiVersionPatch"sv,
+        "makeApiVersion"sv,
+        "ApiVersion10"sv,
+        "ApiVersion11"sv,
+        "ApiVersion12"sv,
+        "ApiVersion13"sv,
+        "ApiVersion14"sv,
+        "isExtensionSupported"sv,
+        "destroyDevice"sv,
+        "destroyInstance"sv,
+        "getInstanceProcAddr"sv,
+        "getDeviceProcAddr"sv,
+        "getGlobalProcAddr"sv,
+        "initInstancePFNs"sv,
+        "initDevicePFNs"sv,
+        "operator|"sv,
+    };
+
+    static const std::array ERROR_MODULE_EXPORTS = {
+        "checkForSuccessValue"sv,
+        "checkSuccess"sv,
+        "throwResultExceptionWithMessage"sv,
+        "throwResultException"sv,
+        "Error"sv,
+    };
 
     inline std::ostream& print(std::ostream& os, std::string_view text, int indent = 0) {
         return os << std::string(indent * 4, ' ') << text;

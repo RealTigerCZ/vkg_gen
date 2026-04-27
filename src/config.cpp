@@ -4,7 +4,7 @@
  * @brief Config file parser (key=value format)
  *
  * @date Created:  11. 04. 2026
- * @date Modified: 18. 04. 2026
+ * @date Modified: 27. 04. 2026
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -123,7 +123,9 @@ void Config::load_from_file(const std::string& path) {
         if NON_EMPTY_FIELD(xml_path)
         else if NON_EMPTY_FIELD(header_path)
         else if NON_EMPTY_FIELD(source_path)
-        else if (key == "namespace") { if (value.empty()) throw ConfigError(path, line_num, "Field 'namespace' cannot be empty"); namespace_name = value; }
+        else if NON_EMPTY_FIELD(detail_namespace)
+        else if (key == "namespace") { namespace_name = value; } // Can be empty
+        else if (key == "modules_path") { modules_path = value; } // Can be empty
 
 #undef NON_EMPTY_FIELD
         // Version
@@ -277,9 +279,12 @@ static constexpr std::string_view DEFAULT_CONFIG =
 "\n"
 "# If provided with empty string, namespace wont be generated, commenting this out will generate default namespace\n"
 "namespace = vk\n"
+"details_namespace = detail\n"
 "header_path = vkg.hpp\n"
 "source_path = vkg.cpp\n"
-"xml_path = vk.xml\n";
+"xml_path = vk.xml\n"
+"# If provided with empty string, modules file wont be generated, commenting this out will generate default module file\n"
+"modules_path = vkg.cppm\n";
 
 
 void Config::save_to_file(const std::string& path) {
@@ -339,7 +344,7 @@ CliResult handle_cli(Config& config, int argc, char* argv[]) {
             return CliResult::ReturnSuccess;
         } else if (std::strcmp(argv[i], "--ext") == 0) {
             if (i + 1 >= argc) throw ConfigError("--ext requires a path argument");
-            config.extension_filter_mode = ExtensionFilterMode::WhiteList; // default: All extension, --ext provided: only provided extensions 
+            config.extension_filter_mode = ExtensionFilterMode::WhiteList; // default: All extension, --ext provided: only provided extensions
             std::string err = config.parse_extensions(argv[++i]);
             if (!err.empty())
                 throw ConfigError("Invalid extension: " + err);
