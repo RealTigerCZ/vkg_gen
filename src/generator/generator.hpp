@@ -236,6 +236,7 @@ namespace vkgen::Generator {
     void trim_trailing_ws(std::string_view& s);
     void trim_ws(std::string_view& s);
 
+    class Type;
 
     struct Member {
         enum class LimitType : uint16_t {
@@ -317,12 +318,7 @@ namespace vkgen::Generator {
         std::string_view comment;
         bool is_standalone_comment = false;
 
-        enum class ParentType : uint8_t {
-            Struct,
-            Union
-        };
-
-        Member(const vkgen::xml::Element& elem, vkgen::Arena& arena, ParentType parent_type, bool is_standalone_comment = false);
+        Member(const vkgen::xml::Element& elem, vkgen::Arena& arena, Type& parent, bool is_standalone_comment = false);
 
         LimitType limit_type_from_string(std::string_view s);
     };
@@ -335,6 +331,8 @@ namespace vkgen::Generator {
         // it out and passing it to the API.
 
         bool allow_duplicate = false; // pNext can include multiple structures of this type.
+        bool has_pNext = false; // pNext is present in this structure
+        bool pNext_is_const = false; // pNext is a const pointer, invalid if has_pNext is false
 
         std::string_view struct_extends; // Lists parent structures which this structure may extend
         // via the pNext chain of the parent. When present it

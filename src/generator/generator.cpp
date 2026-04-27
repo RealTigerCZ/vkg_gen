@@ -322,9 +322,9 @@ void Type::parse_struct(const vkgen::xml::Element& elem, vkgen::Arena& arena) {
         auto& ch = child->asElement();
 
         if (ch.tag == "comment")
-            struct_->members.emplace_back(Member(ch, arena, Member::ParentType::Struct, true));
+            struct_->members.emplace_back(Member(ch, arena, *this, true));
         else if (ch.tag == "member")
-            struct_->members.emplace_back(Member(ch, arena, Member::ParentType::Struct));
+            struct_->members.emplace_back(Member(ch, arena, *this));
         else {
             throw my_error{ "Unknown child element: " + std::string(ch.tag) };
         }
@@ -343,9 +343,9 @@ void Type::parse_union(const vkgen::xml::Element& elem, vkgen::Arena& arena) {
         auto& ch = child->asElement();
 
         if (ch.tag == "comment")
-            union_->members.emplace_back(Member(ch, arena, Member::ParentType::Union, true));
+            union_->members.emplace_back(Member(ch, arena, *this, true));
         else if (ch.tag == "member")
-            union_->members.emplace_back(Member(ch, arena, Member::ParentType::Union));
+            union_->members.emplace_back(Member(ch, arena, *this));
         else {
             throw my_error{ "Unknown child element: " + std::string(ch.tag) };
         }
@@ -743,9 +743,10 @@ Member::LimitType Member::limit_type_from_string(std::string_view s) {
 #undef LIMIT
 }
 
-Member::Member(const vkgen::xml::Element& e, vkgen::Arena& arena, ParentType parent_type, bool is_standalone_comment) :
+Member::Member(const vkgen::xml::Element& e, vkgen::Arena& arena, Type& parent, bool is_standalone_comment) :
     is_standalone_comment(is_standalone_comment) {
-    UNUSED(parent_type);
+    assert(parent.category == Type::Category::Struct || parent.category == Type::Category::Union);
+
     if (is_standalone_comment) {
         assert(e.tag == "comment");
         comment = e.children[0]->asText();
@@ -801,6 +802,19 @@ Member::Member(const vkgen::xml::Element& e, vkgen::Arena& arena, ParentType par
     // CHECK: in vulkan spec it's said to be optional
     if (type_param.type.empty())
         throw my_error{ "Member must have a type!" };
+
+    if (parent.category == Type::Category::Struct && parent.api.is_vulkan() && api.is_vulkan()) {
+        if (type_param.name == "sType" && type_param.type == "VkStructureType") {
+            assert(is_standalone_comment == false && parent.alias.empty());
+
+        } else if (type_param.name == "pNext" && type_param.type == "void") {
+            assert(is_standalone_comment == false && parent.alias.empty());
+            parent.struct_->has_pNext = true;
+            parent.struct_->pNext_is_const = type_param.is_const();
+        }
+    }
+
+    assert(values.empty() || !api.is_vulkan() || (type_param.name == "sType" && type_param.type == "VkStructureType"));
 
 }
 
@@ -1283,14 +1297,21 @@ void vkgen::Generator::Generator::generate_member(Member& member, std::ofstream&
     }
 
     // TODO: this is a hack, because the flag class is cant be used with bitselect, C++ does not allow it
-    if (config.generate_flags_class && member.type_param.type.starts_with("Vk") && std::ranges::contains(member.type_param.array_extensions, TypeParam::ArrayExtension::Type::BitSelect, &TypeParam::ArrayExtension::type)) {
+    if (config.generate_flags_class && member.type_param.type.starts_with("Vk") &&
+        std::ranges::contains(member.type_param.array_extensions, TypeParam::ArrayExtension::Type::BitSelect, &TypeParam::ArrayExtension::type)) {
+
         TypeEnum::Bitwidth width = enums.find(types.find(member.type_param.type)->second.bitvalues)->second.bitwidth;
         sv old_type = member.type_param.type;
         member.type_param.type = to_string_type(width);
         file << "    " << member.type_param.stringify() << ';' << LineComment{ member.type_param.comment, false } << "// class Flags<> can't be subscribted with ':' \n";
         member.type_param.type = old_type;
     } else {
-        file << "    " << member.type_param.stringify() << ';' << LineComment{ member.type_param.comment, false } << '\n';
+        file << "    " << member.type_param.stringify();
+        if (!member.values.empty())
+            file << " = " << (config.generate_enums_classes ? "StructureType::" : "") <<
+            NameTranslator::from_enum_value(member.values, NameTranslator::transform_enum_name(member.type_param.type, false), false);
+
+        file << ';' << LineComment{ member.type_param.comment, false } << '\n';
     }
 
 }
@@ -1316,6 +1337,14 @@ void Generator::generate_struct_union(const Type& type, std::ofstream& file, sv 
     for (auto& member : type.struct_->members) {
         generate_member(member, file, struct_union, type.name);
     }
+
+    // Add the setPNext utility function
+    if (struct_union == "struct" && type.struct_->has_pNext) {
+        file << "\n";
+        file << "    constexpr " << NameTranslator::from_type_name(type.name) << "& setPNext(const void* pNext_) noexcept {";
+        file << "pNext = " << (type.struct_->pNext_is_const ? "pNext_" : "const_cast<void*>(pNext_)") << "; return *this; }\n";
+    }
+
     file << "};\n\n";
 }
 
@@ -1785,12 +1814,8 @@ bool Generator::is_device_level_command(const Command& cmd) const {
 bool Generator::has_pnext(sv struct_type_name) {
     auto it = types.find(struct_type_name);
     assert(it != types.end());
-    auto& t = it->second;
-    if (t.category != Type::Category::Struct && t.category != Type::Category::Union) return false;
-    for (auto& m : t.struct_->members) {
-        if (m.type_param.name == "pNext") return true;
-    }
-    return false;
+    if (it->second.category != Type::Category::Struct) return false;
+    return it->second.struct_->has_pNext;
 }
 
 // Emits a single parameter in C++ wrapper style:
