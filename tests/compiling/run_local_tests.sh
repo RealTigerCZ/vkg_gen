@@ -89,11 +89,16 @@ for CONFIG in "${CONFIGS[@]}"; do
         # 5. Verify against Golden Outputs (relative to BUILD_DIR)
         diff -q vkg.hpp ../golden/vkg.hpp
         diff -q vkg.cpp ../golden/vkg.cpp
+        diff -q vkg.cppm ../golden/vkg.cppm
 
         # 6. Execute Test Program
         cp ../golden/vkg_comp.cpp .
         ninja vkg_comp -j $NINJA_JOBS
         ./vkg_comp
+
+        cp ../golden/modules.cpp .
+        ninja modules -j $NINJA_JOBS
+        ./modules_test
 
     ) > "$LOG_FILE" 2>&1; then
         echo -e "${GREEN}✅ $CONFIG Passed!${NC}"

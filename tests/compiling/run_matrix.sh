@@ -104,6 +104,7 @@ docker run --rm -v "$ROOT_DIR:/workspace" -w /workspace/tests/compiling vkg_gen_
 
             diff -q vkg.hpp ../golden/vkg.hpp || exit 1
             diff -q vkg.cpp ../golden/vkg.cpp || exit 1
+            diff -q vkg.cppm ../golden/vkg.cppm || exit 1
 
             echo -e "${CYAN}🧪 Validating compilation of generated files...${NC}"
 
