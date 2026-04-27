@@ -3972,6 +3972,7 @@ void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& so
         header << "\n} // namespace " << config.namespace_name << "\n";
 
     source << "#include \"" << config.header_path << "\"\n";
+    source << boilerplate::CPP_INCLUDES;
 
     if (!config.namespace_name.empty())
         source << "namespace " << config.namespace_name << " {\n\n";
