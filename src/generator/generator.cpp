@@ -3158,9 +3158,7 @@ void Generator::add_extension_with_deps(Element& ext, xml::Dom& dom) {
     }
 
     // Direct exclusion via filter mode
-    bool listed = config.extension_names.contains(std::string(ext_name));
-    bool excluded = (config.extension_filter_mode == ExtensionFilterMode::BlackList) ? listed : !listed;
-    if (excluded) {
+    if ((config.extension_filter_mode == ExtensionFilterMode::BlackList) && config.extension_names.contains(std::string(ext_name))) {
         skipped_extensions.insert(&ext);
         return;
     }
