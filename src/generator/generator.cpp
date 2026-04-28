@@ -3,7 +3,7 @@
  * @author Jaroslav Hucel (xhucel00@vutbr.cz)
  * @brief Vulkan registry data model and code generator implementation.
  * @date Created: 12. 11. 2025
- * @date Modified: 27. 04. 2026
+ * @date Modified: 28. 04. 2026
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -1652,6 +1652,7 @@ CommandClassification Generator::classify_command(Command& cmd) {
                     cc.count_param_idx = i;
                     cc.array_param_idx = j;
                     cc.pattern = Pattern::Enumerate;
+                    cmd.overloads |= Overloads::ThrowNoThrow;
                     return cc;
                 }
             }
@@ -1749,11 +1750,11 @@ CommandClassification Generator::classify_command(Command& cmd) {
     case Pattern::ResultOutParam:  // Throw/NoThrow split
     case Pattern::Enumerate:       // Throw/NoThrow split
     case Pattern::ResultCreate:    // ResultCreate's Unique bit is conditional on output_has_destroy — set later in generate().
-        cmd.overloads = Overloads::ThrowNoThrow;
+        cmd.overloads |= Overloads::ThrowNoThrow;
         break;
 
     case Pattern::ResultCreateArray: // Throw/NoThrow + always Unique; Singular when there's an input array pair.
-        cmd.overloads = Overloads::ThrowNoThrow | Overloads::Unique;
+        cmd.overloads |= Overloads::ThrowNoThrow | Overloads::Unique;
         if (cc.input_array_count > 0)
             cmd.overloads |= Overloads::Singular;
         break;
@@ -3907,8 +3908,9 @@ void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& so
             // Skip aliases that point to destroy commands (already have destroy() overloads)
             if (destroy_commands.contains(ca->alias)) continue;
 
-            std::string alias_base = NameTranslator::from_command_name(ca->name).new_name;
-            std::string target_base = NameTranslator::from_command_name(ca->alias).new_name;
+            auto [alias_unique, alias_base] = NameTranslator::unique_command_name(ca->name);
+            auto [target_unique, target_base] = NameTranslator::unique_command_name(ca->alias);
+
 
             auto emit_alias = [&](sv a_base, sv t_base, sv a_suffix, sv t_suffix) {
                 header << "inline constexpr auto& " << a_base << a_suffix
@@ -3917,17 +3919,13 @@ void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& so
 
             // Mirrors the gating in generate_wrapper_* emitters so every generated
             // target symbol gets a matching alias and none reference missing ones.
-            auto emit_throw_nothrow_default = [&](sv a_base, sv t_base, sv a_pfx, sv t_pfx) {
+            auto emit_throw_nothrow_default = [&](sv a_base, sv t_base) {
                 if (should_emit_throw())
-                    emit_alias(a_base, t_base,
-                        std::string(a_pfx) + (should_emit_default() ? "_throw" : ""),
-                        std::string(t_pfx) + (should_emit_default() ? "_throw" : ""));
+                    emit_alias(a_base, t_base, (should_emit_default() ? "_throw" : ""), (should_emit_default() ? "_throw" : ""));
                 if (should_emit_nothrow())
-                    emit_alias(a_base, t_base,
-                        std::string(a_pfx) + (should_emit_default() ? "_noThrow" : ""),
-                        std::string(t_pfx) + (should_emit_default() ? "_noThrow" : ""));
+                    emit_alias(a_base, t_base, (should_emit_default() ? "_noThrow" : ""), (should_emit_default() ? "_noThrow" : ""));
                 if (should_emit_default())
-                    emit_alias(a_base, t_base, a_pfx, t_pfx);
+                    emit_alias(a_base, t_base, "", "");
                 };
 
             // Fall back to shorthand-only alias when target command isn't in the map.
@@ -3967,25 +3965,31 @@ void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& so
             case Pattern::ResultVoid:
             case Pattern::ResultOutParam:
             case Pattern::Enumerate:
-                emit_throw_nothrow_default(alias_base, target_base, "", "");
+                emit_throw_nothrow_default(alias_base, target_base);
                 break;
             case Pattern::ResultCreate:
-                emit_throw_nothrow_default(alias_base, target_base, "", "");
+                emit_throw_nothrow_default(alias_base, target_base);
                 if (cc.output_has_destroy)
-                    emit_throw_nothrow_default(alias_base, target_base, "Unique", "Unique");
+                    emit_throw_nothrow_default(alias_unique, target_unique);
                 break;
             case Pattern::ResultCreateArray: {
-                    auto emit_both_forms = [&](sv a, sv t) {
-                        emit_throw_nothrow_default(a, t, "", "");
-                        emit_throw_nothrow_default(a, t, "Unique", "Unique");
-                        };
-                    emit_both_forms(alias_base, target_base);
+                    emit_throw_nothrow_default(alias_base, target_base);
+                    emit_throw_nothrow_default(alias_unique, target_unique);
                     // Singular convenience overloads: createGraphicsPipelines -> createGraphicsPipeline
                     if (cc.input_array_count > 0) {
-                        std::string singular_alias = NameTranslator::singularize(alias_base);
-                        std::string singular_target = NameTranslator::singularize(target_base);
-                        if (singular_alias != alias_base && singular_target != target_base)
-                            emit_both_forms(singular_alias, singular_target);
+                        const auto singular_names = [](sv alias_base) {
+                            std::string singular_name = NameTranslator::singularize(alias_base);
+                            sv singular_stem = singular_name;
+                            Extension singular_ext = NameTranslator::get_and_remove_extension_name(singular_stem);
+                            std::string singular_unique_name = std::string(singular_stem) + "Unique"
+                                + (singular_ext != Extension::None ? std::string(to_string(singular_ext)) : "");
+                            return std::make_pair(std::move(singular_unique_name), std::move(singular_name));
+                            };
+
+                        auto [singular_alias_unique, singular_alias] = singular_names(alias_base);
+                        auto [singular_target_unique, singular_target] = singular_names(target_base);
+                        emit_throw_nothrow_default(singular_alias, singular_target);
+                        emit_throw_nothrow_default(singular_alias_unique, singular_target_unique);
                     }
                     break;
                 }

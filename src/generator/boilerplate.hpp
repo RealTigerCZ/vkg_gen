@@ -3,7 +3,7 @@
  * @author Jaroslav Hucel (xhucel00@vutbr.cz)
  * @brief Pregenerated boilerplate code for the generator.
  * @date Created: 23. 03. 2026
- * @date Modified: 27. 04. 2026
+ * @date Modified: 28. 04. 2026
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -767,7 +767,11 @@ namespace boilerplate {
         "unloadLib"sv,
         "cleanUp"sv,
         "initInstance"sv,
+        "initInstance_throw"sv,
+        "initInstance_noThrow"sv,
         "initDevice"sv,
+        "initDevice_throw"sv,
+        "initDevice_noThrow"sv,
         "library"sv,
         "instance"sv,
         "physicalDevice"sv,
@@ -800,6 +804,7 @@ namespace boilerplate {
         "throwResultExceptionWithMessage"sv,
         "throwResultException"sv,
         "Error"sv,
+        "VkgError"sv,
     };
 
     inline std::ostream& print(std::ostream& os, std::string_view text, int indent = 0) {
