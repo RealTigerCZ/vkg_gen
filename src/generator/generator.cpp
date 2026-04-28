@@ -2280,7 +2280,7 @@ void Generator::generate_wrapper_result_create_array(const Command& cmd, const C
             file << "inline Result " << v.fn_name << suffix;
             generate_wrapper_params(cmd, cc, file,
                 WrapperEmitOptions{ .output = OM::Trailing, .array = v.array_mode, .output_trailing_decl = v.trailing_decl });
-            file << " noexcept { for (uint32_t i = 0; i < " << size_expr << "; i++) " << out_name
+            file << " noexcept { for (uint32_t i = 0; i < " << out_name << ".size()" << "; i++) " << out_name
                 << "[i].reset(); if (!" << out_name << ".alloc_noThrow(" << size_expr
                 << ")) return Result::eErrorOutOfHostMemory; return funcs." << cmd.name;
             generate_call_args(cmd, cc, file, WrapperEmitOptions{ .array = v.array_mode, .output_expr = v.call_output_expr });
@@ -3353,10 +3353,10 @@ void vkgen::Generator::Generator::generate_modules(std::ofstream& modules, const
 
 
     {
-        bool emit_throw = config.exception_behavior != ExceptionBehavior::NoThrowOnly;
-        bool emit_nothrow = config.exception_behavior != ExceptionBehavior::ThrowOnly;
-        bool emit_default = config.exception_behavior == ExceptionBehavior::BothWithDefaultThrow
+        bool emit_overloads = config.exception_behavior == ExceptionBehavior::BothWithDefaultThrow
             || config.exception_behavior == ExceptionBehavior::BothWithDefaultNoThrow;
+        bool emit_default = config.exception_behavior != ExceptionBehavior::BothWithoutDefault;
+
 
         // Destroy/free/release commands are skipped from wrapper emission (handled via the
         // generic destroy() overloads), so their overloads bits were never set — skip them too.
@@ -3377,8 +3377,10 @@ void vkgen::Generator::Generator::generate_modules(std::ofstream& modules, const
                     modules << vk_prefix << name << ";\n";
                     return;
                 }
-                if (emit_throw)   modules << vk_prefix << name << "_throw;\n";
-                if (emit_nothrow) modules << vk_prefix << name << "_noThrow;\n";
+                if (emit_overloads) {
+                    modules << vk_prefix << name << "_throw;\n";
+                    modules << vk_prefix << name << "_noThrow;\n";
+                }
                 if (emit_default) modules << vk_prefix << name << ";\n";
                 };
 
