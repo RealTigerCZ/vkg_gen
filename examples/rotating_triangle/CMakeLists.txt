@@ -1,9 +1,12 @@
-cmake_minimum_required(VERSION 3.20)
+cmake_minimum_required(VERSION 3.21)
 project(vkg_triangle CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+
+# Pull in vkgen + the vkg_generate() / vkg_fetch_vk_xml() helpers.
+add_subdirectory(../.. vkg_build)
 
 find_package(Vulkan REQUIRED)
 
@@ -21,16 +24,19 @@ if(NOT glfw3_FOUND)
     FetchContent_MakeAvailable(glfw)
 endif()
 
-add_executable(vkg_triangle
-    vkg_triangle.cpp
-    vkg.cpp
+# Pin vk.xml to the revision this example was last tested against.
+set(VKG_DEFAULT_VK_XML_URL
+    "https://raw.githubusercontent.com/KhronosGroup/Vulkan-Docs/72cd1f587fe55c80873fe6430d667056048a5113/xml/vk.xml"
+    CACHE STRING "" FORCE)
+vkg_fetch_vk_xml(VKG_TRIANGLE_XML)
+
+vkg_generate(vkg_triangle_lib
+    XML    ${VKG_TRIANGLE_XML}
+    CONFIG ${CMAKE_CURRENT_SOURCE_DIR}/triangle.cfg
 )
 
-target_link_libraries(vkg_triangle PRIVATE Vulkan::Headers glfw)
-
-if(NOT WIN32)
-    target_link_libraries(vkg_triangle PRIVATE ${CMAKE_DL_LIBS})
-endif()
+add_executable(vkg_triangle vkg_triangle.cpp)
+target_link_libraries(vkg_triangle PRIVATE vkg_triangle_lib Vulkan::Headers glfw)
 
 if(MSVC)
     target_compile_options(vkg_triangle PRIVATE /W3 /wd4996)

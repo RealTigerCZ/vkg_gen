@@ -1,14 +1,12 @@
-# TODO: this cmake should be inlinable into the build target for other projects
-
-cmake_minimum_required(VERSION 3.15) # CHECK: try other versions later
+cmake_minimum_required(VERSION 3.21) # PROJECT_IS_TOP_LEVEL
 
 set(APP_NAME vkgen)
 set(CMAKE_CXX_STANDARD 23)
 
 project(${APP_NAME})
 
-# Default to Debug build if no profile is specified
-if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+# Default to Debug build if no profile is specified (only when standalone)
+if(PROJECT_IS_TOP_LEVEL AND NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set(CMAKE_BUILD_TYPE "Debug" CACHE STRING "Choose the type of build (Debug, RelWithDebugInfo, Release)" FORCE)
 endif()
 
@@ -25,10 +23,16 @@ set(APP_SOURCES
 set(APP_INCLUDES
    )
 
-option(SANITIZE "Enable Address and Undefined Behavior Sanitizers" OFF)
+if(PROJECT_IS_TOP_LEVEL)
+    option(SANITIZE "Enable Address and Undefined Behavior Sanitizers" OFF)
+endif()
 
 # target
 add_executable(${APP_NAME} ${APP_SOURCES} ${APP_INCLUDES})
+
+# Expose the vkg_generate() helper to this build and to any parent
+# project that pulled us in via add_subdirectory().
+include(${CMAKE_CURRENT_LIST_DIR}/cmake/vkgGenerate.cmake)
 
 if(MSVC)
     # MSVC (Windows) specific base flags
@@ -70,6 +74,7 @@ else()
     endif()
 endif()
 
+if(PROJECT_IS_TOP_LEVEL)
 # Debug target to check if vkg.hpp is compilable
 if (MSVC)
     add_custom_target(vkg_comp COMMAND echo "Compiling vkg.hpp manually with MSVC is not supported")
@@ -104,3 +109,4 @@ elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
         COMMENT "Compiling vkg.cppm and modules.cpp with Clang to test C++20 modules"
     )
 endif()
+endif() # PROJECT_IS_TOP_LEVEL
