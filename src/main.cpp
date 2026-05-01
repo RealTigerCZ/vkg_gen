@@ -3,7 +3,7 @@
  * @author Jaroslav Hucel (xhucel00@vutbr.cz)
  * @brief Entry point; loads config, parses vk.xml, and runs the generator.
  * @date Created: 30. 07. 2025
- * @date Modified: 18. 04. 2026
+ * @date Modified: 27. 04. 2026
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -67,9 +67,12 @@ int main(int argc, char* argv[]) {
 
         std::ofstream header = open_or_throw(config.header_path, std::ios::out);
         std::ofstream source = open_or_throw(config.source_path, std::ios::out);
+        std::ofstream modules;
+        if (!config.modules_path.empty())
+            modules = open_or_throw(config.modules_path, std::ios::out);
 
         vkgen::Generator::Generator generator;
-        generator.generate(dom, header, source, config);
+        generator.generate(dom, header, source, modules, config);
     }
     catch (const xml::Error& e) {
         std::cerr << e.what() << std::endl;

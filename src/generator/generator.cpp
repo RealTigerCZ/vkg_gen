@@ -1,9 +1,9 @@
 /**
  * @file generator.hpp
  * @author Jaroslav Hucel (xhucel00@vutbr.cz)
- * @brief
+ * @brief Vulkan registry data model and code generator implementation.
  * @date Created: 12. 11. 2025
- * @date Modified: 26. 04. 2026
+ * @date Modified: 28. 04. 2026
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -322,9 +322,9 @@ void Type::parse_struct(const vkgen::xml::Element& elem, vkgen::Arena& arena) {
         auto& ch = child->asElement();
 
         if (ch.tag == "comment")
-            struct_->members.emplace_back(Member(ch, arena, Member::ParentType::Struct, true));
+            struct_->members.emplace_back(Member(ch, arena, *this, true));
         else if (ch.tag == "member")
-            struct_->members.emplace_back(Member(ch, arena, Member::ParentType::Struct));
+            struct_->members.emplace_back(Member(ch, arena, *this));
         else {
             throw my_error{ "Unknown child element: " + std::string(ch.tag) };
         }
@@ -343,9 +343,9 @@ void Type::parse_union(const vkgen::xml::Element& elem, vkgen::Arena& arena) {
         auto& ch = child->asElement();
 
         if (ch.tag == "comment")
-            union_->members.emplace_back(Member(ch, arena, Member::ParentType::Union, true));
+            union_->members.emplace_back(Member(ch, arena, *this, true));
         else if (ch.tag == "member")
-            union_->members.emplace_back(Member(ch, arena, Member::ParentType::Union));
+            union_->members.emplace_back(Member(ch, arena, *this));
         else {
             throw my_error{ "Unknown child element: " + std::string(ch.tag) };
         }
@@ -743,9 +743,10 @@ Member::LimitType Member::limit_type_from_string(std::string_view s) {
 #undef LIMIT
 }
 
-Member::Member(const vkgen::xml::Element& e, vkgen::Arena& arena, ParentType parent_type, bool is_standalone_comment) :
+Member::Member(const vkgen::xml::Element& e, vkgen::Arena& arena, Type& parent, bool is_standalone_comment) :
     is_standalone_comment(is_standalone_comment) {
-    UNUSED(parent_type);
+    assert(parent.category == Type::Category::Struct || parent.category == Type::Category::Union);
+
     if (is_standalone_comment) {
         assert(e.tag == "comment");
         comment = e.children[0]->asText();
@@ -801,6 +802,19 @@ Member::Member(const vkgen::xml::Element& e, vkgen::Arena& arena, ParentType par
     // CHECK: in vulkan spec it's said to be optional
     if (type_param.type.empty())
         throw my_error{ "Member must have a type!" };
+
+    if (parent.category == Type::Category::Struct && parent.api.is_vulkan() && api.is_vulkan()) {
+        if (type_param.name == "sType" && type_param.type == "VkStructureType") {
+            assert(is_standalone_comment == false && parent.alias.empty());
+
+        } else if (type_param.name == "pNext" && type_param.type == "void") {
+            assert(is_standalone_comment == false && parent.alias.empty());
+            parent.struct_->has_pNext = true;
+            parent.struct_->pNext_is_const = type_param.is_const();
+        }
+    }
+
+    assert(values.empty() || !api.is_vulkan() || (type_param.name == "sType" && type_param.type == "VkStructureType"));
 
 }
 
@@ -1164,7 +1178,7 @@ void Generator::generate_enum(TypeEnum& e, std::ofstream& file) {
 
     if (e.type == TypeEnum::Type::Constants) {
         for (auto& item : e.items) {
-            file << "constexpr " << get_translated_type_name(item.constant.type) << " "
+            file << "inline constexpr " << get_translated_type_name(item.constant.type) << " "
                 << NameTranslator::from_constexpr_value(item.name) << " = " << item.constant.value << ";"
                 << LineComment{ item.comment, false } << '\n';
         }
@@ -1283,14 +1297,21 @@ void vkgen::Generator::Generator::generate_member(Member& member, std::ofstream&
     }
 
     // TODO: this is a hack, because the flag class is cant be used with bitselect, C++ does not allow it
-    if (config.generate_flags_class && member.type_param.type.starts_with("Vk") && std::ranges::contains(member.type_param.array_extensions, TypeParam::ArrayExtension::Type::BitSelect, &TypeParam::ArrayExtension::type)) {
+    if (config.generate_flags_class && member.type_param.type.starts_with("Vk") &&
+        std::ranges::contains(member.type_param.array_extensions, TypeParam::ArrayExtension::Type::BitSelect, &TypeParam::ArrayExtension::type)) {
+
         TypeEnum::Bitwidth width = enums.find(types.find(member.type_param.type)->second.bitvalues)->second.bitwidth;
         sv old_type = member.type_param.type;
         member.type_param.type = to_string_type(width);
         file << "    " << member.type_param.stringify() << ';' << LineComment{ member.type_param.comment, false } << "// class Flags<> can't be subscribted with ':' \n";
         member.type_param.type = old_type;
     } else {
-        file << "    " << member.type_param.stringify() << ';' << LineComment{ member.type_param.comment, false } << '\n';
+        file << "    " << member.type_param.stringify();
+        if (!member.values.empty())
+            file << " = " << (config.generate_enums_classes ? "StructureType::" : "") <<
+            NameTranslator::from_enum_value(member.values, NameTranslator::transform_enum_name(member.type_param.type, false), false);
+
+        file << ';' << LineComment{ member.type_param.comment, false } << '\n';
     }
 
 }
@@ -1316,6 +1337,14 @@ void Generator::generate_struct_union(const Type& type, std::ofstream& file, sv 
     for (auto& member : type.struct_->members) {
         generate_member(member, file, struct_union, type.name);
     }
+
+    // Add the setPNext utility function
+    if (struct_union == "struct" && type.struct_->has_pNext) {
+        file << "\n";
+        file << "    constexpr " << NameTranslator::from_type_name(type.name) << "& setPNext(const void* pNext_) noexcept {";
+        file << "pNext = " << (type.struct_->pNext_is_const ? "pNext_" : "const_cast<void*>(pNext_)") << "; return *this; }\n";
+    }
+
     file << "};\n\n";
 }
 
@@ -1574,12 +1603,15 @@ void vkgen::Generator::Generator::generate_command_wrapper(Command& cmd, std::of
 
 }
 
-CommandClassification Generator::classify_command(const Command& cmd) {
+CommandClassification Generator::classify_command(Command& cmd) {
     CommandClassification cc;
+    using Pattern = CommandClassification::Pattern;
+
 
     // Non-standard return type → pass-through
     if (cmd.type != "void" && cmd.type != "VkResult") {
-        cc.pattern = CommandClassification::Pattern::Other;
+        cc.pattern = Pattern::Other;
+        // cmd.overloads stays None — only the base wrapper is emitted.
         return cc;
     }
 
@@ -1619,7 +1651,8 @@ CommandClassification Generator::classify_command(const Command& cmd) {
                 if (cmd.parameters[j].len == p.type_param.name) {
                     cc.count_param_idx = i;
                     cc.array_param_idx = j;
-                    cc.pattern = CommandClassification::Pattern::Enumerate;
+                    cc.pattern = Pattern::Enumerate;
+                    cmd.overloads |= Overloads::ThrowNoThrow;
                     return cc;
                 }
             }
@@ -1640,7 +1673,7 @@ CommandClassification Generator::classify_command(const Command& cmd) {
             if (last_is_handle) {
                 cc.output_param_idx = last_idx;
                 if (cmd.type == "VkResult") {
-                    cc.pattern = CommandClassification::Pattern::ResultCreate;
+                    cc.pattern = Pattern::ResultCreate;
                     // Detect array-create: output's len references a uint32_t count param in same command
                     sv len = last.len;
                     if (!len.empty() && !len.starts_with("latexmath:") && len.find(',') == sv::npos) {
@@ -1673,20 +1706,20 @@ CommandClassification Generator::classify_command(const Command& cmd) {
                                 cc.input_arrays[cc.input_array_count++] = { cnt_idx, in_arr_idx };
                             }
                             cc.count_param_idx = cnt_idx;
-                            cc.pattern = CommandClassification::Pattern::ResultCreateArray;
+                            cc.pattern = Pattern::ResultCreateArray;
                         }
                     }
                 } else {
                     assert(cmd.type == "void");
-                    cc.pattern = CommandClassification::Pattern::VoidOutParam;
+                    cc.pattern = Pattern::VoidOutParam;
                 }
             } else if (last.type_param.type != "void" && last.type_param.type != "uint32_t") {
                 cc.output_param_idx = last_idx;
                 if (cmd.type == "void") {
-                    cc.pattern = CommandClassification::Pattern::VoidOutParam;
+                    cc.pattern = Pattern::VoidOutParam;
                 } else {
                     assert(cmd.type == "VkResult");
-                    cc.pattern = CommandClassification::Pattern::ResultOutParam;
+                    cc.pattern = Pattern::ResultOutParam;
                 }
             }
         }
@@ -1695,16 +1728,37 @@ CommandClassification Generator::classify_command(const Command& cmd) {
     // No output data — set pattern if not already determined by output detection
     if (cc.output_param_idx == -1) {
         if (cmd.type == "void") {
-            cc.pattern = CommandClassification::Pattern::Void;
+            cc.pattern = Pattern::Void;
         } else {
             assert(cmd.type == "VkResult");
-            cc.pattern = CommandClassification::Pattern::ResultVoid;
+            cc.pattern = Pattern::ResultVoid;
         }
     }
 
     // Detect 1:1 input array pairs, can be combined with other patterns
     detect_input_arrays(cmd, cc);
 
+    // Cache which overload kinds the wrappers will emit, so generate_modules can
+    // emit matching using-decls without re-classifying.
+    switch (cc.pattern) {
+
+    case Pattern::Void:         // Single base only
+    case Pattern::VoidOutParam: // Single base only
+    case Pattern::Other:        // Single base only
+        break;
+    case Pattern::ResultVoid:      // Throw/NoThrow split
+    case Pattern::ResultOutParam:  // Throw/NoThrow split
+    case Pattern::Enumerate:       // Throw/NoThrow split
+    case Pattern::ResultCreate:    // ResultCreate's Unique bit is conditional on output_has_destroy — set later in generate().
+        cmd.overloads |= Overloads::ThrowNoThrow;
+        break;
+
+    case Pattern::ResultCreateArray: // Throw/NoThrow + always Unique; Singular when there's an input array pair.
+        cmd.overloads |= Overloads::ThrowNoThrow | Overloads::Unique;
+        if (cc.input_array_count > 0)
+            cmd.overloads |= Overloads::Singular;
+        break;
+    }
     return cc;
 }
 
@@ -1761,12 +1815,8 @@ bool Generator::is_device_level_command(const Command& cmd) const {
 bool Generator::has_pnext(sv struct_type_name) {
     auto it = types.find(struct_type_name);
     assert(it != types.end());
-    auto& t = it->second;
-    if (t.category != Type::Category::Struct && t.category != Type::Category::Union) return false;
-    for (auto& m : t.struct_->members) {
-        if (m.type_param.name == "pNext") return true;
-    }
-    return false;
+    if (it->second.category != Type::Category::Struct) return false;
+    return it->second.struct_->has_pNext;
 }
 
 // Emits a single parameter in C++ wrapper style:
@@ -2230,7 +2280,7 @@ void Generator::generate_wrapper_result_create_array(const Command& cmd, const C
             file << "inline Result " << v.fn_name << suffix;
             generate_wrapper_params(cmd, cc, file,
                 WrapperEmitOptions{ .output = OM::Trailing, .array = v.array_mode, .output_trailing_decl = v.trailing_decl });
-            file << " noexcept { for (uint32_t i = 0; i < " << size_expr << "; i++) " << out_name
+            file << " noexcept { for (uint32_t i = 0; i < " << out_name << ".size()" << "; i++) " << out_name
                 << "[i].reset(); if (!" << out_name << ".alloc_noThrow(" << size_expr
                 << ")) return Result::eErrorOutOfHostMemory; return funcs." << cmd.name;
             generate_call_args(cmd, cc, file, WrapperEmitOptions{ .array = v.array_mode, .output_expr = v.call_output_expr });
@@ -2244,7 +2294,10 @@ void Generator::generate_wrapper_result_create_array(const Command& cmd, const C
     std::string singular_name = NameTranslator::singularize(name);
     if (singular_name == name) return;
 
-    std::string singular_unique_name = singular_name + "Unique";
+    sv singular_stem = singular_name;
+    Extension singular_ext = NameTranslator::get_and_remove_extension_name(singular_stem);
+    std::string singular_unique_name = std::string(singular_stem) + "Unique"
+        + (singular_ext != Extension::None ? std::string(to_string(singular_ext)) : "");
     auto& arr_param = cmd.parameters[cc.input_arrays[0].array_idx];
     std::string singular_param_name = NameTranslator::singularize(
         NameTranslator::from_input_array_name(arr_param.type_param.name).new_name);
@@ -3105,9 +3158,7 @@ void Generator::add_extension_with_deps(Element& ext, xml::Dom& dom) {
     }
 
     // Direct exclusion via filter mode
-    bool listed = config.extension_names.contains(std::string(ext_name));
-    bool excluded = (config.extension_filter_mode == ExtensionFilterMode::BlackList) ? listed : !listed;
-    if (excluded) {
+    if ((config.extension_filter_mode == ExtensionFilterMode::BlackList) && config.extension_names.contains(std::string(ext_name))) {
         skipped_extensions.insert(&ext);
         return;
     }
@@ -3156,6 +3207,243 @@ void Generator::add_extension_with_deps(Element& ext, xml::Dom& dom) {
 
     processed_extensions.insert(&ext);
     add_extension_prototype(ext, dom);
+}
+
+void vkgen::Generator::Generator::generate_modules(std::ofstream& modules, const std::vector<HandleInfo>& handles) {
+    modules << "module;\n\n";
+
+    modules << "#include \"" << config.header_path << "\"\n";
+
+    for (const auto* include : required_types.get()) {
+        if (!include || include->category != Type::Category::Include) continue;
+        if (include->name.starts_with("vk_video/"))
+            modules << "#include <" << include->name << ">\n";
+    }
+
+    modules << "\n";
+    modules << "export module vkg;\n\n";
+
+    if (!config.namespace_name.empty())
+        modules << "export namespace " << config.namespace_name << " ";
+    modules << "{\n";
+
+    std::string vk_prefix = config.namespace_name.empty() ? "    using ::" : "    using ::" + config.namespace_name + "::";
+    std::string detail_prefix = "    using ::" + config.detail_namespace;
+
+    modules << vk_prefix << "Handle;\n\n";
+
+    ProtectGuard modules_guard{ .file = modules };
+
+    // --- Handle type + aliases ---
+    for (const HandleInfo& h : handles) {
+        modules_guard.transition(h.type.protect);
+        modules << vk_prefix << NameTranslator::from_type_name(h.type.name) << ";\n";
+    }
+    modules_guard.close();
+    modules << "\n";
+
+
+    // --- UniqueHandle<T> template + aliases (only for destroyable handles) ---
+    modules << vk_prefix << "UniqueHandle;\n\n";
+    for (const HandleInfo& h : handles) {
+        if (!h.is_destroyable()) continue;
+        modules_guard.transition(h.type.protect);
+        modules << vk_prefix << "Unique" << NameTranslator::from_type_name(h.type.name) << ";\n";
+    }
+    modules_guard.close();
+    modules << "\n";
+    modules << vk_prefix << "destroy;\n\n";
+
+    for (auto& def : boilerplate::MODULE_EXPORTS) {
+        modules << vk_prefix << def << ";\n";
+    }
+
+    // --- Enums ---
+    for (TypeEnum* enum_ : required_enums.get()) {
+        if (enum_ == nullptr) continue;
+        modules_guard.transition(enum_->protect);
+        if (enum_->type == TypeEnum::Type::Constants) {
+            for (const TypeEnum::EnumItem& item : enum_->items) {
+                if (item.is_standalone_comment) continue;
+                if (item.is_alias) continue;
+                modules << vk_prefix << NameTranslator::from_constexpr_value(item.name) << ";\n";
+            }
+            continue;
+        }
+        modules << vk_prefix << NameTranslator::from_type_name(enum_->name) << ";\n";
+    }
+    modules_guard.close();
+    modules << "\n";
+
+    if (config.to_cstr_behavior != ToCstrFunction::None) {
+        modules << vk_prefix << "to_cstr;\n\n";
+    }
+
+    for (Type* p : required_types.get()) {
+        if (p == nullptr) continue;
+
+        auto& type = *p;
+        if (type.category == Type::Category::Handle) continue; // already emitted above
+        modules_guard.transition(type.protect);
+
+        switch (type.category) {
+        case Type::Category::Struct: // fallthrough
+        case Type::Category::Union:  // fallthrough
+        case Type::Category::Bitmask:
+            modules << vk_prefix << NameTranslator::from_type_name(type.name) << ";\n";
+            break;
+        case Type::Category::Funcpointer: // fallthrough
+        case Type::Category::Basetype:
+            if (type.name.starts_with("Vk"))
+                modules << vk_prefix << type.name.substr(2) << ";\n";
+            else
+                modules << vk_prefix << type.name << ";\n";
+        default:
+            break;
+        }
+    }
+    modules_guard.close();
+
+    // --- PFN typedefs ---
+    for (Command* cmd : required_commands.get()) {
+        if (cmd == nullptr) continue;
+        modules_guard.transition(cmd->protect);
+        modules << vk_prefix << "PFN_" << cmd->name << ";\n";
+    }
+    modules_guard.close();
+    modules << "\n";
+
+    modules << vk_prefix << "allocator;\n";
+    modules << vk_prefix << "setAllocator;\n\n";
+
+    // --- Error classes ---
+    if (config.exception_behavior != ExceptionBehavior::NoThrowOnly) {
+        for (auto& err : boilerplate::ERROR_MODULE_EXPORTS)
+            modules << vk_prefix << err << ";\n";
+
+        auto VkResult = enums.at("VkResult");
+        auto enum_name = NameTranslator::transform_enum_name("VkResult", false);
+
+        for (auto& item : VkResult.items) {
+            if (item.is_alias || item.is_standalone_comment) continue;
+
+            auto translated = NameTranslator::from_enum_value(item.name, enum_name, false);
+            sv class_name = translated.new_name;
+            // eErrorOutOfHostMemory -> OutOfHostMemoryError, eSuccess -> SuccessResult
+            if (class_name.starts_with("eError")) {
+                class_name = class_name.substr(6); // skip "eError"
+                modules << vk_prefix << class_name << "Error;\n";
+            } else {
+                assert(class_name.starts_with("e"));
+                class_name = class_name.substr(1); // skip "e"
+                modules << vk_prefix << class_name << "Result;\n";
+            }
+        }
+        modules << "\n";
+
+    }
+
+    // --- PFN aliases ---
+    if (config.generate_command_aliases) {
+        for (CommandAlias* ca : required_commands_aliases.get()) {
+            if (ca == nullptr) continue;
+            modules << vk_prefix << "PFN_" << ca->name << ";\n";
+        }
+    }
+
+
+    {
+        bool emit_overloads = config.exception_behavior == ExceptionBehavior::BothWithDefaultThrow
+            || config.exception_behavior == ExceptionBehavior::BothWithDefaultNoThrow;
+        bool emit_default = config.exception_behavior != ExceptionBehavior::BothWithoutDefault;
+
+
+        // Destroy/free/release commands are skipped from wrapper emission (handled via the
+        // generic destroy() overloads), so their overloads bits were never set — skip them too.
+        std::unordered_set<sv> destroy_commands;
+        for (const auto& h : handles) {
+            if (h.is_destroyable() && h.destroy_command)
+                destroy_commands.insert(h.destroy_command->name);
+        }
+
+        // Emits using-decls for one command's wrappers given its raw vk-prefixed name and the
+        // cached Overloads bits. Used for both regular commands and command aliases (which mirror
+        // their target command's overloads).
+        auto emit_command_overloads = [&](sv vk_name, Overloads ov, sv protect) {
+            modules_guard.transition(protect);
+            const bool gated = has(ov, Overloads::ThrowNoThrow);
+            auto emit_set = [&](sv name) {
+                if (!gated) {
+                    modules << vk_prefix << name << ";\n";
+                    return;
+                }
+                if (emit_overloads) {
+                    modules << vk_prefix << name << "_throw;\n";
+                    modules << vk_prefix << name << "_noThrow;\n";
+                }
+                if (emit_default) modules << vk_prefix << name << ";\n";
+                };
+
+            std::string base_name(NameTranslator::from_command_name(vk_name).new_name);
+            emit_set(base_name);
+
+            if (has(ov, Overloads::Unique)) {
+                auto [unique, _] = NameTranslator::unique_command_name(vk_name);
+                emit_set(unique);
+            }
+
+            if (has(ov, Overloads::Singular)) {
+                std::string singular = NameTranslator::singularize(base_name);
+                emit_set(singular);
+                if (has(ov, Overloads::Unique)) {
+                    sv stem = singular;
+                    Extension ext = NameTranslator::get_and_remove_extension_name(stem);
+                    std::string singular_unique = std::string(stem) + "Unique"
+                        + (ext != Extension::None ? std::string(to_string(ext)) : "");
+                    emit_set(singular_unique);
+                }
+            }
+            };
+
+        for (Command* cmd : required_commands.get()) {
+            if (cmd == nullptr) continue;
+            if (destroy_commands.contains(cmd->name)) continue;
+            emit_command_overloads(cmd->name, cmd->overloads, cmd->protect);
+        }
+
+        // --- Command alias wrappers ---
+        if (config.generate_command_aliases) {
+            for (CommandAlias* ca : required_commands_aliases.get()) {
+                if (ca == nullptr) continue;
+                auto it = commands.find(ca->alias);
+                if (it == commands.end()) continue;
+                const Command& target = it->second;
+                // Alias of a destroy command has no wrapper (covered by destroy() overloads).
+                if (destroy_commands.contains(target.name)) continue;
+
+                // PhysicalDevice aliases go through generate_physical_device_overload_alias,
+                // which only emits _throw/_noThrow forwarders in BothWithoutDefault mode and
+                // a single default-named forwarder otherwise.
+                bool is_pd_alias = !target.parameters.empty()
+                    && target.parameters[0].type_param.type == "VkPhysicalDevice";
+                if (is_pd_alias) {
+                    modules_guard.transition(target.protect);
+                    std::string alias_name(NameTranslator::from_command_name(ca->name).new_name);
+                    if (config.exception_behavior == ExceptionBehavior::BothWithoutDefault) {
+                        modules << vk_prefix << alias_name << "_throw;\n";
+                        modules << vk_prefix << alias_name << "_noThrow;\n";
+                    } else {
+                        modules << vk_prefix << alias_name << ";\n";
+                    }
+                    continue;
+                }
+
+                emit_command_overloads(ca->name, target.overloads, target.protect);
+            }
+        }
+    }
+
+    modules << "}\n";
 }
 
 void Generator::add_extension_prototype(Element& ext, xml::Dom& dom) {
@@ -3268,7 +3556,7 @@ void Generator::add_extension_prototype(Element& ext, xml::Dom& dom) {
 }
 
 
-void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& source, Config& config) {
+void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& source, std::ofstream& modules, const Config& config) {
     // TASK: 250226_01 Handle config in generator properly
     this->config = config;
     Deprecate::enabled = config.deprecation_behavior == DeprecationBehavior::GenerateWithDeprecationWarning;
@@ -3572,6 +3860,9 @@ void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& so
                     break;
                 }
             }
+            // ResultCreate emits Unique only when the handle is destroyable; record it.
+            if (cc.pattern == CommandClassification::Pattern::ResultCreate && cc.output_has_destroy)
+                cmd->overloads |= Overloads::Unique;
         }
         switch (cc.pattern) {
         case CommandClassification::Pattern::Void:
@@ -3617,8 +3908,9 @@ void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& so
             // Skip aliases that point to destroy commands (already have destroy() overloads)
             if (destroy_commands.contains(ca->alias)) continue;
 
-            std::string alias_base = NameTranslator::from_command_name(ca->name).new_name;
-            std::string target_base = NameTranslator::from_command_name(ca->alias).new_name;
+            auto [alias_unique, alias_base] = NameTranslator::unique_command_name(ca->name);
+            auto [target_unique, target_base] = NameTranslator::unique_command_name(ca->alias);
+
 
             auto emit_alias = [&](sv a_base, sv t_base, sv a_suffix, sv t_suffix) {
                 header << "inline constexpr auto& " << a_base << a_suffix
@@ -3627,17 +3919,13 @@ void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& so
 
             // Mirrors the gating in generate_wrapper_* emitters so every generated
             // target symbol gets a matching alias and none reference missing ones.
-            auto emit_throw_nothrow_default = [&](sv a_base, sv t_base, sv a_pfx, sv t_pfx) {
+            auto emit_throw_nothrow_default = [&](sv a_base, sv t_base) {
                 if (should_emit_throw())
-                    emit_alias(a_base, t_base,
-                        std::string(a_pfx) + (should_emit_default() ? "_throw" : ""),
-                        std::string(t_pfx) + (should_emit_default() ? "_throw" : ""));
+                    emit_alias(a_base, t_base, (should_emit_default() ? "_throw" : ""), (should_emit_default() ? "_throw" : ""));
                 if (should_emit_nothrow())
-                    emit_alias(a_base, t_base,
-                        std::string(a_pfx) + (should_emit_default() ? "_noThrow" : ""),
-                        std::string(t_pfx) + (should_emit_default() ? "_noThrow" : ""));
+                    emit_alias(a_base, t_base, (should_emit_default() ? "_noThrow" : ""), (should_emit_default() ? "_noThrow" : ""));
                 if (should_emit_default())
-                    emit_alias(a_base, t_base, a_pfx, t_pfx);
+                    emit_alias(a_base, t_base, "", "");
                 };
 
             // Fall back to shorthand-only alias when target command isn't in the map.
@@ -3677,25 +3965,31 @@ void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& so
             case Pattern::ResultVoid:
             case Pattern::ResultOutParam:
             case Pattern::Enumerate:
-                emit_throw_nothrow_default(alias_base, target_base, "", "");
+                emit_throw_nothrow_default(alias_base, target_base);
                 break;
             case Pattern::ResultCreate:
-                emit_throw_nothrow_default(alias_base, target_base, "", "");
+                emit_throw_nothrow_default(alias_base, target_base);
                 if (cc.output_has_destroy)
-                    emit_throw_nothrow_default(alias_base, target_base, "Unique", "Unique");
+                    emit_throw_nothrow_default(alias_unique, target_unique);
                 break;
             case Pattern::ResultCreateArray: {
-                    auto emit_both_forms = [&](sv a, sv t) {
-                        emit_throw_nothrow_default(a, t, "", "");
-                        emit_throw_nothrow_default(a, t, "Unique", "Unique");
-                        };
-                    emit_both_forms(alias_base, target_base);
+                    emit_throw_nothrow_default(alias_base, target_base);
+                    emit_throw_nothrow_default(alias_unique, target_unique);
                     // Singular convenience overloads: createGraphicsPipelines -> createGraphicsPipeline
                     if (cc.input_array_count > 0) {
-                        std::string singular_alias = NameTranslator::singularize(alias_base);
-                        std::string singular_target = NameTranslator::singularize(target_base);
-                        if (singular_alias != alias_base && singular_target != target_base)
-                            emit_both_forms(singular_alias, singular_target);
+                        const auto singular_names = [](sv alias_base) {
+                            std::string singular_name = NameTranslator::singularize(alias_base);
+                            sv singular_stem = singular_name;
+                            Extension singular_ext = NameTranslator::get_and_remove_extension_name(singular_stem);
+                            std::string singular_unique_name = std::string(singular_stem) + "Unique"
+                                + (singular_ext != Extension::None ? std::string(to_string(singular_ext)) : "");
+                            return std::make_pair(std::move(singular_unique_name), std::move(singular_name));
+                            };
+
+                        auto [singular_alias_unique, singular_alias] = singular_names(alias_base);
+                        auto [singular_target_unique, singular_target] = singular_names(target_base);
+                        emit_throw_nothrow_default(singular_alias, singular_target);
+                        emit_throw_nothrow_default(singular_alias_unique, singular_target_unique);
                     }
                     break;
                 }
@@ -3707,6 +4001,7 @@ void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& so
         header << "\n} // namespace " << config.namespace_name << "\n";
 
     source << "#include \"" << config.header_path << "\"\n";
+    source << boilerplate::CPP_INCLUDES;
 
     if (!config.namespace_name.empty())
         source << "namespace " << config.namespace_name << " {\n\n";
@@ -3784,6 +4079,9 @@ void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& so
 
     if (!config.namespace_name.empty())
         source << "\n} // namespace " << config.namespace_name << "\n";
+
+    if (!config.modules_path.empty())
+        generate_modules(modules, handles);
 };
 
 CommandParameter CommandParameter::from_xml(const xml::Element& elem, vkgen::Arena& arena) {

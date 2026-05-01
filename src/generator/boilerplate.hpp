@@ -3,7 +3,7 @@
  * @author Jaroslav Hucel (xhucel00@vutbr.cz)
  * @brief Pregenerated boilerplate code for the generator.
  * @date Created: 23. 03. 2026
- * @date Modified: 26. 04. 2026
+ * @date Modified: 28. 04. 2026
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -111,6 +111,19 @@ namespace boilerplate {
         "constexpr Flags<BitType> operator|(BitType bit, const Flags<BitType>& flags) noexcept { return flags | bit; }\n"sv,
     };
 
+    // author: PCJohn (peciva at fit.vut.cz)
+    static constexpr std::string_view CPP_INCLUDES = ""
+        "#include <cassert>\n"
+        "#include <cstdlib>\n"
+        "#include <string>\n"
+        "#include <filesystem>\n"
+        "#ifdef _WIN32\n"
+        "# define WIN32_LEAN_AND_MEAN  // this reduces win32 headers default namespace pollution\n"
+        "# include <windows.h>\n"
+        "#else\n"
+        "# include <dlfcn.h>\n"
+        "#endif\n"sv;
+
 
     // author: PCJohn (peciva at fit.vut.cz)
     static constexpr std::string_view UNIQUE_HANDLE_DEFINITION =
@@ -212,15 +225,15 @@ namespace boilerplate {
         "void unloadLib() noexcept;\n"
         "void cleanUp() noexcept;\n\n"sv;
 
-    // author: PCJohn (peciva at fit.vut.cz)
+    // original author: PCJohn (peciva at fit.vut.cz), added inline for modules support
     static constexpr std::string_view VERSION_HELPERS =
         "constexpr uint32_t makeApiVersion(uint32_t variant, uint32_t major, uint32_t minor, uint32_t patch) { return (variant << 29) | (major << 22) | (minor << 12) | patch; }\n"
         "constexpr uint32_t makeApiVersion(uint32_t major, uint32_t minor, uint32_t patch) { return (major << 22) | (minor << 12) | patch; }\n"
-        "constexpr const uint32_t ApiVersion10 = makeApiVersion(0, 1, 0, 0);\n"
-        "constexpr const uint32_t ApiVersion11 = makeApiVersion(0, 1, 1, 0);\n"
-        "constexpr const uint32_t ApiVersion12 = makeApiVersion(0, 1, 2, 0);\n"
-        "constexpr const uint32_t ApiVersion13 = makeApiVersion(0, 1, 3, 0);\n"
-        "constexpr const uint32_t ApiVersion14 = makeApiVersion(0, 1, 4, 0);\n"
+        "inline constexpr const uint32_t ApiVersion10 = makeApiVersion(0, 1, 0, 0);\n"
+        "inline constexpr const uint32_t ApiVersion11 = makeApiVersion(0, 1, 1, 0);\n"
+        "inline constexpr const uint32_t ApiVersion12 = makeApiVersion(0, 1, 2, 0);\n"
+        "inline constexpr const uint32_t ApiVersion13 = makeApiVersion(0, 1, 3, 0);\n"
+        "inline constexpr const uint32_t ApiVersion14 = makeApiVersion(0, 1, 4, 0);\n"
         "constexpr uint32_t apiVersionVariant(uint32_t version) { return version >> 29; }\n"
         "constexpr uint32_t apiVersionMajor(uint32_t version) { return (version >> 22) & 0x7f; }\n"
         "constexpr uint32_t apiVersionMinor(uint32_t version) { return (version >> 12) & 0x3ff; }\n"
@@ -262,9 +275,6 @@ namespace boilerplate {
         "}\n\n"sv;
 
     static constexpr std::string_view CPP_IMPL =
-        "#include <dlfcn.h>\n"
-        "#include <assert.h>\n"
-        "\n"
         "void* detail::_library = nullptr;\n"
         "Instance detail::_instance = nullptr;\n"
         "PhysicalDevice detail::_physicalDevice = nullptr;\n"
@@ -286,33 +296,126 @@ namespace boilerplate {
 
     // This code is modified. original author: PCJohn (peciva at fit.vut.cz)
     static constexpr std::string_view LOAD_UNLOAD_LIB_IMPL =
+        "void loadLib_throw() {\n"
+        "#ifdef _WIN32\n"
+        "    loadLib_throw(\"vulkan-1.dll\");\n"
+        "#else\n"
+        "    loadLib_throw(\"libvulkan.so.1\");\n"
+        "#endif\n"
+        "}\n"
+        "\n"
+        "\n"
+        "Result loadLib_noThrow() noexcept {\n"
+        "#ifdef _WIN32\n"
+        "    return loadLib_noThrow(\"vulkan-1.dll\");\n"
+        "#else\n"
+        "    return loadLib_noThrow(\"libvulkan.so.1\");\n"
+        "#endif\n"
+        "}\n"
+        "\n"
+        "\n"
         "void loadLib_throw(const char* libPath) {\n"
-        "    detail::_library = dlopen(libPath, RTLD_NOW);\n"
-        "    if (!detail::_library) throw VkgError(\"Failed to load Vulkan library\");\n"
-        "    funcs.vkGetInstanceProcAddr = (PFN_vkGetInstanceProcAddr)(dlsym(detail::_library, \"vkGetInstanceProcAddr\"));\n"
-        "    if (!funcs.vkGetInstanceProcAddr) throw VkgError(\"Failed to load vkGetInstanceProcAddr\");\n"
-        "    funcs.vkCreateInstance = getGlobalProcAddr<PFN_vkCreateInstance>(\"vkCreateInstance\");\n"
-        "    funcs.vkEnumerateInstanceExtensionProperties = getGlobalProcAddr<PFN_vkEnumerateInstanceExtensionProperties>(\"vkEnumerateInstanceExtensionProperties\");\n"
-        "    funcs.vkEnumerateInstanceLayerProperties = getGlobalProcAddr<PFN_vkEnumerateInstanceLayerProperties>(\"vkEnumerateInstanceLayerProperties\");\n"
-        "}\n\n"
-        "void loadLib_throw() { loadLib_throw(\"libvulkan.so.1\"); }\n\n"
+        "    // avoid multiple initialization attempts\n"
+        "    if (detail::_library)\n"
+        "        throw VkgError(\"Vulkan error: Multiple initialization attempts.\");\n"
+        "\n"
+        "    // load library\n"
+        "    // and get vkGetInstanceProcAddr pointer\n"
+        "    std::filesystem::path p = std::filesystem::path(libPath);\n"
+        "#ifdef _WIN32\n"
+        "    detail::_library = reinterpret_cast<void*>(LoadLibraryW(p.native().c_str()));\n"
+        "    if (detail::_library == nullptr)\n"
+        "        throw VkgError((std::string(\"Vulkan error: Can not open \\\"\") + p.string() + \"\\\".\").c_str());\n"
+        "    funcs.vkGetInstanceProcAddr = PFN_vkGetInstanceProcAddr(\n"
+        "        GetProcAddress(reinterpret_cast<HMODULE>(detail::_library), \"vkGetInstanceProcAddr\"));\n"
+        "#else\n"
+        "    detail::_library = dlopen(p.native().c_str(), RTLD_NOW);\n"
+        "    if (detail::_library == nullptr)\n"
+        "        throw VkgError((std::string(\"Vulkan error: Can not open \\\"\") + p.native() + \"\\\".\").c_str());\n"
+        "    funcs.vkGetInstanceProcAddr = PFN_vkGetInstanceProcAddr(dlsym(detail::_library, \"vkGetInstanceProcAddr\"));\n"
+        "#endif\n"
+        "    if (funcs.vkGetInstanceProcAddr == nullptr) {\n"
+        "        unloadLib();\n"
+        "        throw VkgError((std::string(\"Vulkan error: Can not retrieve vkGetInstanceProcAddr function pointer out of \\\"\") + p.string() + \".\").c_str());\n"
+        "    }\n"
+        "\n"
+        "    // function pointers available without vk::Instance\n"
+        "    funcs.vkEnumerateInstanceExtensionProperties = getInstanceProcAddr<PFN_vkEnumerateInstanceExtensionProperties>(\"vkEnumerateInstanceExtensionProperties\");\n"
+        "    funcs.vkEnumerateInstanceLayerProperties = getInstanceProcAddr<PFN_vkEnumerateInstanceLayerProperties>(\"vkEnumerateInstanceLayerProperties\");\n"
+        "    funcs.vkCreateInstance = getInstanceProcAddr<PFN_vkCreateInstance>(\"vkCreateInstance\");\n"
+        "    PFN_vkEnumerateInstanceVersion vkEnumerateInstanceVersion = getInstanceProcAddr<PFN_vkEnumerateInstanceVersion>(\"vkEnumerateInstanceVersion\");\n"
+        "\n"
+        "    // instance version\n"
+        "    if (vkEnumerateInstanceVersion) {\n"
+        "        uint32_t v;\n"
+        "        Result r = vkEnumerateInstanceVersion(&v);\n"
+        "        if (r != Result::eSuccess) {\n"
+        "            unloadLib();\n"
+        "            throwResultException(r, \"vkEnumerateInstanceVersion\");\n"
+        "        }\n"
+        "        detail::_instanceVersion = v;\n"
+        "    } else\n"
+        "        detail::_instanceVersion = ApiVersion10;\n"
+        "}\n"
+        "\n"
+        "\n"
         "Result loadLib_noThrow(const char* libPath) noexcept {\n"
-        "    detail::_library = dlopen(libPath, RTLD_NOW);\n"
-        "    if (!detail::_library) return Result::eErrorInitializationFailed;\n"
-        "    funcs.vkGetInstanceProcAddr = (PFN_vkGetInstanceProcAddr)(dlsym(detail::_library, \"vkGetInstanceProcAddr\"));\n"
-        "    if (!funcs.vkGetInstanceProcAddr) return Result::eErrorInitializationFailed;\n"
-        "    funcs.vkCreateInstance = getGlobalProcAddr<PFN_vkCreateInstance>(\"vkCreateInstance\");\n"
-        "    funcs.vkEnumerateInstanceExtensionProperties = getGlobalProcAddr<PFN_vkEnumerateInstanceExtensionProperties>(\"vkEnumerateInstanceExtensionProperties\");\n"
-        "    funcs.vkEnumerateInstanceLayerProperties = getGlobalProcAddr<PFN_vkEnumerateInstanceLayerProperties>(\"vkEnumerateInstanceLayerProperties\");\n"
+        "    // avoid multiple initialization attempts\n"
+        "    if (detail::_library)\n"
+        "        return Result::eErrorUnknown;\n"
+        "\n"
+        "    // load library\n"
+        "    // and get vkGetInstanceProcAddr pointer\n"
+        "    std::filesystem::path p = std::filesystem::path(libPath);\n"
+        "#ifdef _WIN32\n"
+        "    detail::_library = reinterpret_cast<void*>(LoadLibraryW(p.native().c_str()));\n"
+        "    if (detail::_library == nullptr)\n"
+        "        return Result::eErrorInitializationFailed;\n"
+        "    funcs.vkGetInstanceProcAddr = PFN_vkGetInstanceProcAddr(\n"
+        "        GetProcAddress(reinterpret_cast<HMODULE>(detail::_library), \"vkGetInstanceProcAddr\"));\n"
+        "#else\n"
+        "    detail::_library = dlopen(p.native().c_str(), RTLD_NOW);\n"
+        "    if (detail::_library == nullptr)\n"
+        "        return Result::eErrorInitializationFailed;\n"
+        "    funcs.vkGetInstanceProcAddr = PFN_vkGetInstanceProcAddr(dlsym(detail::_library, \"vkGetInstanceProcAddr\"));\n"
+        "#endif\n"
+        "    if (funcs.vkGetInstanceProcAddr == nullptr) {\n"
+        "        unloadLib();\n"
+        "        return Result::eErrorIncompatibleDriver;\n"
+        "    }\n"
+        "\n"
+        "    // function pointers available without vk::Instance\n"
+        "    funcs.vkEnumerateInstanceExtensionProperties = getInstanceProcAddr<PFN_vkEnumerateInstanceExtensionProperties>(\"vkEnumerateInstanceExtensionProperties\");\n"
+        "    funcs.vkEnumerateInstanceLayerProperties = getInstanceProcAddr<PFN_vkEnumerateInstanceLayerProperties>(\"vkEnumerateInstanceLayerProperties\");\n"
+        "    funcs.vkCreateInstance = getInstanceProcAddr<PFN_vkCreateInstance>(\"vkCreateInstance\");\n"
+        "    PFN_vkEnumerateInstanceVersion vkEnumerateInstanceVersion = getInstanceProcAddr<PFN_vkEnumerateInstanceVersion>(\"vkEnumerateInstanceVersion\");\n"
+        "\n"
+        "    // instance version\n"
+        "    if (vkEnumerateInstanceVersion) {\n"
+        "        uint32_t v;\n"
+        "        Result r = vkEnumerateInstanceVersion(&v);\n"
+        "        if (r != Result::eSuccess) {\n"
+        "            unloadLib();\n"
+        "            return r;\n"
+        "        }\n"
+        "        detail::_instanceVersion = v;\n"
+        "    } else\n"
+        "        detail::_instanceVersion = ApiVersion10;\n"
+        "\n"
         "    return Result::eSuccess;\n"
-        "}\n\n"
-        "Result loadLib_noThrow() noexcept { return loadLib_noThrow(\"libvulkan.so.1\"); }\n\n"
+        "}\n"
+        "\n"
         "void unloadLib() noexcept {\n"
         "    if (detail::_library) {\n"
+        "#ifdef _WIN32\n"
+        "        FreeLibrary(reinterpret_cast<HMODULE>(detail::_library));\n"
+        "#else\n"
         "        dlclose(detail::_library);\n"
+        "#endif\n"
         "        detail::_library = nullptr;\n"
         "    }\n"
-        "}\n\n"
+        "}\n"
+        "\n"
         "void cleanUp() noexcept {\n"
         "    destroyDevice();\n"
         "    destroyInstance();\n"
@@ -652,6 +755,57 @@ namespace boilerplate {
         "    }\n"
         "    return true;\n"
         "}\n";
+
+
+    // TODO: handle dynamically
+    static const std::array MODULE_EXPORTS = {
+        "Flags"sv,
+        "vector"sv,
+        "iterator"sv,
+        "span"sv,
+        "loadLib"sv,
+        "unloadLib"sv,
+        "cleanUp"sv,
+        "initInstance"sv,
+        "initInstance_throw"sv,
+        "initInstance_noThrow"sv,
+        "initDevice"sv,
+        "initDevice_throw"sv,
+        "initDevice_noThrow"sv,
+        "library"sv,
+        "instance"sv,
+        "physicalDevice"sv,
+        "device"sv,
+        "enumerateInstanceVersion"sv,
+        "apiVersionVariant"sv,
+        "apiVersionMajor"sv,
+        "apiVersionMinor"sv,
+        "apiVersionPatch"sv,
+        "makeApiVersion"sv,
+        "ApiVersion10"sv,
+        "ApiVersion11"sv,
+        "ApiVersion12"sv,
+        "ApiVersion13"sv,
+        "ApiVersion14"sv,
+        "isExtensionSupported"sv,
+        "destroyDevice"sv,
+        "destroyInstance"sv,
+        "getInstanceProcAddr"sv,
+        "getDeviceProcAddr"sv,
+        "getGlobalProcAddr"sv,
+        "initInstancePFNs"sv,
+        "initDevicePFNs"sv,
+        "operator|"sv,
+    };
+
+    static const std::array ERROR_MODULE_EXPORTS = {
+        "checkForSuccessValue"sv,
+        "checkSuccess"sv,
+        "throwResultExceptionWithMessage"sv,
+        "throwResultException"sv,
+        "Error"sv,
+        "VkgError"sv,
+    };
 
     inline std::ostream& print(std::ostream& os, std::string_view text, int indent = 0) {
         return os << std::string(indent * 4, ' ') << text;

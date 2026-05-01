@@ -157,3 +157,7 @@ cd tests/compiling
 
 - column numbers are not correct if the file contains non-ASCII characters
 - TASKS
+
+## AI usage
+
+Parts of this project were developed with the assistance of AI tools, namely [Claude Code](https://claude.com/claude-code) (Anthropic), [Codeium](https://codeium.com/) and [Gemini](https://github.com/google/gemini) (Google). All AI-generated contributions were reviewed by the author except parts explicitly marked as "AI-generated".

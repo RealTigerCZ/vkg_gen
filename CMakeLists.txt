@@ -80,5 +80,27 @@ else()
         COMMAND ${CMAKE_CXX_COMPILER} ${CMAKE_BINARY_DIR}/vkg_comp.cpp -g ${CMAKE_BINARY_DIR}/vk.o -o ${CMAKE_BINARY_DIR}/vkg_comp
         COMMAND echo "" && echo "Successfully compiled test file 'vkg_comp.cpp' with ${CMAKE_CXX_COMPILER_ID}!"
         COMMENT "Compiling vkg.hpp manually with ${CMAKE_CXX_COMPILER_ID} to check if it compiles"
+        )
+        endif()
+
+        # Debug target to check if C++20 modules are compilable
+        if (MSVC)
+        add_custom_target(modules COMMAND echo "Compiling modules manually with MSVC is not supported")
+        elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        add_custom_target(modules
+        COMMAND ${CMAKE_CXX_COMPILER} -std=c++20 -fmodules-ts -c ${CMAKE_BINARY_DIR}/vkg.cppm -o ${CMAKE_BINARY_DIR}/vkg_module.o -Wall -Wextra -g -pedantic -fdiagnostics-color=always
+        COMMAND ${CMAKE_CXX_COMPILER} -std=c++20 -c ${CMAKE_BINARY_DIR}/vkg.cpp -o ${CMAKE_BINARY_DIR}/vkg.o -Wall -Wextra -g -pedantic -fdiagnostics-color=always
+        COMMAND ${CMAKE_CXX_COMPILER} -std=c++20 -fmodules-ts ${CMAKE_BINARY_DIR}/modules.cpp -g ${CMAKE_BINARY_DIR}/vkg_module.o ${CMAKE_BINARY_DIR}/vkg.o -o ${CMAKE_BINARY_DIR}/modules_test
+        COMMAND echo "" && echo "Successfully compiled modules test 'modules.cpp' with GCC!"
+        COMMENT "Compiling vkg.cppm and modules.cpp with GCC to test C++20 modules"
+    )
+elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    add_custom_target(modules
+        COMMAND ${CMAKE_CXX_COMPILER} -std=c++20 --precompile ${CMAKE_BINARY_DIR}/vkg.cppm -o ${CMAKE_BINARY_DIR}/vkg.pcm -Wall -Wextra -g -pedantic -fdiagnostics-color=always
+        COMMAND ${CMAKE_CXX_COMPILER} -std=c++20 -c ${CMAKE_BINARY_DIR}/vkg.pcm -o ${CMAKE_BINARY_DIR}/vkg_module.o -Wall -Wextra -g -pedantic -fdiagnostics-color=always
+        COMMAND ${CMAKE_CXX_COMPILER} -std=c++20 -fprebuilt-module-path=${CMAKE_BINARY_DIR} -c ${CMAKE_BINARY_DIR}/vkg.cpp -o ${CMAKE_BINARY_DIR}/vkg.o -Wall -Wextra -g -pedantic -fdiagnostics-color=always
+        COMMAND ${CMAKE_CXX_COMPILER} -std=c++20 -fprebuilt-module-path=${CMAKE_BINARY_DIR} ${CMAKE_BINARY_DIR}/modules.cpp -g ${CMAKE_BINARY_DIR}/vkg_module.o ${CMAKE_BINARY_DIR}/vkg.o -o ${CMAKE_BINARY_DIR}/modules_test
+        COMMAND echo "" && echo "Successfully compiled modules test 'modules.cpp' with Clang!"
+        COMMENT "Compiling vkg.cppm and modules.cpp with Clang to test C++20 modules"
     )
 endif()

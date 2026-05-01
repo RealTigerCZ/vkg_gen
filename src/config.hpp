@@ -4,7 +4,7 @@
  * @brief Program configuration loader
  *
  * @date Created:  25. 02. 2026
- * @date Modified: 18. 04. 2026
+ * @date Modified: 27. 04. 2026
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -114,7 +114,6 @@ struct Config {
     VulkanVersion target_version = VulkanVersion::VK_VERSION_1_4;
 
     // C++ features: namespacing?
-    // C++ features: modules?
 
     bool generate_extension_defined_macro = false;
     bool generate_extension_name_macro = false;
@@ -127,6 +126,8 @@ struct Config {
     std::string header_path = "vkg.hpp";
     std::string source_path = "vkg.cpp";
     std::string xml_path = "vk.xml";
+    std::string modules_path = "vkg.cppm"; // empty means no C++ modules
+    std::string detail_namespace = "detail";
 
     /* Currently unsupported, maybe replaced by "converters" in future
         STLClassesInfo vector = STLClassesInfo::UseStdImpl; // use std::vector or own implementation?
