@@ -1160,6 +1160,29 @@ void Generator::generate_enum_alias(const Type& e, std::ofstream& file) {
         << NameTranslator::from_type_name(e.alias) << ";\n\n";
 }
 
+// TODO: workaround, not a real fix. Drops aliases whose target is missing.
+// Happens when an extension is skipped but another extension's alias to it is kept.
+// Proper fix is in the depends parser (handle OR groups).
+void prune_orphan_aliases(std::vector<TypeEnum::EnumItem>& items) {
+    bool changed = true;
+    while (changed) {
+        changed = false;
+        std::erase_if(items, [&](const TypeEnum::EnumItem& item) {
+            if (!item.is_alias || item.is_standalone_comment)
+                return false;
+            bool target_present = std::ranges::any_of(items,
+                [&](const TypeEnum::EnumItem& other) {
+                    return !other.is_standalone_comment && other.name == item.alias;
+                });
+            if (!target_present) {
+                changed = true;
+                return true;
+            }
+            return false;
+            });
+    }
+}
+
 // Ensures aliases come after the items they reference.
 // Sorts by extension number
 // Keeps XML order otherwise, still an bit hacky function, because we dont handle enum items dependencies
@@ -1216,8 +1239,11 @@ void Generator::generate_enum(TypeEnum& e, std::ofstream& file) {
         bool is_bitfield_value = false;
         if (e.type == TypeEnum::Type::Bitmask) {
             auto* target = &item;
-            while (target->is_alias)
-                target = &*std::ranges::find(e.items, target->alias, &TypeEnum::EnumItem::name);
+            while (target->is_alias) {
+                auto it = std::ranges::find(e.items, target->alias, &TypeEnum::EnumItem::name);
+                assert(it != e.items.end());
+                target = &*it;
+            }
             is_bitfield_value = target->bitmask.is_bitfield;
         }
 
@@ -3164,10 +3190,16 @@ void Generator::add_extension_with_deps(Element& ext, xml::Dom& dom) {
     }
 
     sv depends = ext.get_attr_value("depends");
-    if (!depends.empty()) {
+    sv promotedto = ext.get_attr_value("promotedto");
+    if (!depends.empty() || !promotedto.empty()) {
         // Parse depends expression: split on + (AND) and , (OR), strip parens
         // TODO: right now we treat all tokens as required
+        // TODO: pormotedto argument can break this, so we need to at leas add it as an dependency
+
         std::string deps_str(depends);
+        deps_str += ",";
+        deps_str += promotedto;
+
         for (char& c : deps_str) {
             if (c == '+' || c == ',' || c == '(' || c == ')')
                 c = ' ';
@@ -3185,6 +3217,11 @@ void Generator::add_extension_with_deps(Element& ext, xml::Dom& dom) {
 
             if (token.starts_with("VK_VERSION_")) {
                 if (vk_version_cmp(token, config.target_version) < 0) {
+                    if (config.extension_names.empty() && config.extension_filter_mode == ExtensionFilterMode::BlackList) {
+                        skipped_extensions.insert(&ext);
+                        return;
+                    }
+
                     throw my_error{ std::stringstream() << "Extension '" << ext_name << "' requires newer Vulkan version '" << token << "' than was provided '"
                         << vulkan_version_to_string(config.target_version) << "'." };
                 }
@@ -3607,6 +3644,12 @@ void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& so
     if (config.generate_flags_class) {
         required_types.remove("VkFlags");
         required_types.remove("VkFlags64");
+    }
+
+    // Drop aliases whose target was excluded with a skipped extension.
+    for (TypeEnum* enum_ : required_enums.get()) {
+        if (enum_ == nullptr) continue;
+        prune_orphan_aliases(enum_->items);
     }
 
     // ==================== Header generation ====================
