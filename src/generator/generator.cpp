@@ -3,7 +3,7 @@
  * @author Jaroslav Hucel (xhucel00@vutbr.cz)
  * @brief Vulkan registry data model and code generator implementation.
  * @date Created: 12. 11. 2025
- * @date Modified: 28. 04. 2026
+ * @date Modified: 04. 05. 2026
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -3803,6 +3803,12 @@ void Generator::generate(xml::Dom& dom, std::ofstream& header, std::ofstream& so
         generate_command_PFN(*cmd, header);
     }
     header_guard.close();
+
+    // loadLib boilerplate uses PFN_vkEnumerateInstanceVersion even on 1.0
+    // (runtime null-check falls back to ApiVersion10). Emit it if missing.
+    if (!required_commands.contains("vkEnumerateInstanceVersion")) {
+        header << "typedef Result (VKAPI_PTR* PFN_vkEnumerateInstanceVersion)(uint32_t* pApiVersion);\n";
+    }
 
     // --- Funcs struct ---
     header << "\nstruct Funcs {\n";
