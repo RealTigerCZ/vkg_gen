@@ -3,7 +3,7 @@
  * @author Jaroslav Hucel (xhucel00@vutbr.cz)
  * @brief Vulkan registry data model and code generator driver.
  * @date Created: 02. 11. 2025
- * @date Modified: 27. 04. 2026
+ * @date Modified: 05. 05. 2026
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -709,6 +709,9 @@ namespace vkgen::Generator {
 
         std::unordered_map<std::string_view, std::string_view> platform_to_protect; // platform name → protect macro
         std::unordered_set<std::string_view> included_platforms;
+
+        // Names from <enums name="API Constants"> — populated by parse_enums.
+        std::unordered_set<std::string_view> api_constants;
 
         std::unordered_map<std::string_view, xml::Element*> extension_name_to_element; // TASK: 110426_01
         std::unordered_set<xml::Element*> processed_extensions;

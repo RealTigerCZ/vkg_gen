@@ -1011,6 +1011,10 @@ void Generator::parse_enums(vkgen::xml::Dom& dom) {
     for (Node* enum_ : registry.children | std::views::filter(has_tag("enums"))) {
         TypeEnum e(enum_->asElement(), dom.arena);
         //std::cout << "- " << e.name << std::endl;
+        if (e.name == "API Constants") {
+            for (const auto& item : e.items)
+                api_constants.insert(item.name);
+        }
         this->enums.emplace(e.name, std::move(e));
     }
 }
@@ -2941,9 +2945,6 @@ void Generator::add_required_type(sv name, std::vector<Type*>& types_stack) {
 }
 
 void vkgen::Generator::Generator::add_required_enum(sv name) {
-    // FIXME: API constatnts
-    static const std::unordered_set<sv> api_constants = { "VK_MAX_PHYSICAL_DEVICE_NAME_SIZE", "VK_UUID_SIZE", "VK_LUID_SIZE", "VK_MAX_EXTENSION_NAME_SIZE", "VK_MAX_DESCRIPTION_SIZE", "VK_MAX_MEMORY_TYPES", "VK_MAX_MEMORY_HEAPS", "VK_LOD_CLAMP_NONE", "VK_REMAINING_MIP_LEVELS", "VK_REMAINING_ARRAY_LAYERS", "VK_REMAINING_3D_SLICES_EXT", "VK_WHOLE_SIZE", "VK_ATTACHMENT_UNUSED", "VK_TRUE", "VK_FALSE", "VK_QUEUE_FAMILY_IGNORED", "VK_QUEUE_FAMILY_EXTERNAL", "VK_QUEUE_FAMILY_FOREIGN_EXT", "VK_SUBPASS_EXTERNAL", "VK_MAX_DEVICE_GROUP_SIZE", "VK_MAX_DRIVER_NAME_SIZE", "VK_MAX_DRIVER_INFO_SIZE", "VK_SHADER_UNUSED_KHR", "VK_MAX_GLOBAL_PRIORITY_SIZE", "VK_MAX_SHADER_MODULE_IDENTIFIER_SIZE_EXT", "VK_MAX_PIPELINE_BINARY_KEY_SIZE_KHR", "VK_MAX_VIDEO_AV1_REFERENCES_PER_FRAME_KHR", "VK_MAX_VIDEO_VP9_REFERENCES_PER_FRAME_KHR", "VK_SHADER_INDEX_UNUSED_AMDX", "VK_PARTITIONED_ACCELERATION_STRUCTURE_PARTITION_INDEX_GLOBAL_NV", "VK_MAX_PHYSICAL_DEVICE_DATA_GRAPH_OPERATION_SET_NAME_SIZE_ARM" };
-
     if (api_constants.contains(name))
         name = "API Constants";
 
