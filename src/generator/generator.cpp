@@ -3,7 +3,7 @@
  * @author Jaroslav Hucel (xhucel00@vutbr.cz)
  * @brief Vulkan registry data model and code generator implementation.
  * @date Created: 12. 11. 2025
- * @date Modified: 04. 05. 2026
+ * @date Modified: 05. 05. 2026
  *
  * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
  */
@@ -1336,6 +1336,8 @@ void vkgen::Generator::Generator::generate_member(Member& member, std::ofstream&
         if (!member.values.empty())
             file << " = " << (config.generate_enums_classes ? "StructureType::" : "") <<
             NameTranslator::from_enum_value(member.values, NameTranslator::transform_enum_name(member.type_param.type, false), false);
+        else if (member.type_param.name == "pNext" && member.type_param.type == "void")
+            file << " = nullptr";
 
         file << ';' << LineComment{ member.type_param.comment, false } << '\n';
     }
