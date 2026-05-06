@@ -291,6 +291,7 @@ void Config::save_to_file(const std::string& path) {
 }
 
 void print_usage(const char* program_name) {
+    std::cerr << "Version: " << VKGEN_VERSION << "\n\n";
     std::cerr << "Usage: " << program_name << " [options]\n"
         << "Options:\n"
         << "  --config <path>   Load config from file (recommended for more control)\n\n"
@@ -300,7 +301,7 @@ void print_usage(const char* program_name) {
         << "  --version <X.Y>   Target Vulkan version, e.g. 1.3 (overrides config)\n"
         << "  --ext <name>      Enable extension, can be specified multiple times, can contain comma-separated list (overrides config)\n\n"
         << "  --create-config <path>   Creates a config file at the given path with default values.\n\n"
-        << "  --help            Show this help\n";
+        << "  --help            Show this help and version of the program\n";
 }
 
 CliResult handle_cli(Config& config, int argc, char* argv[]) {

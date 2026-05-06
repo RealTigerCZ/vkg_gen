@@ -17,6 +17,8 @@
 #include <string_view>
 #include <unordered_set>
 
+constexpr std::string_view VKGEN_VERSION = "Aplha 1.2.0";
+
 class ConfigError : public my_error {
 public:
     ConfigError(const std::string& path, int line, const std::string& message);
