@@ -93,8 +93,8 @@ Generated `vkg.h` / `vkg.cpp` headers are compatible (with minor changes) with t
 For the working demo, see the [Bachelor's thesis files](#bachelors-thesis).
 
 ## Bachelor's Thesis
-As mentioned before, this project is part of a bachelor's thesis. All submitted work can be found here: <TODO: add link when finished>. This archive contains a demonstration of the VulkanTutorial example, speed measurements, the LaTeX source of the work, a PDF, and the source code of this repo. 
-The thesis PDF itself can be found here: <TODO: add link when finished>
+As mentioned before, this project is part of a bachelor's thesis. All submitted work can be found [here](https://nextcloud.fit.vutbr.cz/s/88E4DjxigiEgneJ). This archive contains a demonstration of the VulkanTutorial example, speed measurements, the LaTeX source of the work, a PDF, and the source code of this repo. 
+The thesis site itself can be found [here](https://www.vut.cz/en/students/final-thesis/detail/169667).
 
 
 ## Limitations:
