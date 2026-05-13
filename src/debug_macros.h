@@ -1,7 +1,17 @@
+/**
+ * @file main.cpp
+ * @author Jaroslav Hucel (xhucel00@vutbr.cz)
+ * @brief Helper file with debug macros
+ * @date Created: 15. 12. 2025
+ * @date Modified: 16. 04. 2026
+ *
+ * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
+ */
+
 #pragma once
 
-// THIS FILE MAY BE DELETED IN FUTURE
-// It is here only for debugging purposes
+ // THIS FILE MAY BE DELETED IN FUTURE
+ // It is here only for debugging purposes
 
 #include <cassert>
 #include <cstdlib>

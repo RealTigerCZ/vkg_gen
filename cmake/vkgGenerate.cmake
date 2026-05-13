@@ -1,3 +1,12 @@
+# @file vkgGenerate.cmake
+# @author Jaroslav Hucel (xhucel00@vutbr.cz)
+# @brief Cmake integration fucntions for vkgen
+# @date Created: 01. 05. 2026
+# @date Modified: 01. 05. 2026
+#
+# @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
+
+
 set(VKG_DEFAULT_VK_XML_URL
     "https://raw.githubusercontent.com/KhronosGroup/Vulkan-Docs/refs/heads/main/xml/vk.xml"
     CACHE STRING "URL used by vkg_fetch_vk_xml() when no URL is given")

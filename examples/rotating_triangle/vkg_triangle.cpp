@@ -1,5 +1,16 @@
-// Test example using the generated vk:: wrapper (vkg.hpp / vkg.cpp)
-// Read README.md for more info
+/**
+ * @file vkg_triangle.cpp
+ * @author Jaroslav Hucel (xhucel00@vutbr.cz)
+ * @brief  Test example using the generated vk:: wrapper (vkg.hpp / vkg.cpp)
+ *         Read README.md for more info
+ *
+ * @date Created: 08. 04. 2026
+ * @date Modified: 18. 04. 2026
+ * @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
+ */
+
+ // Test example using the generated vk:: wrapper (vkg.hpp / vkg.cpp)
+ // Read README.md for more info
 
 #include "vkg.hpp"
 
@@ -25,6 +36,7 @@ using PFN_vkGetInstanceProcAddr = vk::PFN_vkGetInstanceProcAddr;
 #include <fstream>
 #include <chrono>
 #include <thread>
+#include <array>
 
 const uint32_t WIDTH = 800;
 const uint32_t HEIGHT = 600;
@@ -110,8 +122,9 @@ private:
 
         createInstance();
         createSurface();
-        pickPhysicalDevice();
-        createLogicalDevice();
+        auto [pd, graphicsFamilyIndex, presentationFamilyIndex] = pickPhysicalDevice();
+        physicalDevice = pd;
+        createLogicalDevice(graphicsFamilyIndex, presentationFamilyIndex);
         createSwapChain();
         createImageViews();
         createRenderPass();
@@ -184,39 +197,85 @@ private:
         surface = rawSurface;
     }
 
-    void pickPhysicalDevice() {
-        auto devices = vk::enumeratePhysicalDevices();
+    // This function was taken from PCJohn (peciva at fit.vut.cz) and adapted to vkg.
+    // Original: <https://github.com/pc-john/VulkanTutorial/blob/main/11-swapchain/main.cpp>
+    std::tuple<vk::PhysicalDevice, uint32_t, uint32_t> pickPhysicalDevice() {
+        auto deviceList = vk::enumeratePhysicalDevices();
+        for (vk::PhysicalDevice pd : deviceList) {
 
-        for (const auto& dev : devices) {
-            auto props = vk::getPhysicalDeviceProperties(dev);
-            if (props.deviceType == vk::PhysicalDeviceType::eDiscreteGpu) {
-                physicalDevice = dev;
-                std::cout << "Selected GPU: " << props.deviceName << std::endl;
-                return;
+            // skip devices without VK_KHR_swapchain
+            auto extensionList = vk::enumerateDeviceExtensionProperties(pd, "");
+            for (vk::ExtensionProperties& e : extensionList)
+                if (strcmp(e.extensionName, "VK_KHR_swapchain") == 0)
+                    goto swapchainSupported;
+            continue;
+        swapchainSupported:
+
+            // select queues for graphics rendering and for presentation
+            uint32_t graphicsQueueFamily = UINT32_MAX;
+            uint32_t presentationQueueFamily = UINT32_MAX;
+            vk::vector<vk::QueueFamilyProperties> queueFamilyList = vk::getPhysicalDeviceQueueFamilyProperties(pd);
+            for (uint32_t i = 0, c = uint32_t(queueFamilyList.size()); i < c; i++) {
+
+                // test for presentation support
+                if (vk::getPhysicalDeviceSurfaceSupportKHR(pd, i, surface)) {
+
+                    // test for graphics operations support
+                    if (queueFamilyList[i].queueFlags & vk::QueueFlagBits::eGraphics) {
+                        // if presentation and graphics operations are supported on the same queue,
+                        // we will use single queue
+                        return { pd, i, i };
+                    } else
+                        // if only presentation is supported, we store the first such queue
+                        if (presentationQueueFamily == UINT32_MAX)
+                            presentationQueueFamily = i;
+                } else {
+                    if (queueFamilyList[i].queueFlags & vk::QueueFlagBits::eGraphics)
+                        // if only graphics operations are supported, we store the first such queue
+                        if (graphicsQueueFamily == UINT32_MAX)
+                            graphicsQueueFamily = i;
+                };
             }
+
+            if (graphicsQueueFamily != UINT32_MAX && presentationQueueFamily != UINT32_MAX) {
+                // presentation and graphics operations are supported on the different queues
+                return { pd, graphicsQueueFamily, presentationQueueFamily };
+            }
+
         }
-        physicalDevice = devices[0];
+
+        throw std::runtime_error("Could not find compatible Vulkan device.");
     }
 
-    void createLogicalDevice() {
+
+    void createLogicalDevice(uint32_t graphicsFamilyIndex, uint32_t presentationFamilyIndex) {
         float queuePriority = 1.0f;
-        vk::DeviceQueueCreateInfo queueCreateInfo{};
-        queueCreateInfo.sType = vk::StructureType::eDeviceQueueCreateInfo;
-        queueCreateInfo.queueFamilyIndex = 0;
-        queueCreateInfo.queueCount = 1;
-        queueCreateInfo.pQueuePriorities = &queuePriority;
+        std::array<vk::DeviceQueueCreateInfo, 2> queueCreateInfos = {
+            vk::DeviceQueueCreateInfo{
+                .sType = vk::StructureType::eDeviceQueueCreateInfo,
+                .queueFamilyIndex = graphicsFamilyIndex,
+                .queueCount = 1,
+                .pQueuePriorities = &queuePriority
+            },
+            vk::DeviceQueueCreateInfo{
+                .sType = vk::StructureType::eDeviceQueueCreateInfo,
+                .queueFamilyIndex = presentationFamilyIndex,
+                .queueCount = 1,
+                .pQueuePriorities = &queuePriority,
+            }
+        };
 
         vk::DeviceCreateInfo createInfo{};
         createInfo.sType = vk::StructureType::eDeviceCreateInfo;
-        createInfo.queueCreateInfoCount = 1;
-        createInfo.pQueueCreateInfos = &queueCreateInfo;
+        createInfo.queueCreateInfoCount = graphicsFamilyIndex == presentationFamilyIndex ? 1 : 2;
+        createInfo.pQueueCreateInfos = queueCreateInfos.data();
         createInfo.enabledExtensionCount = static_cast<uint32_t>(deviceExtensions.size());
         createInfo.ppEnabledExtensionNames = deviceExtensions.data();
 
         vk::initDevice(physicalDevice, createInfo);
 
-        graphicsQueue = vk::getDeviceQueue(0, 0);
-        presentQueue = vk::getDeviceQueue(0, 0);
+        graphicsQueue = vk::getDeviceQueue(graphicsFamilyIndex, 0);
+        presentQueue = vk::getDeviceQueue(presentationFamilyIndex, 0);
     }
 
     void createSwapChain(vk::SwapchainKHR oldSwapchain = nullptr) {
@@ -602,5 +661,7 @@ int main() {
     HelloTriangleApplication app;
     try { app.run(); }
     catch (const std::exception& e) { std::cerr << e.what() << std::endl; return EXIT_FAILURE; }
+    catch (const vk::Error& e) { std::cerr << "vk::Error: " << e.what() << std::endl; return EXIT_FAILURE; }
+    catch (...) { std::cerr << "Failed because of unspecified exception!"; return EXIT_FAILURE; }
     return EXIT_SUCCESS;
 }

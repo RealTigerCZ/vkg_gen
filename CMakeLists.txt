@@ -1,3 +1,11 @@
+# @file CMakeLists.txt
+# @author Jaroslav Hucel (xhucel00@vutbr.cz)
+# @brief Main CMake file for compiling vkgen
+# @date Created: 30. 07. 2025
+# @date Modified: 01. 05. 2026
+#
+# @copyright Copyright (c) 2025 -> Public Domain, for more information see LICENSE
+
 cmake_minimum_required(VERSION 3.21) # PROJECT_IS_TOP_LEVEL
 
 set(APP_NAME vkgen)
